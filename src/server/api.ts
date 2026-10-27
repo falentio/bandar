@@ -1,6 +1,12 @@
 import { Elysia } from "elysia";
 import * as v from "valibot";
-import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
+import {
+  ANALYTICS_FILTER_DIMENSIONS,
+  AnalyticsFiltersSchema,
+  AnalyticsSchema,
+  RequestListSchema,
+  type AnalyticsFilterDimension,
+} from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
@@ -476,7 +482,13 @@ export function createApi(deps: ApiDeps) {
       if (caller instanceof Response) return caller;
 
       const { days } = parseInput(AnalyticsQuerySchema, query);
-      const analytics = readAnalytics(deps.duck, { userId: caller.userId, days });
+
+      const filters = parseInput(
+        AnalyticsFiltersSchema,
+        filterParams(new URL(request.url).searchParams),
+      );
+
+      const analytics = readAnalytics(deps.duck, { userId: caller.userId, days, filters });
 
       return v.parse(AnalyticsSchema, analytics);
     })
@@ -498,6 +510,21 @@ export function createApi(deps: ApiDeps) {
 
 function loginKey(userId: string, providerId: string): string {
   return `${userId}:${providerId}`;
+}
+
+function filterParams(search: URLSearchParams): Record<AnalyticsFilterDimension, string[]> {
+  const raw: Record<AnalyticsFilterDimension, string[]> = {
+    providerKind: [],
+    providerId: [],
+    model: [],
+    tag: [],
+  };
+
+  for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
+    raw[dimension] = search.getAll(dimension);
+  }
+
+  return raw;
 }
 
 function oauthKindOf(kind: ProviderKind): OAuthProviderKind | null {

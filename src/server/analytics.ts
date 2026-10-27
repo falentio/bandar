@@ -1,3 +1,9 @@
+import {
+  ANALYTICS_FILTER_DIMENSIONS,
+  type AnalyticsFilterDimension,
+  type AnalyticsFilters,
+} from "../shared/analytics";
+import { tagRefOf } from "../shared/slugs";
 import type { DuckDb, QueryRow } from "./duck/client";
 import { SQL_NULL, sqlInt, sqlText, type SqlValue } from "./duck/client";
 import { errorRate, round } from "./router/metrics";
@@ -5,6 +11,7 @@ import { errorRate, round } from "./router/metrics";
 export type AnalyticsQuery = {
   readonly userId: string;
   readonly days: number;
+  readonly filters: AnalyticsFilters;
   readonly now?: Date;
 };
 
@@ -91,10 +98,30 @@ export type RequestEvent = {
 
 export type RequestList = { readonly requests: readonly RequestEvent[] };
 
+type FilterColumn = {
+  readonly column: string;
+  readonly encode: (value: string) => string;
+};
+
+type FilterClause = {
+  readonly clauses: readonly string[];
+  readonly params: readonly SqlValue[];
+};
+
+const FILTER_COLUMNS: Record<AnalyticsFilterDimension, FilterColumn> = {
+  providerKind: { column: "provider_kind", encode: sameValue },
+  providerId: { column: "provider_id", encode: sameValue },
+  model: { column: "model", encode: sameValue },
+  tag: { column: "reference", encode: tagRefOf },
+};
+
 export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
   const end = startOfUtcDay(query.now ?? new Date());
   const start = new Date(end);
   start.setUTCDate(start.getUTCDate() - (query.days - 1));
+
+  const filter = filterClause(query.filters);
+  const filterSql = filter.clauses.length === 0 ? "" : ` AND ${filter.clauses.join(" AND ")}`;
 
   const summary = db.query(
     `SELECT
@@ -108,8 +135,8 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
        approx_quantile(duration_ms, 0.95) AS p95_duration_ms,
        avg(tokens_per_second) AS avg_tps
      FROM request_events
-     WHERE user_id = ? AND started_at >= ?::TIMESTAMP`,
-    [sqlText(query.userId), sqlText(start.toISOString())],
+     WHERE user_id = ? AND started_at >= ?::TIMESTAMP${filterSql}`,
+    [sqlText(query.userId), sqlText(start.toISOString()), ...filter.params],
   )[0];
 
   if (summary === undefined) throw new Error("analytics summary returned no row");
@@ -132,10 +159,10 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
        avg(events.tokens_per_second) AS avg_tps
      FROM days
      LEFT JOIN request_events events
-       ON events.user_id = ? AND CAST(events.started_at AS DATE) = days.day
+       ON events.user_id = ? AND CAST(events.started_at AS DATE) = days.day${filterSql}
      GROUP BY days.day
      ORDER BY days.day`,
-    [sqlText(dateOnly(start)), sqlText(dateOnly(end)), sqlText(query.userId)],
+    [sqlText(dateOnly(start)), sqlText(dateOnly(end)), sqlText(query.userId), ...filter.params],
   );
 
   const models = db.query(
@@ -148,11 +175,11 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
        coalesce(sum(cost_usd), 0) AS cost_usd,
        avg(tokens_per_second) AS avg_tps
      FROM request_events
-     WHERE user_id = ? AND started_at >= ?::TIMESTAMP
+     WHERE user_id = ? AND started_at >= ?::TIMESTAMP${filterSql}
      GROUP BY model, provider_kind
      ORDER BY sum(coalesce(input_tokens, 0) + coalesce(output_tokens, 0)) DESC, model ASC
      LIMIT 20`,
-    [sqlText(query.userId), sqlText(start.toISOString())],
+    [sqlText(query.userId), sqlText(start.toISOString()), ...filter.params],
   );
 
   return {
@@ -273,6 +300,33 @@ export function readProviderUsage(db: DuckDb, query: ProviderUsageQuery): Provid
     costUsd: round(number(row, "cost_usd"), 6),
     lastRequestAt: lastRequestAt === null ? null : new Date(lastRequestAt).toISOString(),
   };
+}
+
+function filterClause(filters: AnalyticsFilters): FilterClause {
+  const clauses: string[] = [];
+  const params: SqlValue[] = [];
+
+  for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
+    const values = filters[dimension];
+
+    if (values.length === 0) continue;
+
+    const filter = FILTER_COLUMNS[dimension];
+    const placeholders: string[] = [];
+
+    for (const value of values) {
+      placeholders.push("?");
+      params.push(sqlText(filter.encode(value)));
+    }
+
+    clauses.push(`${filter.column} IN (${placeholders.join(", ")})`);
+  }
+
+  return { clauses, params };
+}
+
+function sameValue(value: string): string {
+  return value;
 }
 
 function providerParam(value: string | null): SqlValue {

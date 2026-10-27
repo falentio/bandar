@@ -8,6 +8,7 @@ import {
   RequestListSchema,
   analyticsPaths,
   type Analytics,
+  type RequestEvent,
 } from "../src/shared/analytics";
 import { ApiErrorBodySchema, HealthSchema } from "../src/shared/api";
 import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
@@ -22,6 +23,7 @@ import {
   providerPaths,
   type Provider,
 } from "../src/shared/providers";
+import { TagListSchema, tagPaths } from "../src/shared/tags";
 
 const BINARY = join(import.meta.dir, "../dist/bandar");
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
@@ -52,6 +54,11 @@ const CompletionSchema = v.object({
       total_tokens: v.number(),
     }),
   ),
+});
+
+const ModelListSchema = v.object({
+  object: v.literal("list"),
+  data: v.array(v.object({ id: v.string(), object: v.literal("model") })),
 });
 
 const OpenAiErrorSchema = v.object({
@@ -157,6 +164,7 @@ try {
 
     assert.equal(builtIn.kind, "kilocode");
     assert.equal(builtIn.name, "Kilo Code");
+    assert.equal(builtIn.slug, "kilo");
     assert.equal(builtIn.baseUrl, `${kilocodeOrigin}/api/openrouter`);
     assert.equal(builtIn.hasKey, false);
     assert.deepEqual(builtIn.models, []);
@@ -189,6 +197,9 @@ try {
       ProviderSchema,
       201,
     );
+
+    openaiProvider.provider = provider;
+    openaiProvider.modelId = provider.models[0]?.id ?? "";
 
     assert.deepEqual(
       provider.models.map((model) => [model.alias, model.upstreamModel]),
@@ -287,14 +298,11 @@ try {
       apiKey = await mintGatewayKey();
       const models = await fetch(new URL("/v1/models", origin), { headers: bearer() });
 
-      const body = v.parse(
-        v.object({ data: v.array(v.object({ id: v.string() })) }),
-        await models.json(),
-      );
+      const body = v.parse(ModelListSchema, await models.json());
 
       assert.deepEqual(
         body.data.map((model) => model.id).sort(),
-        ["fast", "gemini"],
+        ["fake-google/fake-gemini", "fake-openai/fake-openai-model", "fast", "gemini"],
         `aliases after the removal: ${body.data.map((model) => model.id).join(", ")}`,
       );
 
@@ -315,19 +323,20 @@ try {
     assert.ok(minted.startsWith("bandar_"), `key ${minted} lacks the bandar_ prefix`);
   });
 
-  await check("GET /v1/models lists the caller's aliases", async () => {
+  await check("GET /v1/models lists aliases and provider refs", async () => {
     const response = await fetch(new URL("/v1/models", origin), { headers: bearer() });
     assert.equal(response.status, 200);
 
-    const body = v.parse(
-      v.object({
-        object: v.literal("list"),
-        data: v.array(v.object({ id: v.string(), object: v.literal("model") })),
-      }),
-      await response.json(),
-    );
+    const body = v.parse(ModelListSchema, await response.json());
 
-    assert.deepEqual(body.data.map((model) => model.id).sort(), ["claude", "fast", "gemini"]);
+    assert.deepEqual(body.data.map((model) => model.id).sort(), [
+      "claude",
+      "fake-anthropic/fake-claude",
+      "fake-google/fake-gemini",
+      "fake-openai/fake-openai-model",
+      "fast",
+      "gemini",
+    ]);
   });
 
   await check("POST /v1/chat/completions non-streaming routes to OpenAI", async () => {
@@ -615,6 +624,260 @@ try {
     assert.equal(body.usage.completion_tokens, 4);
   });
 
+  await check("providers carry derived slugs and model refs", async () => {
+    const list = await getJson(providerPaths.list, ProviderListSchema, 200);
+    const byName = new Map(list.providers.map((provider) => [provider.name, provider]));
+
+    assert.equal(byName.get("Fake OpenAI")?.slug, "fake-openai");
+    assert.equal(byName.get("Fake Anthropic")?.slug, "fake-anthropic");
+    assert.equal(byName.get("Fake Google")?.slug, "fake-google");
+    assert.equal(byName.get("Kilo Code")?.slug, "kilo");
+
+    const fast = byName.get("Fake OpenAI")?.models.find((model) => model.alias === "fast");
+
+    assert.equal(fast?.ref, "fake-openai/fake-openai-model");
+    assert.equal(fast?.shadowed, false);
+  });
+
+  await check("a provider ref answers inference and records the reference", async () => {
+    const response = await chatRequest("fake-openai/fake-openai-model", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from OpenAI");
+
+    const rows = await waitForRequests(
+      "fake-openai/fake-openai-model",
+      (requests) => requests.some((request) => request.status === "success"),
+      "the provider-ref success",
+    );
+
+    assert.equal(rows.find((request) => request.status === "success")?.model, "fast");
+  });
+
+  await check("a tag falls back to the next model and records one event per attempt", async () => {
+    const dead = await postJson(
+      providerPaths.list,
+      {
+        name: "Dead",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "wrong-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    const deadProvider = await postJson(
+      providerPaths.models(dead.id),
+      { upstreamModel: "dead-model" },
+      ProviderSchema,
+      201,
+    );
+
+    const deadModelId = deadProvider.models[0]?.id ?? "";
+    const fastModelId = openaiProvider.modelId;
+
+    assert.notEqual(deadModelId, "");
+    assert.notEqual(fastModelId, "");
+
+    const created = await postJson(tagPaths.create, { slug: "failover" }, TagListSchema, 201);
+    const tagId = created.tags.find((tag) => tag.slug === "failover")?.id ?? "";
+
+    assert.notEqual(tagId, "");
+
+    await putJson(
+      tagPaths.models(tagId),
+      { modelIds: [deadModelId, fastModelId] },
+      TagListSchema,
+      200,
+    );
+
+    const response = await chatRequest("tags/failover", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from OpenAI");
+
+    const rows = await waitForRequests(
+      "tags/failover",
+      (requests) =>
+        requests.some((request) => request.status === "error") &&
+        requests.some((request) => request.status === "success"),
+      "both fallback attempts",
+    );
+
+    assert.equal(rows.find((request) => request.status === "error")?.model, "dead-model");
+    assert.equal(rows.find((request) => request.status === "success")?.model, "fast");
+
+    await putJson(
+      tagPaths.models(tagId),
+      { modelIds: [fastModelId, deadModelId] },
+      TagListSchema,
+      200,
+    );
+
+    const flipped = await chatRequest("tags/failover", false);
+
+    assert.equal(flipped.status, 200);
+
+    const flippedBody = v.parse(CompletionSchema, await flipped.json());
+
+    assert.equal(flippedBody.choices[0]?.message.content, "Hello from OpenAI");
+
+    const settled = await waitForRequests(
+      "tags/failover",
+      (requests) => requests.filter((request) => request.status === "success").length === 2,
+      "the flipped success",
+    );
+
+    assert.equal(settled.filter((request) => request.status === "error").length, 1);
+  });
+
+  await check("GET /v1/models and GET /api/tags list the tag in priority order", async () => {
+    const response = await fetch(new URL("/v1/models", origin), { headers: bearer() });
+    const models = v.parse(ModelListSchema, await response.json());
+
+    assert.ok(models.data.some((model) => model.id === "tags/failover"));
+
+    const list = await getJson(tagPaths.list, TagListSchema, 200);
+    const tag = list.tags.find((entry) => entry.slug === "failover");
+
+    assert.equal(tag?.ref, "tags/failover");
+    assert.deepEqual(
+      tag?.models.map((model) => model.alias),
+      ["fast", "dead-model"],
+      `failover order: ${tag?.models.map((model) => model.alias).join(", ")}`,
+    );
+  });
+
+  await check("a tag with no models is a 404 and stays out of /v1/models", async () => {
+    await postJson(tagPaths.create, { slug: "empty" }, TagListSchema, 201);
+
+    const response = await chatRequest("tags/empty", false);
+
+    assert.equal(response.status, 404);
+
+    const error = await openAiError(response);
+
+    assert.equal(error.code, "model_not_found");
+    assert.match(error.message, /tag empty has no enabled models/);
+
+    const models = await fetch(new URL("/v1/models", origin), { headers: bearer() });
+    const body = v.parse(ModelListSchema, await models.json());
+
+    assert.equal(
+      body.data.some((model) => model.id === "tags/empty"),
+      false,
+      "an empty tag was listed",
+    );
+  });
+
+  await check("an alias wins over an identical provider ref", async () => {
+    const provider = await postJson(
+      providerPaths.list,
+      {
+        name: "Anthropic",
+        kind: "anthropic",
+        baseUrl: `${upstreamOrigin}/anthropic`,
+        apiKey: "anthropic-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    assert.equal(provider.slug, "anthropic");
+
+    const withModel = await postJson(
+      providerPaths.models(provider.id),
+      { upstreamModel: "claude-sonnet-4" },
+      ProviderSchema,
+      201,
+    );
+
+    const model = withModel.models.find((entry) => entry.upstreamModel === "claude-sonnet-4");
+
+    assert.equal(model?.ref, "anthropic/claude-sonnet-4");
+    assert.equal(model?.shadowed, true);
+
+    const response = await chatRequest("anthropic/claude-sonnet-4", true);
+
+    assert.equal(response.status, 200);
+
+    const stream = await readStream(response);
+
+    assert.equal(stream.text, "Hello from Kilo");
+  });
+
+  await check("reserved refs and slugs are rejected", async () => {
+    const reservedAlias = await post(providerPaths.models(openaiProvider.provider?.id ?? ""), {
+      upstreamModel: "reserved-model",
+      alias: "tags/x",
+    });
+
+    assert.equal(reservedAlias.status, 422);
+
+    const badTag = await post(tagPaths.create, { slug: "Nope" });
+
+    assert.equal(badTag.status, 422);
+
+    const named = await postJson(
+      providerPaths.list,
+      {
+        name: "Tags",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    assert.equal(named.slug, "tags-2");
+
+    const reservedSlug = await put(providerPaths.update(named.id), {
+      name: named.name,
+      kind: named.kind,
+      baseUrl: named.baseUrl,
+      slug: "kilo",
+    });
+
+    assert.equal(reservedSlug.status, 422);
+  });
+
+  await check("deleting a tag returns the list, and a deleted model leaves its tags", async () => {
+    const before = await getJson(tagPaths.list, TagListSchema, 200);
+    const empty = before.tags.find((tag) => tag.slug === "empty");
+
+    assert.ok(empty, "the empty tag is missing");
+
+    const removed = await deleteJson(tagPaths.remove(empty.id), TagListSchema);
+
+    assert.equal(
+      removed.tags.some((tag) => tag.slug === "empty"),
+      false,
+    );
+    assert.ok(removed.tags.some((tag) => tag.slug === "failover"));
+
+    await deleteJson(
+      providerPaths.model(openaiProvider.provider?.id ?? "", openaiProvider.modelId),
+      ProviderSchema,
+    );
+
+    const after = await getJson(tagPaths.list, TagListSchema, 200);
+    const failover = after.tags.find((tag) => tag.slug === "failover");
+
+    assert.deepEqual(
+      failover?.models.map((model) => model.alias),
+      ["dead-model"],
+      `failover order after the model removal: ${failover?.models.map((model) => model.alias).join(", ")}`,
+    );
+  });
+
   await check("GET /api/providers/:id hides another account's provider", async () => {
     const response = await fetch(
       new URL(`${providerPaths.detail("00000000-0000-0000-0000-000000000000")}?days=30`, origin),
@@ -823,6 +1086,66 @@ async function post(
     headers: { "content-type": "application/json", ...sessionHeaders(), ...headers },
     body: JSON.stringify(body),
   });
+}
+
+async function put(
+  path: string,
+  body: Json,
+  headers: Readonly<Record<string, string>> = {},
+  base: string = origin,
+): Promise<Response> {
+  return fetch(new URL(path, base), {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...sessionHeaders(), ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+async function putJson<T>(
+  path: string,
+  body: Json,
+  schema: v.GenericSchema<T>,
+  status: number,
+): Promise<T> {
+  const response = await put(path, body);
+
+  if (response.status !== status) {
+    throw new Error(`PUT ${path} returned ${response.status}: ${await response.clone().text()}`);
+  }
+
+  return v.parse(schema, await response.json());
+}
+
+function chatRequest(model: string, stream: boolean): Promise<Response> {
+  return fetch(new URL("/v1/chat/completions", origin), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...bearer() },
+    body: JSON.stringify(chat(model, stream, "reference")),
+  });
+}
+
+async function referenceRows(reference: string): Promise<readonly RequestEvent[]> {
+  const list = await getJson(`${analyticsPaths.requests}?limit=20`, RequestListSchema, 200);
+
+  return list.requests.filter((request) => request.reference === reference);
+}
+
+async function waitForRequests(
+  reference: string,
+  done: (requests: readonly RequestEvent[]) => boolean,
+  what: string,
+): Promise<readonly RequestEvent[]> {
+  const deadline = Date.now() + 3000;
+
+  for (;;) {
+    const requests = await referenceRows(reference);
+
+    if (done(requests)) return requests;
+
+    if (Date.now() > deadline) throw new Error(`${what} never appeared for ${reference}`);
+
+    await Bun.sleep(25);
+  }
 }
 
 async function mintGatewayKey(): Promise<string> {

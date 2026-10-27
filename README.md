@@ -1,18 +1,23 @@
 # bandar
 
 A self-hosted LLM gateway that ships as one binary. Clients speak OpenAI's chat
-completions API; bandar resolves the model alias to a provider, translates the
-request to that provider's wire, streams the answer back, and records one
+completions API; bandar resolves the model reference to a provider, translates
+the request to that provider's wire, streams the answer back, and records one
 analytics event per attempt in an embedded DuckDB database.
 
-The dashboard covers providers, requests, API keys, and usage: tokens, time to
-first token, tokens per second, error rate, p95 latency, daily tokens, and a
-30-day average. Provider credentials are sealed before they reach SQLite.
+The dashboard covers providers, model tags, requests, API keys, and usage:
+tokens, time to first token, tokens per second, error rate, p95 latency, daily
+tokens, and a 30-day average. Provider credentials are sealed before they reach
+SQLite.
 
 ## What works
 
 - OpenAI-compatible `POST /v1/chat/completions`, streaming and non-streaming.
-- OpenAI-compatible `GET /v1/models` for the caller's aliases.
+- OpenAI-compatible `GET /v1/models` for the caller's aliases, tags, and
+  provider refs.
+- Model references in three forms: an alias, `tags/<slug>`, or
+  `<provider-slug>/<upstream-model>`.
+- Tags as ordered fallback chains, managed in the dashboard.
 - Three generic wires for custom providers: `openai`, `anthropic`, and `google`.
 - Built-in Kilo Code, present on every account, with a device-code login.
 - Custom providers added from the dashboard without changing code.
@@ -22,9 +27,8 @@ first token, tokens per second, error rate, p95 latency, daily tokens, and a
 - Per-request analytics in DuckDB with SQL migrations embedded in the binary.
 - Email/password accounts and per-user data isolation.
 
-Not in v1: tools, images, embeddings, the responses API, fallback chains, and
-cost sync beyond the Kilo Code catalog. The adapter contract is text-only and
-says so.
+Not in v1: tools, images, embeddings, and the responses API. Cost sync stops at
+the Kilo Code catalog. The adapter contract is text-only and says so.
 
 ## Quickstart
 
@@ -62,23 +66,77 @@ The dev client proxies `/api` and `/v1` to the API port, so a page loaded from
 POST /v1/chat/completions [1]
 ├── authenticate the gateway key [1a] ✗ 401
 ├── parse the OpenAI body with valibot [1b] ✗ 422
-├── resolve the alias for this user [1c] ✗ 404 model_not_found
+├── resolve the reference: alias, tag chain, or provider ref [1c] ✗ 404 model_not_found
 ├── pick the adapter for the provider kind [1d]
 ├── call the upstream [1e] ✗ 502/429 and record the failure
 │   └── normalize wire events into canonical text, usage and finish events [1e1]
+├── try the next candidate when the tag chain allows a retry [1e2]
 ├── stream OpenAI chunks back to the client [1f]
 └── record one DuckDB event with tokens, TTFT, duration and tokens/sec [1g]
 ```
 
-Provider credentials are decrypted only inside `resolveTarget` for the duration
-of an upstream call. `GET /api/providers` returns `authMode` and `hasKey`, never
-the key or token. A device-code login keeps the device code on the server: the
-browser sees only the short user code it types at kilocode.ai.
+Provider credentials are decrypted per attempt, immediately before an upstream
+call, so a credential is in memory only for the length of that call and a tag
+never opens keys for models it does not try. `GET /api/providers` returns
+`authMode` and `hasKey`, never the key or token. A device-code login keeps the
+device code on the server: the browser sees only the short user code it types at
+kilocode.ai.
+
+## Model references
+
+A request's `model` field is a reference. Resolution is case-sensitive and tries
+the forms in this order:
+
+| Reference                          | Resolves to                                               |
+| ---------------------------------- | --------------------------------------------------------- |
+| An enabled alias, such as `fast`   | That one model.                                           |
+| `tags/<slug>`                      | The tag's models, in priority order.                      |
+| `<provider-slug>/<upstream-model>` | The enabled model of that provider with that upstream id. |
+
+An exact alias always wins, so a reference that works today keeps working. A
+provider slug is derived from the provider name once, when the provider is
+created. Custom slugs are editable on the Settings tab; a built-in slug is fixed
+in code (`kilo`). `tags` and every built-in slug are reserved, so a custom
+provider named `Tags` gets `tags-2`.
+
+The provider's model list shows each model's computed ref and marks a model
+`shadowed` when an enabled alias equals its ref. A shadowed model still answers
+through its alias, and `GET /v1/models` leaves the duplicate ref out. An alias
+that existed before tags and starts with `tags/` keeps winning; new aliases
+cannot start with that prefix.
+
+## Tags
+
+A tag is a named fallback chain. It holds an ordered list of models, and clients
+call it as `tags/<slug>`. The gateway tries the models in priority order.
+
+- The chain is retried only on `auth`, `rate_limit`, `unavailable`, `protocol`,
+  and `network`. An `invalid_request` or an aborted request is final.
+- There is no attempt cap. The chain is walked in full, so a long tag can mean
+  several upstream calls for one client request.
+- Each attempt writes one DuckDB event. A fallback therefore adds a row for the
+  failed model beside the row for the model that answered.
+- TTFT is measured from the request start and is not reset on a retry, so it
+  spans the whole chain. A failed attempt records `ttft_ms = null`; duration is
+  per attempt.
+- A tag with no enabled models is a 404 `model_not_found` with the message
+  `tag <slug> has no enabled models`.
+
+Manage tags on the **Tags** page or over `/api/tags`. Every membership write
+replaces the whole list, so priorities are always 1-based and contiguous.
 
 ## Analytics
 
 Each attempt writes one row to `request_events`, including failures and aborts.
 The fields are denormalized, so deleting a provider does not erase its history.
+The row carries the resolved alias and the string the client sent.
+
+| Column      | Meaning                                                                                                     |
+| ----------- | ----------------------------------------------------------------------------------------------------------- |
+| `model`     | The resolved alias.                                                                                         |
+| `reference` | The string the client sent as `model`, such as `fast`, `tags/failover`, or `fake-openai/fake-openai-model`. |
+
+The dashboard derives these metrics:
 
 | Metric             | Definition                                                                                                         |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
@@ -202,7 +260,7 @@ semicolons out of string literals in a migration.
 | `bun run check`          | Format, lint, and type-check.                                                    |
 | `bun run check:fix`      | The same with fixes.                                                             |
 | `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                       |
-| `bun run smoke`          | Boot `dist/bandar` and run 36 end-to-end checks against fake upstreams.          |
+| `bun run smoke`          | Boot `dist/bandar` and run 44 end-to-end checks against fake upstreams.          |
 | `bun run verify`         | `check`, `test`, `build`, `smoke`.                                               |
 | `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                    |
 | `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                       |
@@ -210,9 +268,9 @@ semicolons out of string literals in a migration.
 
 The smoke run mints a user, creates one provider per kind against local fake
 upstreams, approves a fake Kilo Code device login, imports a catalog with an
-alias collision, calls the gateway streaming and non-streaming, asserts
-TTFT/tokens-per-second in DuckDB, revokes the key, restarts the binary, and
-proves the analytics rows survived.
+alias collision, calls the gateway streaming and non-streaming, walks a tag with
+a failing first model, checks the recorded references, rejects reserved slugs,
+revokes the key, restarts the binary, and proves the analytics rows survived.
 
 ## Layout
 
@@ -227,6 +285,8 @@ bandar/
 ├── src/shared/                     # valibot schemas and paths for both sides
 │   ├── chat.ts                     # OpenAI ingress schema, model list
 │   ├── providers.ts                # provider kinds, provider/model schemas
+│   ├── slugs.ts                    # slug rules, ref building, reserved names
+│   ├── tags.ts                     # tag schemas and paths
 │   ├── analytics.ts                # analytics and request schemas
 │   ├── api.ts                      # /api and /v1 prefix guards, health
 │   ├── api-keys.ts                 # gateway key paths and schemas
@@ -238,7 +298,8 @@ bandar/
 │   ├── gateway.ts                  # Elysia /v1 routes and caller auth
 │   ├── api.ts                      # management routes, session/key gate
 │   ├── analytics.ts                # DuckDB reads and window math
-│   ├── providers.ts                # provider/model repo, catalog import, target resolution
+│   ├── providers.ts                # provider/model repo, catalog import, slug backfill
+│   ├── tags.ts                     # tag list and membership writes
 │   ├── credential.ts               # api-key / oauth credential union
 │   ├── oauth.ts                    # device-code connectors per OAuth kind
 │   ├── seal.ts                     # AES-GCM credential sealing
@@ -246,7 +307,8 @@ bandar/
 │   │   ├── types.ts                # canonical request/result/stream contract
 │   │   ├── metrics.ts              # tokens/sec, cost, error-rate math
 │   │   ├── record.ts               # one request event -> DuckDB
-│   │   ├── chat.ts                 # resolve, call, stream, record
+│   │   ├── resolve.ts              # alias, tag, and provider-ref resolution
+│   │   ├── chat.ts                 # resolve, walk candidates, stream, record
 │   │   ├── wire.ts                 # OpenAI response and error envelopes
 │   │   └── adapters/
 │   │       ├── index.ts            # satisfies Record<ProviderKind, Adapter>
@@ -263,16 +325,18 @@ bandar/
 │   ├── auth.ts                     # better-auth handler, session, key verify
 │   └── assets.ts                   # embedded client bundle and SPA fallback
 ├── src/client/
-│   ├── router.tsx                  # /overview, /providers, /providers/:id, /requests, /api-keys
+│   ├── router.tsx                  # /overview, /providers, /providers/:id, /tags, /requests, /api-keys
 │   ├── views.tsx                   # navigation registry
 │   ├── use-providers.ts            # provider and model mutations
 │   ├── use-provider-detail.ts      # one provider with its usage window
 │   ├── use-analytics.ts            # overview window state
 │   ├── use-requests.ts             # recent request state
+│   ├── use-tags.ts                 # tag list and membership writes
 │   └── components/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
 │       ├── providers-panel.tsx     # provider list and add dialog
 │       ├── provider-page.tsx       # one provider: overview, settings, models, credential
+│       ├── tags-panel.tsx          # tag chains: create, reorder, remove
 │       ├── connect-flow.tsx        # Kilo Code device-code approval
 │       ├── token-chart.tsx         # shared daily token bars
 │       ├── provider-logo.tsx       # mark per provider kind
@@ -290,15 +354,18 @@ bandar/
 | Route                                       | Auth                   | Purpose                                                 |
 | ------------------------------------------- | ---------------------- | ------------------------------------------------------- |
 | `POST /v1/chat/completions`                 | Gateway key            | OpenAI-compatible chat, streaming or not.               |
-| `GET /v1/models`                            | Gateway key            | Aliases for the caller.                                 |
+| `GET /v1/models`                            | Gateway key            | Aliases, non-empty tags, and unshadowed provider refs.  |
 | `GET/POST /api/providers`                   | Session or `x-api-key` | List providers, or add a custom provider.               |
-| `PUT/DELETE /api/providers/:id`             | Session or `x-api-key` | Edit a custom provider, or remove it with its models.   |
+| `PUT/DELETE /api/providers/:id`             | Session or `x-api-key` | Edit a custom provider's name and slug, or remove it.   |
 | `GET /api/providers/:id?days=30`            | Session or `x-api-key` | One provider plus its window usage.                     |
 | `POST /api/providers/:id/models`            | Session or `x-api-key` | Add one model alias; returns the provider.              |
 | `POST /api/providers/:id/models/refresh`    | Session or `x-api-key` | Import new models from the Kilo Code catalog.           |
 | `DELETE /api/providers/:id/models/:modelId` | Session or `x-api-key` | Remove a model alias; returns the provider.             |
 | `POST /api/providers/:id/oauth/start`       | Session or `x-api-key` | Start a Kilo Code device login; returns a user code.    |
 | `POST /api/providers/:id/oauth/poll`        | Session or `x-api-key` | Poll the pending login; stores the token when approved. |
+| `GET/POST /api/tags`                        | Session or `x-api-key` | List tags with their models, or create a tag.           |
+| `PUT /api/tags/:id/models`                  | Session or `x-api-key` | Replace a tag's model list and order; returns the list. |
+| `DELETE /api/tags/:id`                      | Session or `x-api-key` | Delete a tag; returns the remaining list.               |
 | `GET /api/analytics?days=30`                | Session or `x-api-key` | Window summary, daily series, model breakdown.          |
 | `GET /api/requests?limit=50&providerId=…`   | Session or `x-api-key` | Recent attempts, optionally one provider.               |
 | `GET /api/health`                           | none                   | Both current migration tags.                            |
@@ -306,14 +373,21 @@ bandar/
 
 Each provider has its own page at `/providers/<id>` with four tabs:
 **Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
-(name, kind, base URL), **Models** (aliases, removal, and for Kilo Code a catalog
-import), and **API key** or **Connection** (set or replace the sealed upstream
-key, connect a Kilo Code account, remove a custom provider). The tab lives in the
-URL as `?tab=`, so a reload or a shared link opens the same tab. Custom providers
-are created empty and grow models one at a time; Kilo Code is seeded empty for
-every account. Built-in settings come from code and are read-only, and a built-in
-cannot be removed. `PUT /api/providers/:id` replaces name, kind, and base URL for
-a custom provider, and leaves the credential unchanged when `apiKey` is empty.
+(name, slug, kind, base URL), **Models** (aliases, refs, tag chips, removal, and
+for Kilo Code a catalog import), and **API key** or **Connection** (set or
+replace the sealed upstream key, connect a Kilo Code account, remove a custom
+provider). The tab lives in the URL as `?tab=`, so a reload or a shared link
+opens the same tab. Custom providers are created empty and grow models one at a
+time; Kilo Code is seeded empty for every account. Built-in settings come from
+code and are read-only, and a built-in cannot be removed. `PUT /api/providers/:id`
+replaces name, slug, kind, and base URL for a custom provider, and leaves the
+credential unchanged when `apiKey` is empty. Changing a custom slug stops refs
+built from the old slug from resolving.
+
+The **Tags** page creates a tag from a slug and edits its chain: reorder a model
+with the arrow buttons, remove it, or pick another from the add list. Every edit
+writes the whole list.
+
 Model prices are accepted by the model endpoints (`inputPricePerMtok`,
 `outputPricePerMtok`) and filled by the Kilo Code catalog import; they are not in
 the form yet.
@@ -328,7 +402,7 @@ the form yet.
   Code device code stays on the server; only the short user code is returned.
 - A bad gateway key is final: it is a 401 and the session cookie is not consulted
   on `/v1`.
-- One user cannot resolve another user's aliases, providers, events, or keys.
+- One user cannot resolve another user's references, providers, events, or keys.
 - The `BANDAR_AUTH_SECRET` default is generated per boot. Set it to keep sessions
   and stored credentials across restarts.
 
@@ -341,8 +415,8 @@ the form yet.
   analytics file. SQLite is WAL, DuckDB is not multi-process-writer.
 - **Single process.** DuckDB FFI is synchronous. Move slow scans to a worker or a
   pre-aggregated table before the history gets large.
-- **No fallbacks or retries.** One alias maps to one model. The alias table can
-  grow an ordered fallback list without changing the adapter contract.
+- **Tag chains only.** A tag walks its models in order; an alias still maps to
+  exactly one model, and retries happen only down a tag chain.
 - **No OAuth refresh.** A Kilo Code device token is stored as issued. Reconnect
   when it expires.
 - **No pricing form.** Set prices through the API or import the Kilo Code

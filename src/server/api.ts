@@ -20,7 +20,6 @@ import {
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import type { Auth, SessionUser } from "./auth";
-import type { Db } from "./db/client";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
 import { connectorFor } from "./oauth";
@@ -44,7 +43,6 @@ import { InputError, parseInput, type ParseableInput } from "./validation";
 
 export type ApiDeps = {
   readonly auth: Auth;
-  readonly db: Db;
   readonly duck: DuckDb;
   readonly providers: ProviderDeps;
   readonly migration: MigrationResult;
@@ -395,7 +393,7 @@ export function createApi(deps: ApiDeps) {
 
       if (caller instanceof Response) return caller;
 
-      return listTags(deps, caller.userId);
+      return listTags(deps.providers, caller.userId);
     })
     .post("/tags", async ({ body, request, set }) => {
       const caller = await authenticate(deps.auth, request);
@@ -406,7 +404,7 @@ export function createApi(deps: ApiDeps) {
       const input = parseInput(TagCreateInputSchema, body as ParseableInput);
 
       try {
-        const tags = await createTag(deps, caller.userId, input.slug);
+        const tags = await createTag(deps.providers, caller.userId, input.slug);
 
         set.status = 201;
 
@@ -431,7 +429,7 @@ export function createApi(deps: ApiDeps) {
       const input = parseInput(TagModelsInputSchema, body as ParseableInput);
 
       try {
-        const tags = await setTagModels(deps, caller.userId, id, input.modelIds);
+        const tags = await setTagModels(deps.providers, caller.userId, id, input.modelIds);
 
         if (tags === null) {
           set.status = 404;
@@ -456,7 +454,7 @@ export function createApi(deps: ApiDeps) {
       if (caller instanceof Response) return caller;
 
       const { id } = parseInput(TagParamsSchema, params);
-      const tags = await removeTag(deps, caller.userId, id);
+      const tags = await removeTag(deps.providers, caller.userId, id);
 
       if (tags === null) {
         set.status = 404;

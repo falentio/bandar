@@ -26,7 +26,6 @@ export function createApp(deps: AppDeps): App {
 
   const api = createApi({
     auth: deps.auth,
-    db: deps.db,
     duck: deps.duck,
     providers,
     migration: deps.migration,

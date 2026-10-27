@@ -198,11 +198,13 @@ A failure flags at most one subject:
 Neither says anything about the model, the provider, or the credential, so it
 convicts nobody and the chain still falls through it.
 
-A retired model answers 404, which is `not_found`, so a tag falls through it
-like any other retryable failure. A flagged subject cools down for
+A retired model answers 404 with code `not_found`, so a tag falls through it
+like any other retryable failure. A client that read 400 `invalid_request` for
+the same case now reads 404. A flagged subject cools down for
 `min(30s * 2^(failures - 1), 24h)`, so repeated failures grow the wait to one
-day. A success clears the failure count and the flag on the provider, the
-model, and the credential of that attempt.
+day. The failure count never decays with time. Only a success clears it, on the
+provider, the model, and the credential of that attempt, so repeated failures
+count over the whole life of the row rather than consecutively.
 
 An attempt is skipped when its provider, its model, or its credential is cooling
 down. When every attempt in the plan is skipped, the gateway runs the full plan

@@ -1,6 +1,6 @@
 import * as v from "valibot";
-import type { Credential } from "../../credential";
-import { UpstreamError, type UpstreamErrorKind } from "../types";
+import type { Credential } from "../credential";
+import { UpstreamError, type UpstreamErrorKind } from "./types";
 
 const ErrorBodySchema = v.object({
   error: v.optional(v.object({ message: v.optional(v.string()), type: v.optional(v.string()) })),

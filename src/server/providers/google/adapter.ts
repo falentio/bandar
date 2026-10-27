@@ -8,7 +8,7 @@ import {
   requireOk,
   secretOf,
   sseData,
-} from "./http";
+} from "../http";
 import {
   UpstreamError,
   type AdapterInput,
@@ -52,7 +52,7 @@ type ChatBody = {
   };
 };
 
-export const google: ProviderAdapter = {
+export const googleAdapter: ProviderAdapter = {
   kind: "google",
 
   async chat(input: AdapterInput): Promise<CanonicalResult> {

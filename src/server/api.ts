@@ -4,7 +4,6 @@ import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
-  OAUTH_PROVIDER_KINDS,
   ProviderCreateInputSchema,
   ProviderModelRefreshSchema,
   ProviderDetailSchema,
@@ -14,19 +13,16 @@ import {
   ProviderOAuthPollSchema,
   ProviderOAuthStartSchema,
   ProviderParamsSchema,
-  type OAuthProviderKind,
-  type ProviderKind,
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
-import { connectorFor } from "./oauth";
 import {
   addProviderModel,
   createProvider,
-  fetchKilocodeCatalog,
+  definitionFor,
   syncProviderModels,
   listProviders,
   readProvider,
@@ -37,7 +33,7 @@ import {
   updateProvider,
   type ProviderDeps,
 } from "./providers";
-import { UpstreamError } from "./router/types";
+import { UpstreamError } from "./providers/types";
 import { createTag, listTags, removeTag, setTagModels, TagRuleError } from "./tags";
 import { InputError, parseInput, type ParseableInput } from "./validation";
 
@@ -202,15 +198,15 @@ export function createApi(deps: ApiDeps) {
         return failure("not_found", `provider ${id} not found`);
       }
 
-      const kind = oauthKindOf(provider.kind);
+      const oauth = definitionFor(provider.kind).oauth;
 
-      if (kind === null) {
+      if (oauth === undefined) {
         set.status = 400;
 
         return failure("unsupported", `${provider.kind} does not use a device login`);
       }
 
-      const login = await connectorFor(kind).start(request.signal);
+      const login = await oauth.start(request.signal);
 
       pendingLogins.set(loginKey(caller.userId, id), {
         code: login.code,
@@ -237,9 +233,9 @@ export function createApi(deps: ApiDeps) {
         return failure("not_found", `provider ${id} not found`);
       }
 
-      const kind = oauthKindOf(provider.kind);
+      const oauth = definitionFor(provider.kind).oauth;
 
-      if (kind === null) {
+      if (oauth === undefined) {
         set.status = 400;
 
         return failure("unsupported", `${provider.kind} does not use a device login`);
@@ -261,7 +257,7 @@ export function createApi(deps: ApiDeps) {
         return failure("invalid_request", "the login code expired; start again");
       }
 
-      const result = await connectorFor(kind).poll(login.code, request.signal);
+      const result = await oauth.poll(login.code, request.signal);
 
       if (result.state === "pending") {
         return v.parse(ProviderOAuthPollSchema, { state: "pending" });
@@ -333,15 +329,17 @@ export function createApi(deps: ApiDeps) {
         return failure("not_found", `provider ${id} not found`);
       }
 
-      if (provider.kind !== "kilocode") {
+      const catalog = definitionFor(provider.kind).catalog;
+
+      if (catalog === undefined) {
         set.status = 400;
 
         return failure("unsupported", `${provider.kind} has no model catalog to refresh`);
       }
 
-      const catalog = await fetchKilocodeCatalog(request.signal);
+      const models = await catalog(request.signal);
       const before = provider.models.length;
-      const updated = await syncProviderModels(deps.providers, caller.userId, id, catalog);
+      const updated = await syncProviderModels(deps.providers, caller.userId, id, models);
 
       if (updated === null) {
         set.status = 404;
@@ -351,7 +349,7 @@ export function createApi(deps: ApiDeps) {
 
       return v.parse(ProviderModelRefreshSchema, {
         added: updated.models.length - before,
-        skipped: catalog.length - (updated.models.length - before),
+        skipped: models.length - (updated.models.length - before),
       });
     })
     .delete("/providers/:id/models/:modelId", async ({ params, request, set }) => {
@@ -498,10 +496,6 @@ export function createApi(deps: ApiDeps) {
 
 function loginKey(userId: string, providerId: string): string {
   return `${userId}:${providerId}`;
-}
-
-function oauthKindOf(kind: ProviderKind): OAuthProviderKind | null {
-  return OAUTH_PROVIDER_KINDS.find((candidate) => candidate === kind) ?? null;
 }
 
 function health(

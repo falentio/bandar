@@ -1,26 +1,23 @@
 import { and, asc, eq } from "drizzle-orm";
-import * as v from "valibot";
-import {
-  BUILT_IN_PROVIDERS,
-  BUILT_IN_PROVIDER_KINDS,
-  GENERIC_PROVIDER_KINDS,
-  RESERVED_PROVIDER_SLUGS,
-  type Provider,
-  type ProviderAuthMode,
-  type ProviderCreateInput,
-  type ProviderInput,
-  type ProviderKind,
-  type ProviderList,
-  type ProviderModelInput,
-} from "../shared/providers";
-import { availableSlug, providerRefOf, slugify, TAG_REF_PREFIX } from "../shared/slugs";
-import { parseCredential, type Credential } from "./credential";
-import { KILO_MODELS_URL } from "./router/adapters/kilocode";
-import type { Db } from "./db/client";
-import { UpstreamError } from "./router/types";
-import { providerModels, providers } from "./db/schema";
-import type { Sealer } from "./seal";
-import { renumberTagPriorities } from "./tags";
+import type {
+  Provider,
+  ProviderAuthMode,
+  ProviderCreateInput,
+  ProviderInput,
+  ProviderKind,
+  ProviderList,
+  ProviderModelInput,
+} from "../../shared/providers";
+import { availableSlug, providerRefOf, slugify, TAG_REF_PREFIX } from "../../shared/slugs";
+import { parseCredential, type Credential } from "../credential";
+import type { Db } from "../db/client";
+import { providerModels, providers } from "../db/schema";
+import type { Sealer } from "../seal";
+import { renumberTagPriorities } from "../tags";
+import { builtInProviders, definitionFor, reservedProviderSlugs } from "./registry";
+import type { ModelCatalogEntry } from "./types";
+
+export { definitionFor };
 
 export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
 
@@ -174,7 +171,7 @@ export async function updateProvider(
     throw new ProviderRuleError("built-in provider settings come from the code");
   }
 
-  if (existing.origin === "custom" && !GENERIC_PROVIDER_KINDS.some((kind) => kind === input.kind)) {
+  if (existing.origin === "custom" && definitionFor(input.kind).builtIn !== undefined) {
     throw new ProviderRuleError("custom providers use one of the generic wires", "validation");
   }
 
@@ -192,7 +189,7 @@ export async function updateProvider(
   };
 
   if (input.slug !== undefined && input.slug !== existing.slug) {
-    if (RESERVED_PROVIDER_SLUGS.has(input.slug)) {
+    if (reservedProviderSlugs.has(input.slug)) {
       throw new ProviderRuleError(`${input.slug} is a reserved slug`, "validation");
     }
 
@@ -246,76 +243,6 @@ export async function addProviderModel(
     .run();
 
   return findProvider(deps, userId, providerId);
-}
-
-export type ModelCatalogEntry = {
-  readonly upstreamModel: string;
-  readonly alias: string;
-  readonly inputPricePerMtok: number | null;
-  readonly outputPricePerMtok: number | null;
-};
-
-const PriceSchema = v.union([v.string(), v.number()]);
-
-const KiloCatalogSchema = v.object({
-  data: v.array(
-    v.object({
-      id: v.string(),
-      pricing: v.optional(
-        v.nullable(
-          v.object({
-            prompt: v.optional(PriceSchema),
-            completion: v.optional(PriceSchema),
-          }),
-        ),
-      ),
-    }),
-  ),
-});
-
-export async function fetchKilocodeCatalog(
-  signal: AbortSignal,
-): Promise<readonly ModelCatalogEntry[]> {
-  const url = Bun.env.BANDAR_KILOCODE_MODELS_URL ?? KILO_MODELS_URL;
-
-  const response = await fetch(url, { signal }).catch((error: Error) => {
-    throw new UpstreamError(`could not read the kilo code catalog: ${error.message}`, "network");
-  });
-
-  if (!response.ok) {
-    throw new UpstreamError(
-      `could not read the kilo code catalog (${response.status})`,
-      "unavailable",
-      response.status,
-    );
-  }
-
-  const parsed = v.safeParse(KiloCatalogSchema, await response.json());
-
-  if (!parsed.success) throw new UpstreamError("kilo code catalog is not readable", "protocol");
-
-  const aliases = new Set<string>();
-  const ids = new Set<string>();
-
-  return parsed.output.data.flatMap((model) => {
-    if (ids.has(model.id)) return [];
-
-    ids.add(model.id);
-
-    const base = aliasFor(model.id);
-    const alias = aliases.has(base) ? model.id : base;
-
-    aliases.add(alias);
-
-    return [
-      {
-        upstreamModel: model.id,
-        alias,
-        inputPricePerMtok: pricePerMtok(model.pricing?.prompt),
-        outputPricePerMtok: pricePerMtok(model.pricing?.completion),
-      },
-    ];
-  });
 }
 
 export async function syncProviderModels(
@@ -430,12 +357,11 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
   const names = new Set(rows.map((row) => row.name));
   const now = new Date();
 
-  for (const kind of BUILT_IN_PROVIDER_KINDS) {
-    if (present.has(kind)) continue;
+  for (const definition of builtInProviders) {
+    if (present.has(definition.kind)) continue;
 
-    const definition = BUILT_IN_PROVIDERS[kind];
-    const name = availableName(definition.name, names);
-    const slug = definition.slug;
+    const name = availableName(definition.builtIn.name, names);
+    const slug = definition.builtIn.slug;
 
     names.add(name);
 
@@ -446,8 +372,8 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
         userId,
         name,
         slug,
-        kind,
-        baseUrl: builtInBaseUrl(kind),
+        kind: definition.kind,
+        baseUrl: definition.builtIn.baseUrl(),
         apiKey: "",
         authMode: "api-key",
         origin: "builtin",
@@ -456,17 +382,6 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
       .onConflictDoNothing()
       .run();
   }
-}
-
-function builtInBaseUrl(kind: keyof typeof BUILT_IN_PROVIDERS): string {
-  const definition = BUILT_IN_PROVIDERS[kind];
-
-  if (kind !== "kilocode") return definition.baseUrl;
-
-  const origin =
-    Bun.env.BANDAR_KILOCODE_API?.replace(/\/+$/, "") ?? new URL(definition.baseUrl).origin;
-
-  return `${origin}/api/openrouter`;
 }
 
 function availableName(base: string, taken: ReadonlySet<string>): string {
@@ -485,7 +400,7 @@ async function takenSlugs(deps: ProviderDeps, userId: string): Promise<Set<strin
     .from(providers)
     .where(eq(providers.userId, userId));
 
-  const taken = new Set(RESERVED_PROVIDER_SLUGS);
+  const taken = new Set(reservedProviderSlugs);
 
   for (const row of rows) {
     if (row.slug !== "") taken.add(row.slug);
@@ -516,7 +431,7 @@ export async function assignProviderSlugs(db: Db): Promise<number> {
   let assigned = 0;
 
   for (const userRows of byUser.values()) {
-    const taken = new Set(RESERVED_PROVIDER_SLUGS);
+    const taken = new Set(reservedProviderSlugs);
 
     for (const row of userRows) {
       if (row.slug !== "") taken.add(row.slug);
@@ -553,9 +468,7 @@ export async function assignProviderSlugs(db: Db): Promise<number> {
 }
 
 function builtInSlugOf(kind: ProviderKind): string | null {
-  const builtIn = BUILT_IN_PROVIDER_KINDS.find((candidate) => candidate === kind);
-
-  return builtIn === undefined ? null : BUILT_IN_PROVIDERS[builtIn].slug;
+  return definitionFor(kind).builtIn?.slug ?? null;
 }
 
 export async function saveOAuthCredential(
@@ -576,22 +489,6 @@ export async function saveOAuthCredential(
     .run();
 
   return findProvider(deps, userId, providerId);
-}
-
-/** Model ids are namespaced, so the alias keeps the namespace and loses only the `:free` tag. */
-function aliasFor(upstreamModel: string): string {
-  return upstreamModel.replace(/:free$/, "");
-}
-
-function pricePerMtok(value: string | number | undefined): number | null {
-  if (value === undefined) return null;
-
-  const perToken = Number(value);
-
-  // Kilo reports `-1` for a model it routes dynamically, and 0 for a free one.
-  if (!Number.isFinite(perToken) || perToken < 0) return null;
-
-  return perToken * 1_000_000;
 }
 
 async function findProvider(

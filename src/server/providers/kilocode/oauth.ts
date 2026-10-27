@@ -1,23 +1,6 @@
 import * as v from "valibot";
-import type { OAuthProviderKind } from "../shared/providers";
-import type { Credential } from "./credential";
-import { UpstreamError } from "./router/types";
-
-export type DeviceLogin = {
-  readonly code: string;
-  readonly userCode: string;
-  readonly verificationUrl: string;
-  readonly expiresInSeconds: number;
-};
-
-export type DevicePollResult =
-  | { readonly state: "pending" }
-  | { readonly state: "connected"; readonly credential: Credential };
-
-export interface OAuthConnector {
-  start(signal: AbortSignal): Promise<DeviceLogin>;
-  poll(code: string, signal: AbortSignal): Promise<DevicePollResult>;
-}
+import { UpstreamError } from "../types";
+import type { DeviceLogin, DevicePollResult, OAuthConnector } from "../types";
 
 const DeviceLoginSchema = v.object({
   code: v.string(),
@@ -33,10 +16,9 @@ const ProfileSchema = v.object({
   organizations: v.optional(v.array(v.object({ id: v.string() }))),
 });
 
-// The smoke run points this at a local fake so the device flow runs end to end.
 const KILO_API = Bun.env.BANDAR_KILOCODE_API ?? "https://api.kilo.ai";
 
-const kilocodeConnector: OAuthConnector = {
+export const kilocodeConnector: OAuthConnector = {
   async start(signal: AbortSignal): Promise<DeviceLogin> {
     const response = await fetch(`${KILO_API}/api/device-auth/codes`, {
       method: "POST",
@@ -109,14 +91,6 @@ const kilocodeConnector: OAuthConnector = {
     };
   },
 };
-
-const connectors = {
-  kilocode: kilocodeConnector,
-} satisfies Record<OAuthProviderKind, OAuthConnector>;
-
-export function connectorFor(kind: OAuthProviderKind): OAuthConnector {
-  return connectors[kind];
-}
 
 async function organizationOf(token: string, signal: AbortSignal): Promise<string | null> {
   const response = await fetch(`${KILO_API}/api/profile`, {

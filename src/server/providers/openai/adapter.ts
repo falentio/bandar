@@ -1,16 +1,22 @@
 import * as v from "valibot";
-import { joinUrl, postJson, protocolError, requireBody, requireOk, sseData } from "./http";
 import {
-  UpstreamError,
-  type AdapterInput,
-  type CanonicalRequest,
-  type CanonicalResult,
-  type CanonicalStreamEvent,
-  type CanonicalUsage,
-  type ProviderAdapter,
+  apiKeyHeader,
+  joinUrl,
+  postJson,
+  protocolError,
+  requireBody,
+  requireOk,
+  secretOf,
+  sseData,
+} from "../http";
+import type {
+  AdapterInput,
+  CanonicalRequest,
+  CanonicalResult,
+  CanonicalStreamEvent,
+  CanonicalUsage,
+  ProviderAdapter,
 } from "../types";
-
-export const KILO_MODELS_URL = "https://api.kilo.ai/api/gateway/models";
 
 const UsageSchema = v.object({
   prompt_tokens: v.optional(v.nullable(v.number())),
@@ -51,13 +57,13 @@ type ChatBody = {
   stop?: readonly string[];
 };
 
-export const kilocode: ProviderAdapter = {
-  kind: "kilocode",
+export const openaiAdapter: ProviderAdapter = {
+  kind: "openai",
 
   async chat(input: AdapterInput): Promise<CanonicalResult> {
     const response = await postJson({
       url: joinUrl(input.target.baseUrl, "/chat/completions"),
-      headers: headersFor(input),
+      headers: apiKeyHeader("authorization", authorization(secretOf(input.target.credential))),
       body: JSON.stringify(bodyFor(input, false)),
       signal: input.signal,
     });
@@ -66,11 +72,11 @@ export const kilocode: ProviderAdapter = {
 
     const parsed = v.safeParse(ResponseSchema, await response.json());
 
-    if (!parsed.success) throw protocolError("kilo code returned an unexpected response shape");
+    if (!parsed.success) throw protocolError("openai returned an unexpected response shape");
 
     const choice = parsed.output.choices[0];
 
-    if (choice === undefined) throw protocolError("kilo code returned no choices");
+    if (choice === undefined) throw protocolError("openai returned no choices");
 
     return {
       text: choice.message.content ?? "",
@@ -82,7 +88,7 @@ export const kilocode: ProviderAdapter = {
   async *stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void> {
     const response = await postJson({
       url: joinUrl(input.target.baseUrl, "/chat/completions"),
-      headers: headersFor(input),
+      headers: apiKeyHeader("authorization", authorization(secretOf(input.target.credential))),
       body: JSON.stringify(bodyFor(input, true)),
       signal: input.signal,
     });
@@ -100,7 +106,7 @@ export const kilocode: ProviderAdapter = {
       if (chunk === null) continue;
 
       if (chunk.error !== undefined) {
-        throw protocolError(chunk.error.message ?? "kilo code stream returned an error");
+        throw protocolError(chunk.error.message ?? "openai stream returned an error");
       }
 
       if (chunk.usage !== undefined && chunk.usage !== null) usage = usageOf(chunk.usage);
@@ -148,31 +154,8 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
   return body;
 }
 
-function headersFor(input: AdapterInput) {
-  const credential = input.target.credential;
-
-  if (credential.authMode === "api-key") {
-    return credential.apiKey === ""
-      ? apiHeaders({})
-      : apiHeaders({ authorization: `Bearer ${credential.apiKey}` });
-  }
-
-  if (credential.accessToken === "") {
-    throw new UpstreamError("kilo code needs a connection before it can be called", "auth");
-  }
-
-  if (credential.organizationId === null) {
-    return apiHeaders({ authorization: `Bearer ${credential.accessToken}` });
-  }
-
-  return apiHeaders({
-    authorization: `Bearer ${credential.accessToken}`,
-    "x-kilocode-organizationid": credential.organizationId,
-  });
-}
-
-function apiHeaders(headers: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
-  return headers;
+function authorization(apiKey: string): string {
+  return apiKey === "" ? "" : `Bearer ${apiKey}`;
 }
 
 function parseChunk(data: string): v.InferOutput<typeof ChunkSchema> | null {

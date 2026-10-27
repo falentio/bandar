@@ -4,7 +4,7 @@ import { GatewayRequestSchema, type ModelList } from "../shared/chat";
 import type { Auth, VerifiedKey } from "./auth";
 import { listModelRefs } from "./router/resolve";
 import { runChat, type ChatDeps } from "./router/chat";
-import type { CanonicalRequest } from "./router/types";
+import type { CanonicalRequest } from "./providers/types";
 import { openAiError } from "./router/wire";
 
 export type GatewayDeps = ChatDeps & {

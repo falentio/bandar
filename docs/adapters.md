@@ -53,29 +53,69 @@ and `usage` (`inputTokens`, `outputTokens`, each `number | null`).
 
 The gateway does not read provider JSON. It sees text, usage, finish, or a thrown
 `UpstreamError`. That boundary is the extension point: a new wire format changes
-one file.
+one provider directory.
 
 ## Registry
 
-`src/server/router/adapters/index.ts`:
+Each provider is a directory under `src/server/providers/<kind>/`. Its
+`index.ts` exports one definition object that bundles the adapter with every
+capability the provider has. `src/server/providers/registry.ts` holds the record:
 
 ```ts
-const adapters = {
+const genericDefinitions = {
   openai,
   anthropic,
   google,
-  kilocode,
-} satisfies Record<ProviderKind, ProviderAdapter>;
+} satisfies GenericProviderDefinitions;
 
-export function adapterFor(kind: ProviderKind): ProviderAdapter {
-  return adapters[kind];
+const builtInDefinitions = {
+  kilocode,
+} satisfies BuiltInProviderDefinitions;
+
+const providerDefinitions: ProviderDefinitionRecord = {
+  ...genericDefinitions,
+  ...builtInDefinitions,
+};
+
+export function definitionFor<K extends ProviderKind>(kind: K): ProviderDefinitionRecord[K] {
+  return providerDefinitions[kind];
 }
 ```
 
-`satisfies Record<ProviderKind, ProviderAdapter>` makes the compiler fail when
-`PROVIDER_KINDS` gains a member without an adapter. There is no dynamic loading:
-the binary is compiled, so a static, exhaustive record is the registration
-mechanism.
+`src/server/providers/types.ts` splits a definition in two. A generic wire has
+capabilities only. A built-in also carries the settings its row is seeded with:
+
+```ts
+type ProviderCapabilities = {
+  readonly adapter: ProviderAdapter;
+  readonly oauth?: OAuthConnector;
+  readonly catalog?: ProviderCatalog;
+};
+
+export type GenericProviderDefinition<K extends GenericProviderKind = GenericProviderKind> =
+  ProviderCapabilities & {
+    readonly kind: K;
+    readonly builtIn?: undefined;
+  };
+
+export type BuiltInProviderDefinition<K extends BuiltInProviderKind = BuiltInProviderKind> =
+  ProviderCapabilities & {
+    readonly kind: K;
+    readonly builtIn: BuiltInProviderSettings;
+  };
+```
+
+`GenericProviderDefinitions` and `BuiltInProviderDefinitions` make the compiler
+fail when a kind list gains a member without a definition, when an entry carries
+a `kind` that disagrees with its key, and when a built-in has no `builtIn`
+settings. The key check works because each definition is annotated with its own
+kind, as in `GenericProviderDefinition<"openai">` or
+`BuiltInProviderDefinition<"kilocode">`. `builtInProviders` derives the seeding
+list from `BUILT_IN_PROVIDER_KINDS`, so seeding order does not depend on the
+record's key order.
+
+There is no dynamic loading: the binary is compiled, so a static, exhaustive
+record is the registration mechanism.
 
 ## Built-in and custom providers
 
@@ -83,12 +123,15 @@ mechanism.
 `openai`, `anthropic`, and `google`. A custom provider is a row in SQLite with
 `origin = "custom"` and one of those wires. Adding one never changes code.
 
-A built-in provider is defined by `BUILT_IN_PROVIDERS` and
-`BUILT_IN_PROVIDER_KINDS` in `src/shared/providers.ts`. Its row has
-`origin = "builtin"`, is seeded for every account by `ensureBuiltInProviders`,
-and carries a kind from the built-in list. Kilo Code is the current built-in:
-its gateway adapter is `kilocode`, its login is an `OAuthConnector`, and its
-name, kind, and base URL come from code. Built-in rows cannot be created through
+A built-in provider takes its name, slug, and default base URL from
+`BUILT_IN_PROVIDERS` and its kind from `BUILT_IN_PROVIDER_KINDS` in
+`src/shared/providers.ts`. Its behavior comes from the definition in
+`src/server/providers/<kind>/`. Its row has `origin = "builtin"` and is seeded
+for every account by `ensureBuiltInProviders`. Kilo Code is the current
+built-in: `src/server/providers/kilocode/index.ts` bundles its adapter, its
+`OAuthConnector`, its catalog reader, and an env-aware `builtIn.baseUrl()`. The
+definition reads that function at seeding time, so `BANDAR_KILOCODE_API` can
+point the seeded row at another origin. Built-in rows cannot be created through
 the provider API, edited in Settings, or removed; they reappear on the next
 listing if deleted directly.
 
@@ -140,10 +183,10 @@ apart from optional fields the canonical request does not carry.
 
 Kilo Code has two URLs: the OpenRouter-shaped gateway at
 `https://api.kilo.ai/api/openrouter` for chat, and the catalog at
-`https://api.kilo.ai/api/gateway/models`. The adapter owns only the former; the
-provider repo reads the catalog for **Import catalog** and turns per-token
-pricing into per-million-token prices. A `-1` price means Kilo routes the model
-dynamically and is stored as `null`.
+`https://api.kilo.ai/api/gateway/models`. `src/server/providers/kilocode/adapter.ts`
+owns only the former. `catalog.ts` in the same directory reads the catalog for
+**Import catalog** and turns per-token pricing into per-million-token prices. A
+`-1` price means Kilo routes the model dynamically and is stored as `null`.
 
 ## Streaming rules
 
@@ -164,15 +207,22 @@ not measure time, and non-streaming requests have no TTFT.
 
 1. For a generic wire, add the literal to `GENERIC_PROVIDER_KINDS` in
    `src/shared/providers.ts`. For a built-in, add it to
-   `BUILT_IN_PROVIDER_KINDS` and add a definition to `BUILT_IN_PROVIDERS`.
-2. Create `src/server/router/adapters/<kind>.ts`. Import the helpers, implement
-   `chat` and `stream`, and keep every wire type inside the file.
-3. Register it in `src/server/router/adapters/index.ts`. The `satisfies` record
-   reports a missing entry.
-4. Add a branch to the fake upstream in `scripts/smoke.ts` and two checks: one
+   `BUILT_IN_PROVIDER_KINDS` and add its name, slug, and base URL to
+   `BUILT_IN_PROVIDERS`.
+2. Create `src/server/providers/<kind>/adapter.ts`. Import the helpers from
+   `src/server/providers/http.ts`, implement `chat` and `stream`, and keep every
+   wire type inside the file.
+3. Create `src/server/providers/<kind>/index.ts` with the definition, annotated
+   with its own kind. Add an `OAuthConnector` or a `ProviderCatalog` when the
+   provider has one.
+4. Register the definition in `genericDefinitions` or `builtInDefinitions` in
+   `src/server/providers/registry.ts`. Both `satisfies` records report a missing
+   entry, a wrong kind for the key, and a built-in without its `builtIn`
+   settings.
+5. Add a branch to the fake upstream in `scripts/smoke.ts` and two checks: one
    non-streaming text/usage assertion and one SSE text/usage/finish assertion.
    The fake upstream verifies the adapter's auth header too.
-5. Run `bun run check && bun run test && bun run build && bun run smoke`.
+6. Run `bun run check && bun run test && bun run build && bun run smoke`.
 
 No database migration is needed for a new kind: `providers.kind` is text and its
 TypeScript type comes from `ProviderKind`. Credentials already have an
@@ -184,11 +234,12 @@ generic and built-in lists, so a new kind appears once it has a path in
 
 ## OAuth built-ins
 
-Kilo Code is the first provider that logs in instead of accepting a key. The
-shared contract adds it to `OAUTH_PROVIDER_KINDS`; a kind in that list gets the
-**Connection** tab and the `/api/providers/:id/oauth/{start,poll}` routes.
+Kilo Code is the first provider that logs in instead of accepting a key. A
+definition with an `oauth` connector serves the
+`/api/providers/:id/oauth/{start,poll}` routes; without one, both routes answer 400. The dashboard shows the **Connection** tab for Kilo Code by kind, so a new
+OAuth kind also needs a branch in `src/client/components/provider-page.tsx`.
 
-`src/server/oauth.ts` holds one `OAuthConnector` per OAuth kind:
+The connector contract lives in `src/server/providers/types.ts`:
 
 ```ts
 export interface OAuthConnector {
@@ -197,11 +248,10 @@ export interface OAuthConnector {
 }
 ```
 
-The registry is a `satisfies Record<OAuthProviderKind, OAuthConnector>`, so a new
-OAuth kind fails the type check until it has a connector. The API keeps the
-device code server-side, keyed by user and provider; the start response returns
-only the short user code and the verification URL. The poll stores the token
-with `saveOAuthCredential`, which seals the OAuth bundle and sets
+`src/server/providers/kilocode/oauth.ts` implements it. The API keeps the device
+code server-side, keyed by user and provider; the start response returns only
+the short user code and the verification URL. The poll stores the token with
+`saveOAuthCredential`, which seals the OAuth bundle and sets
 `providers.auth_mode = "oauth"`. An API key saved later replaces the connection
 and switches the mode back to `"api-key"`. A built-in provider's row is seeded
 before login, so the Connection tab works on the first visit.

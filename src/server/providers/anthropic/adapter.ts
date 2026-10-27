@@ -8,7 +8,7 @@ import {
   requireOk,
   secretOf,
   sseData,
-} from "./http";
+} from "../http";
 import {
   UpstreamError,
   type AdapterInput,
@@ -57,7 +57,7 @@ type ChatBody = {
   stop_sequences?: string[];
 };
 
-export const anthropic: ProviderAdapter = {
+export const anthropicAdapter: ProviderAdapter = {
   kind: "anthropic",
 
   async chat(input: AdapterInput): Promise<CanonicalResult> {

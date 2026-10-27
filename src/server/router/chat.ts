@@ -1,6 +1,5 @@
 import type { DuckDb } from "../duck/client";
-import { readCredential, type ProviderDeps } from "../providers";
-import { adapterFor } from "./adapters";
+import { definitionFor, readCredential, type ProviderDeps } from "../providers";
 import { recordRequest, type RequestEventInput, type RequestOutcome } from "./record";
 import { resolvePlan, type ResolvedCandidate, type ResolvedPlan } from "./resolve";
 import {
@@ -9,7 +8,7 @@ import {
   type CanonicalUsage,
   type ProviderTarget,
   type UpstreamErrorKind,
-} from "./types";
+} from "../providers/types";
 import { completionResponse, openAiError, usageBody } from "./wire";
 
 export type ChatDeps = {
@@ -93,7 +92,7 @@ async function complete(
     try {
       const target = await targetOf(deps.providers, candidate);
 
-      const result = await adapterFor(candidate.kind).chat({
+      const result = await definitionFor(candidate.kind).adapter.chat({
         target,
         request: input.request,
         signal: input.signal,
@@ -216,7 +215,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         try {
           const target = await targetOf(deps.providers, candidate);
 
-          for await (const event of adapterFor(candidate.kind).stream({
+          for await (const event of definitionFor(candidate.kind).adapter.stream({
             target,
             request: input.request,
             signal: abort.signal,

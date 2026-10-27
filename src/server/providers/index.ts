@@ -1,7 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import type {
   Provider,
-  ProviderAuthMode,
   ProviderCredential,
   ProviderCreateInput,
   ProviderInput,
@@ -30,10 +29,6 @@ export class ProviderRuleError extends Error {
     this.name = "ProviderRuleError";
     this.code = code;
   }
-}
-
-export function authModesFor(kind: ProviderKind): ProviderAuthMode[] {
-  return definitionFor(kind).oauth === undefined ? ["api-key"] : ["api-key", "oauth"];
 }
 
 type ProviderPatch = {
@@ -125,7 +120,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       kind: row.kind,
       origin: row.origin,
       baseUrl: row.baseUrl,
-      authModes: authModesFor(row.kind),
+      authModes: [...definitionFor(row.kind).authModes],
       credentials: credentials.get(row.id) ?? [],
       models: grouped.get(row.id) ?? [],
       createdAt: row.createdAt.toISOString(),

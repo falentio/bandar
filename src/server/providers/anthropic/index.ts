@@ -4,4 +4,5 @@ import { anthropicAdapter } from "./adapter";
 export const anthropic: GenericProviderDefinition<"anthropic"> = {
   kind: "anthropic",
   adapter: anthropicAdapter,
+  authModes: ["api-key"],
 };

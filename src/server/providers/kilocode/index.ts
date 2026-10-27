@@ -8,6 +8,9 @@ const settings = BUILT_IN_PROVIDERS.kilocode;
 
 export const kilocode: BuiltInProviderDefinition<"kilocode"> = {
   kind: "kilocode",
+  // A device login and a pasted API key reach the same bearer header, so the
+  // dialog offers both and the chain can fall from one to the other.
+  authModes: ["api-key", "oauth"],
   builtIn: {
     name: settings.name,
     slug: settings.slug,

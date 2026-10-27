@@ -67,7 +67,6 @@ export async function fetchKilocodeCatalog(
   });
 }
 
-/** Model ids are namespaced, so the alias keeps the namespace and loses only the `:free` tag. */
 function aliasFor(upstreamModel: string): string {
   return upstreamModel.replace(/:free$/, "");
 }

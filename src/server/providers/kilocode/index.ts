@@ -18,7 +18,6 @@ export const kilocode: BuiltInProviderDefinition = {
   catalog: fetchKilocodeCatalog,
 };
 
-// The smoke run points the env var at a local fake, so the origin stays configurable.
 function kilocodeBaseUrl(): string {
   const origin =
     Bun.env.BANDAR_KILOCODE_API?.replace(/\/+$/, "") ?? new URL(settings.baseUrl).origin;

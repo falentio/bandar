@@ -13,6 +13,7 @@ import {
 import { ApiErrorBodySchema, HealthSchema } from "../src/shared/api";
 import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
 import { AuthResultSchema } from "../src/shared/auth";
+import { CooldownListSchema, cooldownPaths } from "../src/shared/cooldowns";
 import {
   ProviderDetailSchema,
   ProviderListSchema,
@@ -1333,6 +1334,18 @@ try {
     assert.equal(rows.find((request) => request.status === "error")?.model, "dead-model");
     assert.equal(rows.find((request) => request.status === "success")?.model, "fast");
 
+    const deadDetail = await getJson(
+      providerPaths.detail(dead.id) + "?days=30",
+      ProviderDetailSchema,
+      200,
+    );
+
+    const deadCredential = deadDetail.provider.credentials[0];
+
+    assert.equal(deadCredential?.failures, 1);
+    assert.ok(deadCredential?.flaggedUntil !== null, "the failing credential was not flagged");
+    assert.equal(deadDetail.provider.failures, 0);
+
     await putJson(
       tagPaths.models(tagId),
       { modelIds: [fastModelId, deadModelId] },
@@ -1357,6 +1370,20 @@ try {
     assert.equal(settled.filter((request) => request.status === "error").length, 1);
   });
 
+  await check("GET /api/cooldowns lists the failure that flagged a credential", async () => {
+    const list = await getJson(cooldownPaths.list, CooldownListSchema, 200);
+
+    const event = list.events.find(
+      (entry) => entry.reference === "tags/failover" && entry.errorKind === "auth",
+    );
+
+    assert.ok(event, "no cooldown event for tags/failover");
+    assert.equal(event.subject, "credential");
+    assert.equal(event.providerName, "Dead");
+    assert.equal(event.modelAlias, "dead-model");
+    assert.equal(event.credentialName, "");
+  });
+
   await check("GET /v1/models and GET /api/tags list the tag in priority order", async () => {
     const response = await fetch(new URL("/v1/models", origin), { headers: bearer() });
     const models = v.parse(ModelListSchema, await response.json());
@@ -1374,7 +1401,7 @@ try {
     );
   });
 
-  await check("a streaming tag retries the failed model", async () => {
+  await check("a streaming tag skips a model whose credential is cooling down", async () => {
     const list = await getJson(tagPaths.list, TagListSchema, 200);
     const tag = list.tags.find((entry) => entry.slug === "failover");
 
@@ -1630,7 +1657,7 @@ try {
       200,
     );
 
-    assert.ok(tag.summary.requests >= 5, `tag filter saw ${tag.summary.requests} requests`);
+    assert.ok(tag.summary.requests >= 4, `tag filter saw ${tag.summary.requests} requests`);
     assert.deepEqual(tag.models.map((model) => model.model).sort(), ["dead-model", "fast"]);
 
     const narrowed = await getJson(

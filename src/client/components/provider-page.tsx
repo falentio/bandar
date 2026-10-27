@@ -22,6 +22,7 @@ import {
   GENERIC_PROVIDER_KINDS,
   PROVIDER_KIND_LABELS,
   type Provider,
+  type ProviderCredential,
   type ProviderKind,
   type ProviderModel,
   type ProviderModelRefresh,
@@ -177,11 +178,11 @@ export function ProviderPage({
               </TabsTrigger>
               <TabsTrigger value="api-key">
                 <KeyRoundIcon data-icon="inline-start" />
-                {provider.kind === "kilocode" ? "Connection" : "API key"}
+                Connection
                 {provider.hasKey ? (
                   <span
                     className="size-1.5 rounded-full bg-emerald-500"
-                    aria-label={provider.authMode === "oauth" ? "connection saved" : "key saved"}
+                    aria-label="credential saved"
                   />
                 ) : null}
               </TabsTrigger>
@@ -207,7 +208,7 @@ export function ProviderPage({
             </TabsContent>
 
             <TabsContent value="api-key">
-              <ApiKeyCard
+              <CredentialsCard
                 provider={provider}
                 onSaved={(updated) => {
                   providers.apply(updated);
@@ -303,7 +304,7 @@ function SettingsCard({
         <CardDescription>
           {builtIn
             ? "Built-in providers are defined in code. Their kind, name, and URL are fixed; the credential is on the Connection tab."
-            : "Name, wire kind, and base URL. Changing the kind or URL affects every model on this provider. The upstream key is on the API key tab."}
+            : "Name, wire kind, and base URL. Changing the kind or URL affects every model on this provider. Credentials are on the Connection tab."}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -447,7 +448,6 @@ function useProviderSettings(provider: Provider): Settings {
         slug: slug.trim(),
         kind,
         baseUrl: baseUrl.trim(),
-        apiKey: "",
       });
     } catch (saveError) {
       setError(isError(saveError) ? describeError(saveError) : String(saveError));
@@ -473,7 +473,7 @@ function useProviderSettings(provider: Provider): Settings {
   };
 }
 
-function ApiKeyCard({
+function CredentialsCard({
   provider,
   onSaved,
   onRemove,
@@ -482,46 +482,55 @@ function ApiKeyCard({
   onSaved: (provider: Provider) => void;
   onRemove: () => Promise<boolean>;
 }) {
+  const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [pending, setPending] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
 
-  const save = async (event: FormEvent<HTMLFormElement>) => {
+  const add = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setPending(true);
     setError(null);
-    setSaved(false);
 
     try {
-      const updated = await providerApi.update(provider.id, {
-        name: provider.name,
-        kind: provider.kind,
-        baseUrl: provider.baseUrl,
+      const updated = await providerApi.addCredential(provider.id, {
+        name: name.trim(),
         apiKey: apiKey.trim(),
       });
 
+      setName("");
       setApiKey("");
-      setSaved(true);
       onSaved(updated);
-    } catch (saveError) {
-      setError(isError(saveError) ? describeError(saveError) : String(saveError));
+    } catch (addError) {
+      setError(isError(addError) ? describeError(addError) : String(addError));
     } finally {
       setPending(false);
+    }
+  };
+
+  const removeCredential = async (credentialId: string) => {
+    setRemovingId(credentialId);
+    setError(null);
+
+    try {
+      onSaved(await providerApi.removeCredential(provider.id, credentialId));
+    } catch (removeError) {
+      setError(isError(removeError) ? describeError(removeError) : String(removeError));
+    } finally {
+      setRemovingId(null);
     }
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
-          {provider.kind === "kilocode" ? "Kilo Code connection" : "Upstream API key"}
-        </CardTitle>
+        <CardTitle>Connection</CardTitle>
         <CardDescription>
           {provider.kind === "kilocode"
-            ? "Connect a Kilo Code account with a device code, or use an API key instead."
-            : `The credential the gateway sends to ${PROVIDER_KIND_LABELS[provider.kind].toLowerCase()} when it calls this provider.`}
+            ? "Connect a Kilo Code account with a device code, or add API keys. Keys are tried in the order they were added."
+            : `The keys the gateway sends to ${PROVIDER_KIND_LABELS[provider.kind].toLowerCase()} when it calls this provider. Keys are tried in the order they were added.`}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -529,47 +538,61 @@ function ApiKeyCard({
           <ConnectFlow provider={provider} onConnected={onSaved} />
         ) : null}
 
-        <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
-          <KeyRoundIcon className="size-4 shrink-0 text-muted-foreground" />
-          {provider.hasKey ? (
-            <span>
-              {provider.authMode === "oauth" ? "A connection is saved." : "A key is saved."} The
-              credential is sealed with AES-GCM and never returned by the API, so it cannot be shown
-              again.
-            </span>
-          ) : (
-            <span className="text-muted-foreground">
-              {provider.kind === "kilocode"
-                ? "Not connected. Connect Kilo Code before calling this provider."
-                : "No key saved. Requests to this provider are sent without credentials."}
-            </span>
-          )}
-        </div>
+        {provider.credentials.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {provider.kind === "kilocode"
+              ? "Not connected. Connect Kilo Code or add a key before calling this provider."
+              : "No key saved. Requests to this provider are sent without credentials."}
+          </p>
+        ) : (
+          <ul className="divide-y rounded-lg border">
+            {provider.credentials.map((credential, index) => (
+              <CredentialRow
+                key={credential.id}
+                credential={credential}
+                fallbackName={`Key ${String(index + 1)}`}
+                pending={removingId !== null}
+                onRemove={() => void removeCredential(credential.id)}
+              />
+            ))}
+          </ul>
+        )}
 
         <form
-          onSubmit={save}
+          onSubmit={add}
           className={provider.kind === "kilocode" ? "grid gap-3 border-t pt-4" : "grid gap-3"}
         >
-          {provider.kind === "kilocode" ? (
-            <p className="text-xs text-muted-foreground">
-              Saving a key replaces the Kilo Code connection.
-            </p>
-          ) : null}
-          <div className="grid gap-2">
-            <Label htmlFor="api-key-value">{provider.hasKey ? "Replace key" : "Add key"}</Label>
-            <Input
-              id="api-key-value"
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={provider.hasKey ? "Paste a new key to replace it" : "sk-…"}
-              autoComplete="off"
-              maxLength={500}
-            />
-            <p className="text-xs text-muted-foreground">
-              Required by hosted upstreams. Leave empty for a local server that takes no key.
-            </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="credential-name">Name</Label>
+              <Input
+                id="credential-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Personal"
+                maxLength={60}
+                disabled={pending}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="credential-key">API key</Label>
+              <Input
+                id="credential-key"
+                type="password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder="sk-…"
+                autoComplete="off"
+                maxLength={500}
+                required
+                disabled={pending}
+              />
+            </div>
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            Sealed with AES-GCM before it reaches SQLite. It is never returned by the API.
+          </p>
 
           {error === null ? null : <p className="text-sm text-destructive">{error}</p>}
 
@@ -578,24 +601,18 @@ function ApiKeyCard({
               type="submit"
               size="sm"
               variant={provider.kind === "kilocode" ? "outline" : "default"}
-              disabled={pending || removing || apiKey.trim() === ""}
+              disabled={pending || apiKey.trim() === ""}
             >
-              {pending
-                ? "Saving…"
-                : provider.kind === "kilocode" && provider.authMode === "oauth"
-                  ? "Use API key instead"
-                  : provider.hasKey
-                    ? "Replace key"
-                    : "Save key"}
+              <PlusIcon data-icon="inline-start" />
+              {pending ? "Adding…" : "Add key"}
             </Button>
-            {saved ? <span className="text-xs text-muted-foreground">Saved.</span> : null}
           </div>
         </form>
 
         {provider.origin === "custom" ? (
           <div className="flex items-center justify-between gap-3 border-t pt-4">
             <p className="text-xs text-muted-foreground">
-              Removing a provider deletes its models. Requests stay in analytics.
+              Removing a provider deletes its models and credentials. Requests stay in analytics.
             </p>
             <Button
               type="button"
@@ -621,6 +638,56 @@ function ApiKeyCard({
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function CredentialRow({
+  credential,
+  fallbackName,
+  pending,
+  onRemove,
+}: {
+  credential: ProviderCredential;
+  fallbackName: string;
+  pending: boolean;
+  onRemove: () => void;
+}) {
+  const label = credential.name === "" ? fallbackName : credential.name;
+  const flaggedUntil = credential.flaggedUntil;
+
+  const coolingUntil =
+    flaggedUntil !== null && new Date(flaggedUntil).getTime() > Date.now() ? flaggedUntil : null;
+
+  return (
+    <li className="group/credential flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+      <KeyRoundIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="truncate font-medium">{label}</span>
+      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem]">
+        {credential.authMode === "oauth" ? "OAuth" : "API key"}
+      </span>
+      {coolingUntil === null ? (
+        credential.failures === 0 ? null : (
+          <span className="text-xs text-muted-foreground">
+            {credential.failures} recent {credential.failures === 1 ? "failure" : "failures"}
+          </span>
+        )
+      ) : (
+        <span className="text-xs text-destructive">
+          cooling down until {formatWhen(coolingUntil)}
+        </span>
+      )}
+      <button
+        type="button"
+        aria-label={`Remove ${label}`}
+        disabled={pending}
+        onClick={() => {
+          if (window.confirm(`Remove ${label}?`)) onRemove();
+        }}
+        className="ms-auto rounded p-1 text-muted-foreground opacity-0 transition-[opacity,background-color,transform] duration-150 ease-out group-hover/credential:opacity-100 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
+      >
+        <TrashIcon className="size-3.5" />
+      </button>
+    </li>
   );
 }
 

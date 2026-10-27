@@ -154,7 +154,13 @@ function ProviderRow({ provider }: { provider: Provider }) {
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{provider.name}</span>
-            {provider.hasKey ? null : (
+            {provider.hasKey ? (
+              everyCoolingDown(provider) ? (
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
+                  cooling down
+                </span>
+              ) : null
+            ) : (
               <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[0.7rem] text-destructive">
                 {provider.origin === "builtin" ? "not connected" : "no key"}
               </span>
@@ -171,6 +177,17 @@ function ProviderRow({ provider }: { provider: Provider }) {
         <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-hover/row:translate-x-0.5" />
       </Link>
     </li>
+  );
+}
+
+function everyCoolingDown(provider: Provider): boolean {
+  if (provider.credentials.length === 0) return false;
+
+  const now = Date.now();
+
+  return provider.credentials.every(
+    (credential) =>
+      credential.flaggedUntil !== null && new Date(credential.flaggedUntil).getTime() > now,
   );
 }
 

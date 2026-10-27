@@ -33,7 +33,7 @@ export function ErrorsPanel() {
         <CardContent>
           {cooldowns.status === "loading" ? (
             <p className="text-sm text-muted-foreground">Loading cooldown events…</p>
-          ) : cooldowns.events.length === 0 ? (
+          ) : cooldowns.status === "error" ? null : cooldowns.events.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No cooldown events yet. A failing credential, provider, or model shows up here.
             </p>

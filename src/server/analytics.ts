@@ -98,21 +98,16 @@ export type RequestEvent = {
 
 export type RequestList = { readonly requests: readonly RequestEvent[] };
 
-type FilterColumn = {
-  readonly column: string;
-  readonly encode: (value: string) => string;
-};
-
 type FilterClause = {
   readonly clauses: readonly string[];
   readonly params: readonly SqlValue[];
 };
 
-const FILTER_COLUMNS: Record<AnalyticsFilterDimension, FilterColumn> = {
-  providerKind: { column: "provider_kind", encode: sameValue },
-  providerId: { column: "provider_id", encode: sameValue },
-  model: { column: "model", encode: sameValue },
-  tag: { column: "reference", encode: tagRefOf },
+const FILTER_COLUMNS: Record<AnalyticsFilterDimension, string> = {
+  providerKind: "provider_kind",
+  providerId: "provider_id",
+  model: "model",
+  tag: "reference",
 };
 
 export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
@@ -146,6 +141,7 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
   const outputTokens = number(summary, "output_tokens");
   const totalTokens = inputTokens + outputTokens;
 
+  // The clauses belong in the join condition: in WHERE they would drop the empty days.
   const daily = db.query(
     `WITH days AS (
        SELECT CAST(day AS DATE) AS day
@@ -311,22 +307,17 @@ function filterClause(filters: AnalyticsFilters): FilterClause {
 
     if (values.length === 0) continue;
 
-    const filter = FILTER_COLUMNS[dimension];
     const placeholders: string[] = [];
 
     for (const value of values) {
       placeholders.push("?");
-      params.push(sqlText(filter.encode(value)));
+      params.push(sqlText(dimension === "tag" ? tagRefOf(value) : value));
     }
 
-    clauses.push(`${filter.column} IN (${placeholders.join(", ")})`);
+    clauses.push(`${FILTER_COLUMNS[dimension]} IN (${placeholders.join(", ")})`);
   }
 
   return { clauses, params };
-}
-
-function sameValue(value: string): string {
-  return value;
 }
 
 function providerParam(value: string | null): SqlValue {

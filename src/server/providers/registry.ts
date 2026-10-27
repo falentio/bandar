@@ -5,6 +5,7 @@ import { google } from "./google";
 import { hyper } from "./hyper";
 import { kilocode } from "./kilocode";
 import { nous } from "./nous";
+import { opencode } from "./opencode";
 import { openai } from "./openai";
 import { river } from "./river";
 import { tokenharbor } from "./tokenharbor";
@@ -29,6 +30,7 @@ const builtInDefinitions = {
   river,
   nous,
   hyper,
+  opencode,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {

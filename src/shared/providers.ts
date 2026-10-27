@@ -13,6 +13,7 @@ export const BUILT_IN_PROVIDER_KINDS = [
   "river",
   "nous",
   "hyper",
+  "opencode",
 ] as const;
 
 export const PROVIDER_KINDS = [...GENERIC_PROVIDER_KINDS, ...BUILT_IN_PROVIDER_KINDS] as const;
@@ -59,6 +60,12 @@ export const BUILT_IN_PROVIDERS = {
     name: "Hyper",
     slug: "hyper",
     baseUrl: "https://hyper.charm.land/v1",
+  },
+  opencode: {
+    kind: "opencode",
+    name: "OpenCode Go",
+    slug: "opencode",
+    baseUrl: "https://opencode.ai/inference",
   },
 } satisfies Record<
   BuiltInProviderKind,
@@ -235,6 +242,7 @@ export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
   river: "River",
   nous: "Nous Portal",
   hyper: "Hyper",
+  opencode: "OpenCode Go",
 };
 
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;

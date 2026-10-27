@@ -1,8 +1,8 @@
-/** An env-pinned origin carrying the provider's `/v1` path, or the default base URL. */
-export function apiBaseUrl(name: string, fallback: string): string {
+/** An env-pinned origin carrying the provider's API path, or the default base URL. */
+export function apiBaseUrl(name: string, fallback: string, mount = "/v1"): string {
   const origin = originOf(name);
 
-  return origin === null ? fallback : `${origin}/v1`;
+  return origin === null ? fallback : `${origin}${mount}`;
 }
 
 /** An env-pinned origin for a provider's non-API surface, such as its login portal. */

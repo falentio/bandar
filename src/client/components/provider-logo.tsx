@@ -42,4 +42,6 @@ const LOGO_PATHS: Record<ProviderKind, string> = {
   nous: "M4 20V4h2.9l10.2 11.6V4H20v16h-2.9L6.9 8.4V20z",
   // Hyper's mark is a lightning bolt.
   hyper: "M13.5 2 4 13.6h5.8L10.5 22 20 10.4h-5.8z",
+  // OpenCode's mark is its square frame with a smaller square knocked out.
+  opencode: "M18 19.5H6V4.5h12v15Zm-3-12H9v9h6v-9Z",
 };

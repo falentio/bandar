@@ -108,6 +108,7 @@ type NousState = {
 };
 
 const nousState: NousState = { deviceStarts: 0, polls: 0, refreshToken: "rt-1", presented: [] };
+const opencodeState = { requests: 0 };
 const builtIns = startBuiltIns();
 const builtInsOrigin = `http://127.0.0.1:${builtIns.port}`;
 
@@ -121,6 +122,7 @@ const yetaProvider: ProviderSlot = { provider: null, modelId: "" };
 const riverProvider: ProviderSlot = { provider: null, modelId: "" };
 const nousProvider: ProviderSlot = { provider: null, modelId: "" };
 const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
+const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -178,7 +180,7 @@ try {
 
     assert.deepEqual(
       builtIn.map((provider) => provider.kind),
-      ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper"],
+      ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper", "opencode"],
     );
 
     const byKind = new Map(builtIn.map((provider) => [provider.kind, provider]));
@@ -244,12 +246,23 @@ try {
     assert.deepEqual(hyper.authModes, ["api-key"]);
     assert.equal(hyper.hasCatalog, true);
 
+    const opencode = byKind.get("opencode");
+
+    if (opencode === undefined) throw new Error("the built-in OpenCode Go provider is missing");
+
+    assert.equal(opencode.name, "OpenCode Go");
+    assert.equal(opencode.slug, "opencode");
+    assert.equal(opencode.baseUrl, `${builtInsOrigin}/opencode/inference`);
+    assert.deepEqual(opencode.authModes, ["api-key"]);
+    assert.equal(opencode.hasCatalog, true);
+
     kiloProvider.provider = kilo;
     tokenharborProvider.provider = harbor;
     yetaProvider.provider = yeta;
     riverProvider.provider = river;
     nousProvider.provider = nous;
     hyperProvider.provider = hyper;
+    opencodeProvider.provider = opencode;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -335,7 +348,7 @@ try {
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 6);
+    assert.equal(builtIn.length, 7);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -933,6 +946,91 @@ try {
     assert.equal(body.choices[0]?.message.content, "Hello from Hyper");
     assert.equal(body.usage?.prompt_tokens, 3);
     assert.equal(body.usage?.completion_tokens, 4);
+  });
+
+  await check("OpenCode Go imports its catalog before a key and drops the dark ids", async () => {
+    const id = opencodeProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 3);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.credentials, []);
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "claude-haiku-5-5",
+      "gemini-4-argon",
+      "glm-5.3",
+    ]);
+
+    const glm = detail.provider.models.find((model) => model.alias === "glm-5.3");
+    const gemini = detail.provider.models.find((model) => model.alias === "gemini-4-argon");
+
+    assert.equal(glm?.inputPricePerMtok, 1.4);
+    assert.equal(glm?.outputPricePerMtok, 4.4);
+    assert.equal(gemini?.inputPricePerMtok, null);
+    assert.equal(gemini?.outputPricePerMtok, null);
+  });
+
+  await check("OpenCode Go answers chat on each wire with one bearer", async () => {
+    const id = opencodeProvider.provider?.id ?? "";
+
+    await postJson(providerPaths.credentials(id), { apiKey: "opencode_test" }, ProviderSchema, 201);
+
+    const openai = await chatRequest("glm-5.3", false);
+
+    assert.equal(openai.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await openai.json()).choices[0]?.message.content,
+      "Hello from OpenCode OpenAI",
+    );
+
+    const anthropic = await chatRequest("claude-haiku-5-5", false);
+
+    assert.equal(anthropic.status, 200);
+
+    const anthropicBody = v.parse(CompletionSchema, await anthropic.json());
+
+    assert.equal(anthropicBody.choices[0]?.message.content, "Hello from OpenCode Anthropic");
+    assert.equal(anthropicBody.usage?.prompt_tokens, 5);
+    assert.equal(anthropicBody.usage?.completion_tokens, 3);
+
+    const google = await chatRequest("gemini-4-argon", false);
+
+    assert.equal(google.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await google.json()).choices[0]?.message.content,
+      "Hello from OpenCode Google",
+    );
+  });
+
+  await check("a hand-added responses model is a 400 before any request", async () => {
+    const id = opencodeProvider.provider?.id ?? "";
+
+    await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "gpt-6-luna", alias: "luna-gap" },
+      ProviderSchema,
+      201,
+    );
+
+    const before = opencodeState.requests;
+    const response = await chatRequest("luna-gap", false);
+
+    assert.equal(response.status, 400);
+
+    const error = await openAiError(response);
+
+    assert.equal(error.code, "invalid_request");
+    assert.match(error.message, /gpt-6-luna/);
+    assert.match(error.message, /responses/);
+    assert.equal(opencodeState.requests, before);
   });
 
   await check("the Nous Portal device login returns a code and connects", async () => {
@@ -1876,7 +1974,7 @@ try {
         .filter((provider) => provider.origin === "builtin")
         .map((provider) => provider.kind)
         .sort(),
-      ["hyper", "kilocode", "nous", "river", "tokenharbor", "yeta"],
+      ["hyper", "kilocode", "nous", "opencode", "river", "tokenharbor", "yeta"],
       "a built-in provider was seeded twice",
     );
   });
@@ -1938,6 +2036,7 @@ async function boot(port = 0): Promise<Booted> {
       BANDAR_RIVER_PRICING_URL: `${builtInsOrigin}/river/pricing`,
       BANDAR_NOUS_API: `${builtInsOrigin}/nous`,
       BANDAR_HYPER_API: `${builtInsOrigin}/hyper`,
+      BANDAR_OPENCODE_API: `${builtInsOrigin}/opencode`,
       BANDAR_NOUS_PORTAL: `${builtInsOrigin}/portal`,
     },
     stdout: "pipe",
@@ -2436,6 +2535,8 @@ function startBuiltIns() {
       const url = new URL(request.url);
       const authorization = request.headers.get("authorization") ?? "";
 
+      if (url.pathname.startsWith("/opencode/")) opencodeState.requests += 1;
+
       if (url.pathname === "/tokenharbor/v1/models") {
         if (authorization !== "Bearer thk_test") return jsonError(401, "bad token harbor key");
 
@@ -2575,6 +2676,78 @@ function startBuiltIns() {
             },
           ],
           usage: { prompt_tokens: 3, completion_tokens: 4 },
+        });
+      }
+
+      if (url.pathname === "/opencode/inference/go/v1/models") {
+        if (authorization !== "") return jsonError(401, "the opencode go catalog is public");
+
+        return Response.json({
+          object: "list",
+          data: [
+            { id: "glm-5.3" },
+            { id: "claude-haiku-5-5" },
+            { id: "gemini-4-argon" },
+            { id: "gpt-6-luna" },
+            { id: "omen-alpha" },
+            { id: "not-a-go-model" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/opencode/inference/go/openai/v1/chat/completions") {
+        if (authorization !== "Bearer opencode_test") return jsonError(401, "bad opencode key");
+
+        if (request.headers.has("x-api-key") || request.headers.has("x-goog-api-key")) {
+          return jsonError(401, "opencode go takes one bearer");
+        }
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from OpenCode OpenAI" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 8, completion_tokens: 2 },
+        });
+      }
+
+      if (url.pathname === "/opencode/inference/go/anthropic/v1/messages") {
+        if (authorization !== "Bearer opencode_test") return jsonError(401, "bad opencode key");
+
+        if (request.headers.get("anthropic-version") !== "2023-06-01") {
+          return jsonError(400, "opencode go messages needs the version header");
+        }
+
+        if (request.headers.has("x-api-key")) return jsonError(401, "opencode go takes one bearer");
+
+        return Response.json({
+          content: [{ type: "text", text: "Hello from OpenCode Anthropic" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 5, output_tokens: 3 },
+        });
+      }
+
+      if (url.pathname.includes("/opencode/inference/go/google/v1beta/models/")) {
+        if (authorization !== "Bearer opencode_test") return jsonError(401, "bad opencode key");
+
+        if (request.headers.has("x-goog-api-key")) {
+          return jsonError(401, "opencode go takes one bearer");
+        }
+
+        if (!url.pathname.endsWith(":generateContent")) {
+          return jsonError(404, `no fake opencode google route for ${url.pathname}`);
+        }
+
+        return Response.json({
+          candidates: [
+            {
+              content: { parts: [{ text: "Hello from OpenCode Google" }] },
+              finishReason: "STOP",
+            },
+          ],
+          usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2 },
         });
       }
 

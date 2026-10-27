@@ -65,6 +65,7 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   river: BUILT_IN_PROVIDERS.river.baseUrl,
   nous: BUILT_IN_PROVIDERS.nous.baseUrl,
   hyper: BUILT_IN_PROVIDERS.hyper.baseUrl,
+  opencode: BUILT_IN_PROVIDERS.opencode.baseUrl,
 };
 
 function credentialsTabName(authModes: readonly ProviderAuthMode[]): string {

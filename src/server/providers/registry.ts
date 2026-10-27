@@ -2,6 +2,7 @@ import { BUILT_IN_PROVIDER_KINDS, type ProviderKind } from "../../shared/provide
 import { TAG_SLUG } from "../../shared/slugs";
 import { anthropic } from "./anthropic";
 import { google } from "./google";
+import { hyper } from "./hyper";
 import { kilocode } from "./kilocode";
 import { nous } from "./nous";
 import { openai } from "./openai";
@@ -27,6 +28,7 @@ const builtInDefinitions = {
   yeta,
   river,
   nous,
+  hyper,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {

@@ -120,6 +120,7 @@ const tokenharborProvider: ProviderSlot = { provider: null, modelId: "" };
 const yetaProvider: ProviderSlot = { provider: null, modelId: "" };
 const riverProvider: ProviderSlot = { provider: null, modelId: "" };
 const nousProvider: ProviderSlot = { provider: null, modelId: "" };
+const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -177,7 +178,7 @@ try {
 
     assert.deepEqual(
       builtIn.map((provider) => provider.kind),
-      ["kilocode", "tokenharbor", "yeta", "river", "nous"],
+      ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper"],
     );
 
     const byKind = new Map(builtIn.map((provider) => [provider.kind, provider]));
@@ -233,11 +234,22 @@ try {
     assert.deepEqual(nous.authModes, ["oauth"]);
     assert.equal(nous.hasCatalog, true);
 
+    const hyper = byKind.get("hyper");
+
+    if (hyper === undefined) throw new Error("the built-in Hyper provider is missing");
+
+    assert.equal(hyper.name, "Hyper");
+    assert.equal(hyper.slug, "hyper");
+    assert.equal(hyper.baseUrl, `${builtInsOrigin}/hyper/v1`);
+    assert.deepEqual(hyper.authModes, ["api-key"]);
+    assert.equal(hyper.hasCatalog, true);
+
     kiloProvider.provider = kilo;
     tokenharborProvider.provider = harbor;
     yetaProvider.provider = yeta;
     riverProvider.provider = river;
     nousProvider.provider = nous;
+    hyperProvider.provider = hyper;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -323,7 +335,7 @@ try {
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 5);
+    assert.equal(builtIn.length, 6);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -876,6 +888,51 @@ try {
     assert.equal(body.choices[0]?.message.content, "Hello from River");
     assert.equal(body.usage?.prompt_tokens, 4);
     assert.equal(body.usage?.completion_tokens, 3);
+  });
+
+  await check("Hyper imports its public catalog before a key and answers chat", async () => {
+    const id = hyperProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 3);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.credentials, []);
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "hyper-noted",
+      "hyper-prism",
+      "hyper-unpriced",
+    ]);
+
+    const prism = detail.provider.models.find((model) => model.alias === "hyper-prism");
+    const noted = detail.provider.models.find((model) => model.alias === "hyper-noted");
+    const unpriced = detail.provider.models.find((model) => model.alias === "hyper-unpriced");
+
+    assert.equal(prism?.inputPricePerMtok, 2.5);
+    assert.equal(prism?.outputPricePerMtok, 6);
+    assert.equal(noted?.inputPricePerMtok, 0.834);
+    assert.equal(noted?.outputPricePerMtok, 2.501);
+    assert.equal(unpriced?.inputPricePerMtok, null);
+    assert.equal(unpriced?.outputPricePerMtok, null);
+
+    await postJson(providerPaths.credentials(id), { apiKey: "hyper_test" }, ProviderSchema, 201);
+
+    const response = await chatRequest("hyper-prism", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Hyper");
+    assert.equal(body.usage?.prompt_tokens, 3);
+    assert.equal(body.usage?.completion_tokens, 4);
   });
 
   await check("the Nous Portal device login returns a code and connects", async () => {
@@ -1819,7 +1876,7 @@ try {
         .filter((provider) => provider.origin === "builtin")
         .map((provider) => provider.kind)
         .sort(),
-      ["kilocode", "nous", "river", "tokenharbor", "yeta"],
+      ["hyper", "kilocode", "nous", "river", "tokenharbor", "yeta"],
       "a built-in provider was seeded twice",
     );
   });
@@ -1880,6 +1937,7 @@ async function boot(port = 0): Promise<Booted> {
       BANDAR_RIVER_API: `${builtInsOrigin}/river`,
       BANDAR_RIVER_PRICING_URL: `${builtInsOrigin}/river/pricing`,
       BANDAR_NOUS_API: `${builtInsOrigin}/nous`,
+      BANDAR_HYPER_API: `${builtInsOrigin}/hyper`,
       BANDAR_NOUS_PORTAL: `${builtInsOrigin}/portal`,
     },
     stdout: "pipe",
@@ -2486,6 +2544,37 @@ function startBuiltIns() {
             },
           ],
           usage: { prompt_tokens: 4, completion_tokens: 3 },
+        });
+      }
+
+      if (url.pathname === "/hyper/v1/models") {
+        if (authorization !== "") return jsonError(401, "the hyper catalog is public");
+
+        return Response.json({
+          object: "list",
+          data: [
+            {
+              id: "hyper-prism",
+              display_name: "Prism",
+              pricing: { input: 2.5, output: 6, cache_create: 3, cache_hit: 0.5 },
+            },
+            { id: "hyper-noted", pricing: { input: "0.834", output: "2.501" } },
+            { id: "hyper-unpriced" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/hyper/v1/chat/completions") {
+        if (authorization !== "Bearer hyper_test") return jsonError(401, "bad hyper key");
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from Hyper" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 3, completion_tokens: 4 },
         });
       }
 

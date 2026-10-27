@@ -12,6 +12,7 @@ export const BUILT_IN_PROVIDER_KINDS = [
   "yeta",
   "river",
   "nous",
+  "hyper",
 ] as const;
 
 export const PROVIDER_KINDS = [...GENERIC_PROVIDER_KINDS, ...BUILT_IN_PROVIDER_KINDS] as const;
@@ -52,6 +53,12 @@ export const BUILT_IN_PROVIDERS = {
     name: "Nous Portal",
     slug: "nous",
     baseUrl: "https://inference-api.nousresearch.com/v1",
+  },
+  hyper: {
+    kind: "hyper",
+    name: "Hyper",
+    slug: "hyper",
+    baseUrl: "https://hyper.charm.land/v1",
   },
 } satisfies Record<
   BuiltInProviderKind,
@@ -227,6 +234,7 @@ export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
   yeta: "Yeta",
   river: "River",
   nous: "Nous Portal",
+  hyper: "Hyper",
 };
 
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;

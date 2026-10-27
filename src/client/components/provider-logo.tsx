@@ -40,4 +40,6 @@ const LOGO_PATHS: Record<ProviderKind, string> = {
     "M2 6c1.8-2.4 3.6-2.4 5.4 0s3.6 2.4 5.4 0 3.6-2.4 5.4 0 2.6 2.2 3.8 1.8V10.5H2zM2 14c1.8-2.4 3.6-2.4 5.4 0s3.6 2.4 5.4 0 3.6-2.4 5.4 0 2.6 2.2 3.8 1.8V18.5H2z",
   // Nous Portal's mark is an N.
   nous: "M4 20V4h2.9l10.2 11.6V4H20v16h-2.9L6.9 8.4V20z",
+  // Hyper's mark is a lightning bolt.
+  hyper: "M13.5 2 4 13.6h5.8L10.5 22 20 10.4h-5.8z",
 };

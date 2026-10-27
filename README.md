@@ -567,10 +567,10 @@ yet.
   analytics file. SQLite is WAL, DuckDB is not multi-process-writer.
 - **Single process.** DuckDB FFI is synchronous. Move slow scans to a worker or a
   pre-aggregated table before the history gets large.
-- **Ordering is the only fallback.** A tag walks its models in order, and each
-  model walks its provider's credentials in order. An alias still maps to one
-  model. There is no health check and no cool-down: a rate-limited key is tried
-  again the next time it reaches the front of the chain.
+- **Ordering, then cooldowns.** A tag walks its models in order, and each model
+  walks its provider's credentials in order. An alias still maps to one model. A
+  subject that fails retryably is skipped while it cools down. See
+  [Cooldowns](#cooldowns).
 - **OAuth refresh stops at Nous Portal.** Kilo Code stores its device token as
   issued; reconnect when it expires. Nous Portal rotates its token on the request
   path, from one process only. If the process dies after the portal rotates the

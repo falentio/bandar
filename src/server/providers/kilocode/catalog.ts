@@ -1,6 +1,7 @@
 import * as v from "valibot";
+import { fromPerToken } from "../catalog";
 import { UpstreamError } from "../types";
-import type { ModelCatalogEntry } from "../types";
+import type { CatalogRequest, ModelCatalogEntry } from "../types";
 
 const KILO_MODELS_URL = "https://api.kilo.ai/api/gateway/models";
 
@@ -22,9 +23,9 @@ const KiloCatalogSchema = v.object({
   ),
 });
 
-export async function fetchKilocodeCatalog(
-  signal: AbortSignal,
-): Promise<readonly ModelCatalogEntry[]> {
+export async function fetchKilocodeCatalog({
+  signal,
+}: CatalogRequest): Promise<readonly ModelCatalogEntry[]> {
   const url = Bun.env.BANDAR_KILOCODE_MODELS_URL ?? KILO_MODELS_URL;
 
   const response = await fetch(url, { signal }).catch((error: Error) => {
@@ -60,8 +61,8 @@ export async function fetchKilocodeCatalog(
       {
         upstreamModel: model.id,
         alias,
-        inputPricePerMtok: pricePerMtok(model.pricing?.prompt),
-        outputPricePerMtok: pricePerMtok(model.pricing?.completion),
+        inputPricePerMtok: fromPerToken(model.pricing?.prompt),
+        outputPricePerMtok: fromPerToken(model.pricing?.completion),
       },
     ];
   });
@@ -69,15 +70,4 @@ export async function fetchKilocodeCatalog(
 
 function aliasFor(upstreamModel: string): string {
   return upstreamModel.replace(/:free$/, "");
-}
-
-function pricePerMtok(value: string | number | undefined): number | null {
-  if (value === undefined) return null;
-
-  const perToken = Number(value);
-
-  // Kilo reports `-1` for a model it routes dynamically, and 0 for a free one.
-  if (!Number.isFinite(perToken) || perToken < 0) return null;
-
-  return perToken * 1_000_000;
 }

@@ -177,7 +177,7 @@ export function ProviderPage({
               </TabsTrigger>
               <TabsTrigger value="credentials">
                 <KeyRoundIcon data-icon="inline-start" />
-                {provider.kind === "kilocode" ? "Connection" : "Credentials"}
+                {provider.authModes.includes("oauth") ? "Connection" : "Credentials"}
                 {provider.credentials.length === 0 ? null : (
                   <span
                     className="size-1.5 rounded-full bg-emerald-500"
@@ -513,7 +513,7 @@ function ModelsCard({
             to reach a model directly.
           </CardDescription>
         </div>
-        {provider.kind === "kilocode" ? (
+        {provider.hasCatalog ? (
           <Button
             type="button"
             variant="outline"

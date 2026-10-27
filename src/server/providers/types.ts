@@ -82,7 +82,13 @@ export type ModelCatalogEntry = {
   readonly outputPricePerMtok: number | null;
 };
 
-export type ProviderCatalog = (signal: AbortSignal) => Promise<readonly ModelCatalogEntry[]>;
+export type CatalogRequest = {
+  readonly baseUrl: string;
+  readonly credential: Credential | null;
+  readonly signal: AbortSignal;
+};
+
+export type ProviderCatalog = (request: CatalogRequest) => Promise<readonly ModelCatalogEntry[]>;
 
 export type DeviceLogin = {
   readonly code: string;

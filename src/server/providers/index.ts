@@ -121,6 +121,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       origin: row.origin,
       baseUrl: row.baseUrl,
       authModes: [...definitionFor(row.kind).authModes],
+      hasCatalog: definitionFor(row.kind).catalog !== undefined,
       credentials: credentials.get(row.id) ?? [],
       models: grouped.get(row.id) ?? [],
       createdAt: row.createdAt.toISOString(),
@@ -355,6 +356,23 @@ export async function removeProvider(
 
 export function sealApiKey(deps: ProviderDeps, apiKey: string): Promise<string> {
   return deps.sealer.seal(JSON.stringify({ authMode: "api-key", apiKey } satisfies Credential));
+}
+
+/** The credential the chain tries first, or null when the provider has none. */
+export async function readFirstCredential(
+  deps: ProviderDeps,
+  providerId: string,
+): Promise<Credential | null> {
+  const row = await deps.db
+    .select({ credential: providerCredentials.credential })
+    .from(providerCredentials)
+    .where(eq(providerCredentials.providerId, providerId))
+    .orderBy(asc(providerCredentials.priority))
+    .limit(1);
+
+  const sealed = row[0]?.credential;
+
+  return sealed === undefined ? null : readCredential(deps, sealed);
 }
 
 export async function readCredential(deps: ProviderDeps, sealed: string): Promise<Credential> {

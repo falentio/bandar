@@ -38,6 +38,7 @@ import {
   definitionFor,
   syncProviderModels,
   listProviders,
+  readFirstCredential,
   readProvider,
   removeProvider,
   removeProviderModel,
@@ -418,7 +419,12 @@ export function createApi(deps: ApiDeps) {
         return failure("unsupported", `${provider.kind} has no model catalog to refresh`);
       }
 
-      const models = await catalog(request.signal);
+      const models = await catalog({
+        baseUrl: provider.baseUrl,
+        credential: await readFirstCredential(deps.providers, id),
+        signal: request.signal,
+      });
+
       const before = provider.models.length;
       const updated = await syncProviderModels(deps.providers, caller.userId, id, models);
 

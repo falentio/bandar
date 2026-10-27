@@ -167,6 +167,7 @@ try {
     assert.equal(builtIn.slug, "kilo");
     assert.equal(builtIn.baseUrl, `${kilocodeOrigin}/api/openrouter`);
     assert.deepEqual(builtIn.authModes, ["api-key", "oauth"]);
+    assert.equal(builtIn.hasCatalog, true);
     assert.deepEqual(builtIn.credentials, []);
     assert.deepEqual(builtIn.models, []);
 
@@ -609,6 +610,7 @@ try {
 
     assert.equal((await post(providerPaths.oauthStart(id), {})).status, 400);
     assert.equal((await post(providerPaths.refreshModels(id), {})).status, 400);
+    assert.equal(openaiProvider.provider?.hasCatalog, false);
   });
 
   await check("POST /api/providers/:id/models/refresh imports the catalog once", async () => {

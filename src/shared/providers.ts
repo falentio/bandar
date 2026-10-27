@@ -67,6 +67,7 @@ export const ProviderSchema = v.object({
   origin: ProviderOriginSchema,
   baseUrl: v.string(),
   authModes: v.array(ProviderAuthModeSchema),
+  hasCatalog: v.boolean(),
   credentials: v.array(ProviderCredentialSchema),
   models: v.array(ProviderModelSchema),
   createdAt: v.string(),

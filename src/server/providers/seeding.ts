@@ -5,7 +5,6 @@ import type { Db } from "../db/client";
 import { providers } from "../db/schema";
 import { builtInProviders, definitionFor, reservedProviderSlugs } from "./registry";
 
-/** Gives every account a row for each built-in kind it is missing. */
 export async function ensureBuiltInProviders(db: Db, userId: string): Promise<void> {
   const rows = await db
     .select({
@@ -48,7 +47,6 @@ export async function ensureBuiltInProviders(db: Db, userId: string): Promise<vo
   }
 }
 
-/** Fills the slug of every provider written before slugs existed. */
 export async function assignProviderSlugs(db: Db): Promise<number> {
   const rows = await db
     .select({

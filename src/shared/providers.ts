@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { ProviderUsageSchema } from "./analytics";
-import { SlugSchema, TAG_REF_PREFIX } from "./slugs";
+import { SlugSchema, TAG_REF_PREFIX, TAG_SLUG } from "./slugs";
 
 // Generic wires are the kinds a user can add as a custom provider.
 export const GENERIC_PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
@@ -35,9 +35,8 @@ export const BUILT_IN_PROVIDERS = {
   }
 >;
 
-// `tags/` is the reference namespace, so no provider may claim it.
 export const RESERVED_PROVIDER_SLUGS: ReadonlySet<string> = new Set([
-  "tags",
+  TAG_SLUG,
   ...BUILT_IN_PROVIDER_KINDS.map((kind) => BUILT_IN_PROVIDERS[kind].slug),
 ]);
 

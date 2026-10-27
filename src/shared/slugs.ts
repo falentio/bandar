@@ -2,6 +2,8 @@ import * as v from "valibot";
 
 export const TAG_REF_PREFIX = "tags/";
 
+export const TAG_SLUG = TAG_REF_PREFIX.slice(0, -1);
+
 export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const MAX_SLUG_LENGTH = 40;

@@ -116,7 +116,9 @@ export const cooldownEvents = sqliteTable(
   "cooldown_events",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
     subject: text("subject").$type<CooldownSubject>().notNull(),
     subjectName: text("subject_name").notNull(),
     providerId: text("provider_id").notNull(),

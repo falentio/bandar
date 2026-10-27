@@ -8,7 +8,7 @@ import { addProviderCredential } from "./credentials";
 import { user } from "./db/auth-schema";
 import { openDatabase, type DatabaseHandle } from "./db/client";
 import { applyMigrations, type Migration } from "./db/migrate";
-import { providerCredentials } from "./db/schema";
+import { cooldownEvents, providerCredentials } from "./db/schema";
 import {
   COOLDOWN_HISTORY_LIMIT,
   recordFailure,
@@ -89,6 +89,16 @@ describe("cooldown history", () => {
     expect(mineList.events[0]?.providerId).toBe(mine.providerId);
     expect(otherList.events).toHaveLength(1);
     expect(otherList.events[0]?.providerId).toBe(other.providerId);
+  });
+
+  test("drops a user's history when the user is deleted", async () => {
+    const handle = freshDb();
+    const seeded = await seedCredential(handle, "user-1");
+
+    recordFailure(handle.db, failureOf(seeded, new Date("2026-01-01T00:00:00.000Z")));
+    handle.db.delete(user).where(eq(user.id, "user-1")).run();
+
+    expect(handle.db.select().from(cooldownEvents).all()).toHaveLength(0);
   });
 
   test("keeps at most 500 rows per user", async () => {

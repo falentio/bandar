@@ -19,35 +19,49 @@ export async function readModelIds(request: CatalogRequest): Promise<readonly st
     throw new UpstreamError("add a key before importing the catalog", "invalid_request");
   }
 
-  return readIds(request, { authorization: `Bearer ${secretOf(credential)}` });
-}
-
-/** A catalog anyone may read. Never touches `request.credential`. */
-export async function readPublicModelIds(request: CatalogRequest): Promise<readonly string[]> {
-  return readIds(request, {});
-}
-
-async function readIds(request: CatalogRequest, headers: WireHeaders): Promise<readonly string[]> {
-  const response = await fetch(joinUrl(request.baseUrl, "models"), {
-    headers,
-    signal: request.signal,
-  }).catch((error: Error) => {
-    throw new UpstreamError(`could not read the model catalog: ${error.message}`, "network");
+  const response = await readModelResponse(request, {
+    authorization: "Bearer " + secretOf(credential),
   });
-
-  if (!response.ok) {
-    throw new UpstreamError(
-      `could not read the model catalog (${response.status})`,
-      "unavailable",
-      response.status,
-    );
-  }
 
   const parsed = v.safeParse(ModelIdsSchema, await response.json().catch(() => null));
 
   if (!parsed.success) throw new UpstreamError("the model catalog is not readable", "protocol");
 
   return [...new Set(parsed.output.data.map((model) => model.id))];
+}
+
+/** A catalog anyone may read. Never touches `request.credential`. */
+export async function readPublicModelIds(request: CatalogRequest): Promise<readonly string[]> {
+  const response = await readPublicModelResponse(request);
+  const parsed = v.safeParse(ModelIdsSchema, await response.json().catch(() => null));
+
+  if (!parsed.success) throw new UpstreamError("the model catalog is not readable", "protocol");
+
+  return [...new Set(parsed.output.data.map((model) => model.id))];
+}
+
+/** A public catalog response, for a provider whose list carries more than ids. */
+export async function readPublicModelResponse(request: CatalogRequest): Promise<Response> {
+  return readModelResponse(request, {});
+}
+
+async function readModelResponse(request: CatalogRequest, headers: WireHeaders): Promise<Response> {
+  const response = await fetch(joinUrl(request.baseUrl, "models"), {
+    headers,
+    signal: request.signal,
+  }).catch((error: Error) => {
+    throw new UpstreamError("could not read the model catalog: " + error.message, "network");
+  });
+
+  if (!response.ok) {
+    throw new UpstreamError(
+      "could not read the model catalog (" + response.status + ")",
+      "unavailable",
+      response.status,
+    );
+  }
+
+  return response;
 }
 
 export function entryOf(upstreamModel: string, prices: ModelPrices = NO_PRICE): ModelCatalogEntry {

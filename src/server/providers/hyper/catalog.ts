@@ -1,12 +1,10 @@
 import * as v from "valibot";
-import { entryOf, fromPerMtok } from "../catalog";
-import { joinUrl } from "../http";
+import { entryOf, fromPerMtok, readPublicModelResponse } from "../catalog";
 import type { CatalogRequest, ModelCatalogEntry } from "../types";
 import { UpstreamError } from "../types";
 
 const AmountSchema = v.union([v.number(), v.string()]);
 
-// Hyper publishes this catalog to anyone, so the request's credential goes unused.
 const CatalogSchema = v.object({
   data: v.array(
     v.object({
@@ -23,22 +21,10 @@ const CatalogSchema = v.object({
   ),
 });
 
-export async function fetchHyperCatalog({
-  baseUrl,
-  signal,
-}: CatalogRequest): Promise<readonly ModelCatalogEntry[]> {
-  const response = await fetch(joinUrl(baseUrl, "models"), { signal }).catch((error: Error) => {
-    throw new UpstreamError(`could not read the Hyper catalog: ${error.message}`, "network");
-  });
-
-  if (!response.ok) {
-    throw new UpstreamError(
-      `could not read the Hyper catalog (${response.status})`,
-      "unavailable",
-      response.status,
-    );
-  }
-
+export async function fetchHyperCatalog(
+  request: CatalogRequest,
+): Promise<readonly ModelCatalogEntry[]> {
+  const response = await readPublicModelResponse(request);
   const parsed = v.safeParse(CatalogSchema, await response.json().catch(() => null));
 
   if (!parsed.success) throw new UpstreamError("the Hyper catalog is not readable", "protocol");

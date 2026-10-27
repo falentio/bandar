@@ -44,14 +44,8 @@ export const tagPaths = {
   models: (id: string) => `/api/tags/${id}/models`,
 };
 
-export type TagModel = v.InferOutput<typeof TagModelSchema>;
-
 export type Tag = v.InferOutput<typeof TagSchema>;
 
 export type TagList = v.InferOutput<typeof TagListSchema>;
 
 export type TagCreateInput = v.InferOutput<typeof TagCreateInputSchema>;
-
-export type TagModelsInput = v.InferOutput<typeof TagModelsInputSchema>;
-
-export type TagParams = v.InferOutput<typeof TagParamsSchema>;

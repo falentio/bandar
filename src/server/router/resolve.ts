@@ -5,14 +5,11 @@ import { providerModels, providers, tagModels, tags } from "../db/schema";
 import type { ProviderDeps } from "../providers";
 
 export type ResolvedCandidate = {
-  readonly modelId: string;
   readonly alias: string;
   readonly upstreamModel: string;
   readonly inputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;
   readonly providerId: string;
-  readonly providerName: string;
-  readonly providerSlug: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
   readonly sealedKey: string;
@@ -26,29 +23,12 @@ export type ResolvedPlan = {
 
 export type ModelRef = { readonly id: string; readonly createdAt: Date };
 
-type CandidateRow = {
-  readonly modelId: string;
-  readonly alias: string;
-  readonly upstreamModel: string;
-  readonly inputPricePerMtok: number | null;
-  readonly outputPricePerMtok: number | null;
-  readonly providerId: string;
-  readonly providerName: string;
-  readonly providerSlug: string;
-  readonly kind: ProviderKind;
-  readonly baseUrl: string;
-  readonly sealedKey: string;
-};
-
 const candidateColumns = {
-  modelId: providerModels.id,
   alias: providerModels.alias,
   upstreamModel: providerModels.upstreamModel,
   inputPricePerMtok: providerModels.inputPricePerMtok,
   outputPricePerMtok: providerModels.outputPricePerMtok,
   providerId: providers.id,
-  providerName: providers.name,
-  providerSlug: providers.slug,
   kind: providers.kind,
   baseUrl: providers.baseUrl,
   sealedKey: providers.apiKey,
@@ -74,7 +54,7 @@ export async function resolvePlan(
 
   const alias = aliasRows[0];
 
-  if (alias !== undefined) return { ref, tag: null, candidates: [candidate(alias)] };
+  if (alias !== undefined) return { ref, tag: null, candidates: [alias] };
 
   if (ref.startsWith(TAG_REF_PREFIX)) {
     const slug = ref.slice(TAG_REF_PREFIX.length);
@@ -97,7 +77,7 @@ export async function resolvePlan(
       .where(and(eq(tagModels.tagId, tag.id), eq(providerModels.enabled, true)))
       .orderBy(asc(tagModels.priority));
 
-    return { ref, tag: slug, candidates: rows.map(candidate) };
+    return { ref, tag: slug, candidates: rows };
   }
 
   const slash = ref.indexOf("/");
@@ -119,7 +99,7 @@ export async function resolvePlan(
     .orderBy(asc(providerModels.createdAt))
     .limit(1);
 
-  return { ref, tag: null, candidates: rows.map(candidate) };
+  return { ref, tag: null, candidates: rows };
 }
 
 export async function listModelRefs(
@@ -168,20 +148,4 @@ export async function listModelRefs(
   }
 
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
-}
-
-function candidate(row: CandidateRow): ResolvedCandidate {
-  return {
-    modelId: row.modelId,
-    alias: row.alias,
-    upstreamModel: row.upstreamModel,
-    inputPricePerMtok: row.inputPricePerMtok,
-    outputPricePerMtok: row.outputPricePerMtok,
-    providerId: row.providerId,
-    providerName: row.providerName,
-    providerSlug: row.providerSlug,
-    kind: row.kind,
-    baseUrl: row.baseUrl,
-    sealedKey: row.sealedKey,
-  };
 }

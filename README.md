@@ -18,6 +18,7 @@ SQLite.
 - Model references in three forms: an alias, `tags/<slug>`, or
   `<provider-slug>/<upstream-model>`.
 - Tags as ordered fallback chains, managed in the dashboard.
+- Several ordered credentials per provider, tried in priority order.
 - Three generic wires for custom providers: `openai`, `anthropic`, and `google`.
 - Built-in Kilo Code, present on every account, with a device-code login.
 - Custom providers added from the dashboard without changing code.
@@ -66,19 +67,20 @@ The dev client proxies `/api` and `/v1` to the API port, so a page loaded from
 POST /v1/chat/completions [1]
 ├── authenticate the gateway key [1a] ✗ 401
 ├── parse the OpenAI body with valibot [1b] ✗ 422
-├── resolve the reference: alias, tag chain, or provider ref [1c] ✗ 404 model_not_found
+├── resolve the reference into ordered attempts [1c] ✗ 404 model_not_found
+│   └── one attempt per model and credential: tag order, then credential order [1c1]
 ├── pick the adapter for the provider kind [1d]
-├── call the upstream [1e] ✗ 502/429 and record the failure
+├── call the upstream with the attempt's credential [1e] ✗ 502/429 and record the failure
 │   └── normalize wire events into canonical text, usage and finish events [1e1]
-├── try the next candidate when the tag chain allows a retry [1e2]
+├── try the next attempt when the failure is retryable [1e2]
 ├── stream OpenAI chunks back to the client [1f]
 └── record one DuckDB event with tokens, TTFT, duration and tokens/sec [1g]
 ```
 
-Provider credentials are decrypted per attempt, immediately before an upstream
-call, so a credential is in memory only for the length of that call and a tag
-never opens keys for models it does not try. `GET /api/providers` returns
-`authMode` and `hasKey`, never the key or token. A device-code login keeps the
+A credential is decrypted per attempt, immediately before an upstream call, so
+it is in memory only for the length of that call and a tag never opens keys for
+models it does not try. `GET /api/providers` returns each credential's id, label,
+auth mode, and priority, never the key or token. A device-code login keeps the
 device code on the server: the browser sees only the short user code it types at
 kilocode.ai.
 
@@ -127,6 +129,26 @@ call it as `tags/<slug>`. The gateway tries the models in priority order.
 
 Manage tags on the **Tags** page or over `/api/tags`. Every membership write
 replaces the whole list, so priorities are always 1-based and contiguous.
+
+## Credentials
+
+A provider holds an ordered list of credentials: several accounts or API keys for
+the same upstream. The gateway calls with the first credential and falls back to
+the next one when the failure is one a different key might fix.
+
+- Ordering is 1-based and contiguous per provider. Move a credential on the
+  **Credentials** tab, and the write replaces the whole order.
+- A fallback walks the current model's remaining credentials before it moves to
+  the next model in a tag. A tag with two models that each hold two credentials
+  can make four upstream calls for one client request.
+- The retry set is the tag chain's: `auth`, `rate_limit`, `unavailable`,
+  `protocol`, and `network`. An `invalid_request` or an aborted request is final.
+- Each attempt writes one DuckDB event, so a key fallback adds a row beside the
+  row for the key that answered.
+- A provider with no credentials still takes one attempt with no credential
+  header, which is how a local server that needs no key keeps working.
+- Connecting Kilo Code adds a credential. A second Kilo account becomes the next
+  entry in the chain instead of replacing the first.
 
 ## Analytics
 
@@ -311,6 +333,7 @@ bandar/
 │   ├── api.ts                      # management routes, session/key gate
 │   ├── analytics.ts                # DuckDB reads and window math
 │   ├── providers.ts                # provider/model repo, catalog import, slug backfill
+│   ├── credentials.ts              # ordered provider credentials: add, replace, move, remove
 │   ├── tags.ts                     # tag list and membership writes
 │   ├── credential.ts               # api-key / oauth credential union
 │   ├── oauth.ts                    # device-code connectors per OAuth kind
@@ -347,7 +370,8 @@ bandar/
 │   └── components/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
 │       ├── providers-panel.tsx     # provider list and add dialog
-│       ├── provider-page.tsx       # one provider: overview, settings, models, credential
+│       ├── provider-page.tsx       # one provider: overview, settings, models, credentials
+│       ├── credentials-card.tsx    # ordered credential list for one provider
 │       ├── tags-panel.tsx          # tag chains: create, reorder, remove
 │       ├── connect-flow.tsx        # Kilo Code device-code approval
 │       ├── token-chart.tsx         # shared daily token bars
@@ -363,37 +387,41 @@ bandar/
 
 ## API surface
 
-| Route                                       | Auth                   | Purpose                                                 |
-| ------------------------------------------- | ---------------------- | ------------------------------------------------------- |
-| `POST /v1/chat/completions`                 | Gateway key            | OpenAI-compatible chat, streaming or not.               |
-| `GET /v1/models`                            | Gateway key            | Aliases, non-empty tags, and unshadowed provider refs.  |
-| `GET/POST /api/providers`                   | Session or `x-api-key` | List providers, or add a custom provider.               |
-| `PUT/DELETE /api/providers/:id`             | Session or `x-api-key` | Edit a custom provider's name and slug, or remove it.   |
-| `GET /api/providers/:id?days=30`            | Session or `x-api-key` | One provider plus its window usage.                     |
-| `POST /api/providers/:id/models`            | Session or `x-api-key` | Add one model alias; returns the provider.              |
-| `POST /api/providers/:id/models/refresh`    | Session or `x-api-key` | Import new models from the Kilo Code catalog.           |
-| `DELETE /api/providers/:id/models/:modelId` | Session or `x-api-key` | Remove a model alias; returns the provider.             |
-| `POST /api/providers/:id/oauth/start`       | Session or `x-api-key` | Start a Kilo Code device login; returns a user code.    |
-| `POST /api/providers/:id/oauth/poll`        | Session or `x-api-key` | Poll the pending login; stores the token when approved. |
-| `GET/POST /api/tags`                        | Session or `x-api-key` | List tags with their models, or create a tag.           |
-| `PUT /api/tags/:id/models`                  | Session or `x-api-key` | Replace a tag's model list and order; returns the list. |
-| `DELETE /api/tags/:id`                      | Session or `x-api-key` | Delete a tag; returns the remaining list.               |
-| `GET /api/analytics?days=30`                | Session or `x-api-key` | Window summary, daily series, model breakdown.          |
-| `GET /api/requests?limit=50&providerId=…`   | Session or `x-api-key` | Recent attempts, optionally one provider.               |
-| `GET /api/health`                           | none                   | Both current migration tags.                            |
-| `/api/auth/*`                               | better-auth            | Sign-up, sign-in, sessions, key create/list/delete.     |
+| Route                                                 | Auth                   | Purpose                                                 |
+| ----------------------------------------------------- | ---------------------- | ------------------------------------------------------- |
+| `POST /v1/chat/completions`                           | Gateway key            | OpenAI-compatible chat, streaming or not.               |
+| `GET /v1/models`                                      | Gateway key            | Aliases, non-empty tags, and unshadowed provider refs.  |
+| `GET/POST /api/providers`                             | Session or `x-api-key` | List providers, or add a custom provider.               |
+| `PUT/DELETE /api/providers/:id`                       | Session or `x-api-key` | Edit a custom provider's settings, or remove it.        |
+| `POST /api/providers/:id/credentials`                 | Session or `x-api-key` | Add a credential at the end of the provider's order.    |
+| `PUT /api/providers/:id/credentials/order`            | Session or `x-api-key` | Replace the credential order; returns the provider.     |
+| `PUT /api/providers/:id/credentials/:credentialId`    | Session or `x-api-key` | Replace one key or label, keeping its place.            |
+| `DELETE /api/providers/:id/credentials/:credentialId` | Session or `x-api-key` | Remove a credential and compact the order.              |
+| `GET /api/providers/:id?days=30`                      | Session or `x-api-key` | One provider plus its window usage.                     |
+| `POST /api/providers/:id/models`                      | Session or `x-api-key` | Add one model alias; returns the provider.              |
+| `POST /api/providers/:id/models/refresh`              | Session or `x-api-key` | Import new models from the Kilo Code catalog.           |
+| `DELETE /api/providers/:id/models/:modelId`           | Session or `x-api-key` | Remove a model alias; returns the provider.             |
+| `POST /api/providers/:id/oauth/start`                 | Session or `x-api-key` | Start a Kilo Code device login; returns a user code.    |
+| `POST /api/providers/:id/oauth/poll`                  | Session or `x-api-key` | Poll the pending login; stores the token when approved. |
+| `GET/POST /api/tags`                                  | Session or `x-api-key` | List tags with their models, or create a tag.           |
+| `PUT /api/tags/:id/models`                            | Session or `x-api-key` | Replace a tag's model list and order; returns the list. |
+| `DELETE /api/tags/:id`                                | Session or `x-api-key` | Delete a tag; returns the remaining list.               |
+| `GET /api/analytics?days=30`                          | Session or `x-api-key` | Window summary, daily series, model breakdown.          |
+| `GET /api/requests?limit=50&providerId=…`             | Session or `x-api-key` | Recent attempts, optionally one provider.               |
+| `GET /api/health`                                     | none                   | Both current migration tags.                            |
+| `/api/auth/*`                                         | better-auth            | Sign-up, sign-in, sessions, key create/list/delete.     |
 
 Each provider has its own page at `/providers/<id>` with four tabs:
 **Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
 (name, slug, kind, base URL), **Models** (aliases, refs, tag chips, removal, and
-for Kilo Code a catalog import), and **API key** or **Connection** (set or
-replace the sealed upstream key, connect a Kilo Code account, remove a custom
-provider). The tab lives in the URL as `?tab=`, so a reload or a shared link
+for Kilo Code a catalog import), and **Credentials** or **Connection** (the
+ordered credential list: add, replace, move, and remove a key, connect a Kilo Code
+account, remove a custom provider). The tab lives in the URL as `?tab=`, so a reload or a shared link
 opens the same tab. Custom providers are created empty and grow models one at a
 time; Kilo Code is seeded empty for every account. Built-in settings come from
 code and are read-only, and a built-in cannot be removed. `PUT /api/providers/:id`
-replaces name, slug, kind, and base URL for a custom provider, and leaves the
-credential unchanged when `apiKey` is empty. Changing a custom slug stops refs
+replaces name, slug, kind, and base URL for a custom provider. Credentials change
+only through the credential routes. Changing a custom slug stops refs
 built from the old slug from resolving.
 
 The **Tags** page creates a tag from a slug and edits its chain: reorder a model
@@ -427,8 +455,10 @@ the form yet.
   analytics file. SQLite is WAL, DuckDB is not multi-process-writer.
 - **Single process.** DuckDB FFI is synchronous. Move slow scans to a worker or a
   pre-aggregated table before the history gets large.
-- **Tag chains only.** A tag walks its models in order; an alias still maps to
-  exactly one model, and retries happen only down a tag chain.
+- **Ordering is the only fallback.** A tag walks its models in order, and each
+  model walks its provider's credentials in order. An alias still maps to one
+  model. There is no health check and no cool-down: a rate-limited key is tried
+  again the next time it reaches the front of the chain.
 - **No OAuth refresh.** A Kilo Code device token is stored as issued. Reconnect
   when it expires.
 - **No pricing form.** Set prices through the API or import the Kilo Code

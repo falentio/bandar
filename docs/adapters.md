@@ -27,6 +27,9 @@ export type ProviderTarget = {
   readonly credential: Credential;
   readonly upstreamModel: string;
 };
+
+`credential` is the attempt's credential. The gateway opens it immediately before
+the call and never passes more than one to an adapter.
 ```
 
 `Credential` is a sealed-bundle union from `src/server/credential.ts`:
@@ -225,9 +228,9 @@ not measure time, and non-streaming requests have no TTFT.
 6. Run `bun run check && bun run test && bun run build && bun run smoke`.
 
 No database migration is needed for a new kind: `providers.kind` is text and its
-TypeScript type comes from `ProviderKind`. Credentials already have an
+TypeScript type comes from `ProviderKind`. A credential row carries an
 `auth_mode` column and a sealed bundle, so an API-key kind and an OAuth kind use
-the same row shape. `origin` separates a seeded built-in from a custom row. The
+the same `provider_credentials` shape. `origin` separates a seeded built-in from a custom row. The
 dashboard's kind picker, the add dialog, and the provider logo table read the
 generic and built-in lists, so a new kind appears once it has a path in
 `./src/client/components/provider-logo.tsx`.
@@ -250,10 +253,11 @@ export interface OAuthConnector {
 
 `src/server/providers/kilocode/oauth.ts` implements it. The API keeps the device
 code server-side, keyed by user and provider; the start response returns only
-the short user code and the verification URL. The poll stores the token with
-`saveOAuthCredential`, which seals the OAuth bundle and sets
-`providers.auth_mode = "oauth"`. An API key saved later replaces the connection
-and switches the mode back to `"api-key"`. A built-in provider's row is seeded
+the short user code and the verification URL. The poll appends a credential with
+`addOAuthCredential`, which seals the OAuth bundle and records `auth_mode =
+"oauth"` on that row. An API key added later is another credential in the chain,
+so the gateway can fall from the token to the key or the other way round. A
+built-in provider's row is seeded
 before login, so the Connection tab works on the first visit.
 
 An OAuth connector that needs an account identifier should look it up during

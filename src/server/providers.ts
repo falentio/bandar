@@ -405,22 +405,16 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
 
   const present = new Set(rows.filter((row) => row.origin === "builtin").map((row) => row.kind));
   const names = new Set(rows.map((row) => row.name));
-  const slugs = new Set(RESERVED_PROVIDER_SLUGS);
   const now = new Date();
-
-  for (const row of rows) {
-    if (row.slug !== "") slugs.add(row.slug);
-  }
 
   for (const kind of BUILT_IN_PROVIDER_KINDS) {
     if (present.has(kind)) continue;
 
     const definition = BUILT_IN_PROVIDERS[kind];
     const name = availableName(definition.name, names);
-    const slug = availableSlug(definition.slug, withoutSlug(slugs, definition.slug));
+    const slug = definition.slug;
 
     names.add(name);
-    slugs.add(slug);
 
     deps.db
       .insert(providers)
@@ -523,7 +517,7 @@ export async function assignProviderSlugs(db: Db): Promise<number> {
     db.transaction((tx) => {
       for (const row of pending) {
         const builtIn = builtInSlugOf(row.kind);
-        const slug = availableSlug(builtIn ?? slugify(row.name), withoutSlug(taken, builtIn));
+        const slug = builtIn ?? availableSlug(slugify(row.name), taken);
 
         tx.update(providers).set({ slug }).where(eq(providers.id, row.id)).run();
         taken.add(slug);
@@ -539,15 +533,6 @@ function builtInSlugOf(kind: ProviderKind): string | null {
   const builtIn = BUILT_IN_PROVIDER_KINDS.find((candidate) => candidate === kind);
 
   return builtIn === undefined ? null : BUILT_IN_PROVIDERS[builtIn].slug;
-}
-
-// A built-in owns its definition slug; only custom providers are locked out of it.
-function withoutSlug(taken: ReadonlySet<string>, slug: string | null): Set<string> {
-  const copy = new Set(taken);
-
-  if (slug !== null) copy.delete(slug);
-
-  return copy;
 }
 
 export async function saveOAuthCredential(

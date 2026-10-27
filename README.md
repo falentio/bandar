@@ -16,6 +16,12 @@ bun install          # also generates src/server/generated/*
 bun run dev          # http://127.0.0.1:5173, API proxied to :3000
 ```
 
+The dev server binds every interface (`host: true`) and accepts Tailscale
+MagicDNS hostnames, so another device on the tailnet opens the same page at
+`http://<machine>.<tailnet>.ts.net:5173`; HMR runs over that name too. Vite's
+host check is still on: an unknown `Host` is a 403. A custom tailnet domain goes
+next to `.ts.net` in `server.allowedHosts` in `./vite.config.ts`.
+
 The compiled artifact:
 
 ```sh

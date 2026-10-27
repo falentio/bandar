@@ -49,7 +49,10 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: true,
     port: DEFAULT_WEB_PORT,
+    // MagicDNS names resolve to this machine on the tailnet; Vite rejects unknown Host headers.
+    allowedHosts: [".ts.net"],
     proxy: {
       "/api": { target: loopbackOrigin(apiPort), changeOrigin: true },
     },

@@ -6,7 +6,6 @@ import {
   SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import type { View } from "../views";
 import { NavMain } from "./nav-main";
 import { NavUser } from "./nav-user";
 
@@ -14,14 +13,10 @@ export function AppSidebar({
   email,
   pending,
   onSignOut,
-  activeView,
-  onSelect,
 }: {
   email: string;
   pending: boolean;
   onSignOut: () => Promise<void>;
-  activeView: View;
-  onSelect: (view: View) => void;
 }) {
   return (
     <Sidebar collapsible="icon">
@@ -37,7 +32,7 @@ export function AppSidebar({
         </div>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain activeView={activeView} onSelect={onSelect} />
+        <NavMain />
       </SidebarContent>
       <SidebarFooter>
         <NavUser email={email} pending={pending} onSignOut={onSignOut} />

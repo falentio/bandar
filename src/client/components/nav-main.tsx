@@ -1,32 +1,29 @@
+import { Link, useRouterState } from "@tanstack/react-router";
 import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
-import { type View, views } from "../views";
+import { views } from "../views";
 
-export function NavMain({
-  activeView,
-  onSelect,
-}: {
-  activeView: View;
-  onSelect: (view: View) => void;
-}) {
+export function NavMain() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const { setOpenMobile } = useSidebar();
+
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Workspace</SidebarGroupLabel>
       <SidebarMenu>
-        {views.map((item) => (
-          <SidebarMenuItem key={item.id}>
-            <SidebarMenuButton
-              isActive={item.id === activeView.id}
-              tooltip={item.label}
-              onClick={() => onSelect(item)}
-            >
-              <item.icon />
-              <span>{item.label}</span>
+        {views.map((view) => (
+          <SidebarMenuItem key={view.to}>
+            <SidebarMenuButton asChild isActive={view.to === pathname} tooltip={view.label}>
+              <Link to={view.to} onClick={() => setOpenMobile(false)}>
+                <view.icon />
+                <span>{view.label}</span>
+              </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         ))}

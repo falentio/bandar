@@ -1,10 +1,14 @@
 import { KeyRoundIcon, StickyNoteIcon } from "lucide-react";
-import { ApiKeysPanel } from "./components/api-keys-panel";
-import { NotesPanel } from "./components/notes-panel";
 
 export const views = [
-  { id: "notes", label: "Notes", icon: StickyNoteIcon, Panel: NotesPanel },
-  { id: "api-keys", label: "API keys", icon: KeyRoundIcon, Panel: ApiKeysPanel },
+  { to: "/notes", label: "Notes", icon: StickyNoteIcon },
+  { to: "/api-keys", label: "API keys", icon: KeyRoundIcon },
 ] as const;
 
 export type View = (typeof views)[number];
+
+export type ViewPath = View["to"];
+
+export function isViewPath(path: string): path is ViewPath {
+  return views.some((view) => view.to === path);
+}

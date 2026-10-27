@@ -139,16 +139,16 @@ bandar/
 │   │   └── migrate.test.ts       # idempotency, rollback, drift, downgrade
 │   └── generated/                # gitignored; written by scripts/gen.ts
 ├── src/client/
-│   ├── main.tsx                  # createRoot
-│   ├── app.tsx                   # session gate, then the app shell
-│   ├── views.tsx                 # sidebar, breadcrumb, and panel registry
+│   ├── main.tsx                  # createRoot + RouterProvider
+│   ├── router.tsx                # route table, session gate, login and app shells
+│   ├── views.tsx                 # view registry: path, label, icon
 │   ├── api.ts                    # fetch + valibot parse + ApiError
-│   ├── use-session.ts            # SessionState machine + auth actions
+│   ├── use-session.tsx           # SessionProvider + useSession consumer, auth actions
 │   ├── use-notes.ts              # NotesState machine, one pending flag
 │   ├── use-api-keys.ts           # ApiKeysState machine, create/revoke
-│   ├── components/app-shell.tsx  # sidebar provider, breadcrumb header, active view
+│   ├── components/app-shell.tsx  # sidebar provider, breadcrumb header, routed Outlet
 │   ├── components/app-sidebar.tsx # brand, NavMain, NavUser
-│   ├── components/nav-main.tsx   # flat view list
+│   ├── components/nav-main.tsx   # routed view links
 │   ├── components/nav-user.tsx   # account menu and sign out
 │   ├── components/auth-page.tsx  # signed-out split shell
 │   ├── components/login-form.tsx # sign-in / create-account card
@@ -196,6 +196,28 @@ Request
 
 The SQLite file, the client assets, and the migrations are all inside the binary;
 the only thing on disk at runtime is the database.
+
+## Navigation
+
+The client routes with TanStack Router. The table in `src/client/router.tsx`
+declares every URL.
+
+| URL         | Screen                       |
+| ----------- | ---------------------------- |
+| `/notes`    | Notes                        |
+| `/api-keys` | API keys                     |
+| `/login`    | Sign in or create an account |
+
+`/` redirects to `/notes`, and any other path renders a not-found page.
+
+A signed-out request for a view redirects to `/login?redirect=<view>`, and
+signing in returns to that view. Signing out redirects to
+`/login?redirect=<current view>`. The `redirect` value is either `/notes` or
+`/api-keys`; anything else falls back to `/notes`.
+
+A refresh or deep link works because the server serves the SPA shell for any
+extension-less path (`src/server/assets.ts`), and the Vite dev server does the
+same. The router then resolves the URL on the client.
 
 ## Auth
 
@@ -268,7 +290,8 @@ Rename or add around these files, in this order. Nothing else knows about notes.
 6. `src/server/app.ts` — build the repo from `deps.db` and pass it to `createApi`.
 7. `src/client/api.ts` — one function per route, each parsing with the shared schema.
 8. `src/client/use-<entity>.ts` — the state machine, following `use-notes.ts`.
-9. `src/client/components/<entity>-panel.tsx` — the screen; mount it in `app.tsx`.
+9. `src/client/components/<entity>-panel.tsx` — the screen; add its path to
+   `src/client/views.tsx` and its route to `src/client/router.tsx`.
 
 Then `bun run check && bun run test && bun run smoke`. `scripts/smoke.ts` is the
 one place that asserts the new routes end to end; add a check per new route.
@@ -278,9 +301,9 @@ one place that asserts the new routes end to end; add a check per new route.
 The scaffold stays useful with the notes demo gone. Delete, in this order:
 
 1. Auth: `src/client/components/auth-page.tsx`,
-   `src/client/components/login-form.tsx`, `src/client/use-session.ts`, and the
-   session gate in `src/client/app.tsx`; `src/shared/auth.ts` and
-   `authApi` in `src/client/api.ts`; `src/server/auth.ts`, the `/auth/*` route,
+   `src/client/components/login-form.tsx`, `src/client/use-session.tsx`, and the
+   session gate plus `loginRoute` in `src/client/router.tsx`; `src/shared/auth.ts`
+   and `authApi` in `src/client/api.ts`; `src/server/auth.ts`, the `/auth/*` route,
    and `authenticate` in `src/server/api.ts`. The API keys card goes with it:
    `src/client/components/api-keys-panel.tsx`, `src/client/use-api-keys.ts`,
    `src/shared/api-keys.ts`, and `apiKeyApi` in `src/client/api.ts`.
@@ -288,7 +311,8 @@ The scaffold stays useful with the notes demo gone. Delete, in this order:
    `verification`, and `apikey` tables), `scripts/auth-schema.config.ts`, and the
    `db:auth-schema` script.
 3. `src/client/components/notes-panel.tsx`, `src/client/use-notes.ts` — and the
-   `notes` entry in `src/client/views.tsx`.
+   `notes` entry in `src/client/views.tsx` and `notesRoute` in
+   `src/client/router.tsx`.
 4. `src/shared/notes.ts`, and the notes calls and `ApiError` usage in
    `src/client/api.ts` (keep `request`, `send`, and `ApiError`).
 5. `src/server/notes.ts`, and its routes in `src/server/api.ts`.

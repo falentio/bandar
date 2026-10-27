@@ -226,6 +226,13 @@ try {
     assert.equal((await errorBody(response)).code, "not_found");
   });
 
+  await check("GET /api-keys serves the client shell for a router deep link", async () => {
+    const response = await fetch(new URL("/api-keys", origin));
+    assert.equal(response.status, 200);
+    assert.match(contentType(response), /^text\/html/);
+    assert.match(await response.text(), /id="root"/);
+  });
+
   await check("an unknown page falls back to the SPA shell", async () => {
     const response = await fetch(new URL("/nope", origin));
     assert.equal(response.status, 200);

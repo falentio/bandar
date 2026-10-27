@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import type { AuthResult, SessionUser, SignInInput, SignUpInput } from "../shared/auth";
 import { authApi } from "./api";
 import { describeError, isError } from "./errors";
@@ -16,7 +17,23 @@ export type SessionControls = SessionState & {
   readonly signOut: () => Promise<void>;
 };
 
+const SessionContext = createContext<SessionControls | null>(null);
+
+export function SessionProvider({ children }: { children: ReactNode }) {
+  const session = useSessionControls();
+
+  return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
+}
+
 export function useSession(): SessionControls {
+  const session = useContext(SessionContext);
+
+  if (!session) throw new Error("useSession must be inside SessionProvider");
+
+  return session;
+}
+
+function useSessionControls(): SessionControls {
   const [state, setState] = useState<SessionState>({ status: "loading" });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);

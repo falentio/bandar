@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Outlet, useRouterState } from "@tanstack/react-router";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { type View, views } from "../views";
+import { views } from "../views";
 import { AppSidebar } from "./app-sidebar";
 
 export function AppShell({
@@ -20,18 +20,12 @@ export function AppShell({
   pending: boolean;
   onSignOut: () => Promise<void>;
 }) {
-  const [activeView, setActiveView] = useState<View>(views[0]);
-  const ActivePanel = activeView.Panel;
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const activeView = views.find((view) => view.to === pathname) ?? views[0];
 
   return (
     <SidebarProvider>
-      <AppSidebar
-        email={email}
-        pending={pending}
-        onSignOut={onSignOut}
-        activeView={activeView}
-        onSelect={setActiveView}
-      />
+      <AppSidebar email={email} pending={pending} onSignOut={onSignOut} />
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
           <div className="flex items-center gap-2 px-4">
@@ -49,7 +43,7 @@ export function AppShell({
           </div>
         </header>
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 p-4 pt-0">
-          <ActivePanel />
+          <Outlet />
         </div>
       </SidebarInset>
     </SidebarProvider>

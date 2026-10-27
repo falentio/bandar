@@ -135,7 +135,6 @@ export function bearerHeaders(credential: Credential): WireHeaders {
   return secret === "" ? {} : { authorization: `Bearer ${secret}` };
 }
 
-/** `authorization` for a bearer gateway, `x-api-key`/`x-goog-api-key` for a product API. */
 export function apiKeyHeaders(name: string): HeaderFactory {
   return (credential) => {
     const secret = secretOf(credential);

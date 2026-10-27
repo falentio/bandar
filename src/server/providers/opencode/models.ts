@@ -121,7 +121,6 @@ export const OPENCODE_MODELS: readonly OpenCodeModel[] = [
     wire: "openai",
     prices: { inputPricePerMtok: 1, outputPricePerMtok: 2.7 },
   },
-  // Free is a price: zero, not unknown.
   { id: "beam-free", wire: "openai", prices: { inputPricePerMtok: 0, outputPricePerMtok: 0 } },
   {
     id: "iceman-contributor-free",
@@ -140,7 +139,6 @@ export const OPENCODE_MODELS: readonly OpenCodeModel[] = [
 
 const BY_ID = new Map(OPENCODE_MODELS.map((model) => [model.id, model] as const));
 
-/** The row for a gateway model id, or undefined when the table does not know it. */
 export function opencodeModelOf(upstreamModel: string): OpenCodeModel | undefined {
   return BY_ID.get(upstreamModel);
 }

@@ -60,7 +60,6 @@ type ChatBody = {
 export type AnthropicOptions<K extends ProviderKind> = {
   readonly kind: K;
   readonly label: string;
-  /** Auth only; the Messages wire adds `anthropic-version` itself. */
   readonly headers: HeaderFactory;
 };
 

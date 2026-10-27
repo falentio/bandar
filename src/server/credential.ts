@@ -14,6 +14,9 @@ export const CredentialSchema = v.variant("authMode", [
 
 export type Credential = v.InferOutput<typeof CredentialSchema>;
 
+/** How long before expiry a connection counts as expiring: renewal is due, and a reconnect replaces it. */
+export const EXPIRING_CONNECTION_MS = 120_000;
+
 export type OAuthCredential = Extract<Credential, { authMode: "oauth" }>;
 
 export function parseCredential(json: string): Credential | null {

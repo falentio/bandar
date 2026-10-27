@@ -1,13 +1,11 @@
-import type { Credential } from "../../credential";
+import { EXPIRING_CONNECTION_MS, type Credential } from "../../credential";
 import { postForm } from "../http";
 import { UpstreamError, type CredentialRenewer } from "../types";
 import { CLIENT_ID, credentialOf, oauthFailureReason, portalUrl } from "./oauth";
 
-const REFRESH_SKEW_MS = 120_000;
-
 export const nousRenewal: CredentialRenewer = {
   due(credential, now) {
-    return credential.expiresAt !== null && credential.expiresAt - now <= REFRESH_SKEW_MS;
+    return credential.expiresAt !== null && credential.expiresAt - now <= EXPIRING_CONNECTION_MS;
   },
 
   async renew({ credential, signal }): Promise<Credential> {

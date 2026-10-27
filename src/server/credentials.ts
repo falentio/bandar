@@ -1,7 +1,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import type { Provider, ProviderAuthMode, ProviderCredentialInput } from "../shared/providers";
 import type { Db } from "./db/client";
-import type { Credential } from "./credential";
+import { EXPIRING_CONNECTION_MS, type Credential } from "./credential";
 import { providerCredentials } from "./db/schema";
 import {
   definitionFor,
@@ -12,8 +12,6 @@ import {
 } from "./providers";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
-
-const EXPIRING_CONNECTION_MS = 120_000;
 
 type AppendedCredential = {
   readonly label: string;

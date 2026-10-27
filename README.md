@@ -157,21 +157,25 @@ Non-streaming requests have no observable first token, so they record
 The overview defaults to 30 days and can switch to 7 or 90. The API is
 `GET /api/analytics?days=30`; recent attempts are `GET /api/requests?limit=50`.
 
-## Adding a provider adapter
+## Adding a provider
 
-An adapter is one file plus one registry entry. The registry is a `satisfies
-Record<ProviderKind, ProviderAdapter>`, so a new kind fails the type check until
-every switch has an adapter.
+A provider is one directory under `./src/server/providers/<kind>/` plus one
+registry entry. The definition object bundles the wire adapter with every
+capability the provider has: a device login, a model catalog, and the settings a
+built-in seeds. The registry is a `satisfies Record<ProviderKind,
+ProviderDefinition>`, so a new kind fails the type check until it is registered.
 
-1. Add the wire kind to `GENERIC_PROVIDER_KINDS` in `./src/shared/providers.ts`.
-2. Create `./src/server/router/adapters/<kind>.ts` implementing `ProviderAdapter`.
-3. Register it in `./src/server/router/adapters/index.ts`.
-4. Add a fake upstream branch and one streaming plus one non-streaming smoke
+1. Add the kind to `GENERIC_PROVIDER_KINDS` in `./src/shared/providers.ts` for a
+   custom wire, or to `BUILT_IN_PROVIDER_KINDS` and `BUILT_IN_PROVIDERS` for a
+   built-in.
+2. Create `./src/server/providers/<kind>/adapter.ts` implementing `ProviderAdapter`.
+3. Create `./src/server/providers/<kind>/index.ts` with the definition. Add an
+   `oauth` connector or a `catalog` reader when the provider has one.
+4. Register the definition in `./src/server/providers/registry.ts`. The record
+   reports a missing entry, and a built-in without its `builtIn` settings does
+   not compile.
+5. Add a fake upstream branch and one streaming plus one non-streaming smoke
    check in `./scripts/smoke.ts`.
-5. If it is a built-in provider rather than a generic wire, add its definition to
-   `BUILT_IN_PROVIDERS`, add its adapter kind to `BUILT_IN_PROVIDER_KINDS`, and
-   implement its OAuth connector in `./src/server/oauth.ts`. Built-in rows are
-   seeded per account and cannot be added or removed from the UI.
 
 The full contract, wire mapping, and streaming rules are in
 [`docs/adapters.md`](./docs/adapters.md). Adapters never return wire types to the

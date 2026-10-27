@@ -81,7 +81,7 @@ One attempt is one model and one credential pair. The credential is decrypted
 immediately before that upstream call, so it is in memory only for the length of
 the call, and a tag never opens keys for models it does not try.
 `GET /api/providers` returns each provider's credentials with their auth mode and
-health, plus `hasKey`, never the key or token. A device-code login keeps the
+health, plus `hasKey`, never the key or token. Providers and models carry the same `failures` and `flaggedUntil` health fields. A device-code login keeps the
 device code on the server: the browser sees only the short user code it types at
 kilocode.ai.
 

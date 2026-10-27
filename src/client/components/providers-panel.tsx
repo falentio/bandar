@@ -181,9 +181,12 @@ function ProviderRow({ provider }: { provider: Provider }) {
 }
 
 function everyCoolingDown(provider: Provider): boolean {
-  if (provider.credentials.length === 0) return false;
-
   const now = Date.now();
+
+  if (provider.flaggedUntil !== null && new Date(provider.flaggedUntil).getTime() > now)
+    return true;
+
+  if (provider.credentials.length === 0) return false;
 
   return provider.credentials.every(
     (credential) =>

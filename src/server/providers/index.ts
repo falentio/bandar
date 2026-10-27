@@ -93,6 +93,8 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       shadowed: enabledAliases.has(ref),
       inputPricePerMtok: row.inputPricePerMtok,
       outputPricePerMtok: row.outputPricePerMtok,
+      failures: row.failures,
+      flaggedUntil: row.flaggedUntil === null ? null : row.flaggedUntil.toISOString(),
     });
     grouped.set(row.providerId, list);
   }
@@ -118,6 +120,8 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
         origin: row.origin,
         baseUrl: row.baseUrl,
         hasKey: credentials.length > 0,
+        failures: row.failures,
+        flaggedUntil: row.flaggedUntil === null ? null : row.flaggedUntil.toISOString(),
         credentials,
         models: grouped.get(row.id) ?? [],
         createdAt: row.createdAt.toISOString(),
@@ -528,7 +532,7 @@ export async function removeCredential(
 ): Promise<Provider | null> {
   if ((await findProvider(deps, userId, providerId)) === null) return null;
 
-  deps.db
+  const removed = await deps.db
     .delete(providerCredentials)
     .where(
       and(
@@ -537,9 +541,9 @@ export async function removeCredential(
         eq(providerCredentials.userId, userId),
       ),
     )
-    .run();
+    .returning({ id: providerCredentials.id });
 
-  return findProvider(deps, userId, providerId);
+  return removed.length === 0 ? null : findProvider(deps, userId, providerId);
 }
 
 type NewCredential = {

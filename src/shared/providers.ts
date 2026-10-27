@@ -49,6 +49,8 @@ export const ProviderModelSchema = v.object({
   shadowed: v.boolean(),
   inputPricePerMtok: v.nullable(v.number()),
   outputPricePerMtok: v.nullable(v.number()),
+  failures: v.number(),
+  flaggedUntil: v.nullable(v.string()),
 });
 
 export const ProviderCredentialSchema = v.object({
@@ -68,6 +70,8 @@ export const ProviderSchema = v.object({
   origin: ProviderOriginSchema,
   baseUrl: v.string(),
   hasKey: v.boolean(),
+  failures: v.number(),
+  flaggedUntil: v.nullable(v.string()),
   credentials: v.array(ProviderCredentialSchema),
   models: v.array(ProviderModelSchema),
   createdAt: v.string(),

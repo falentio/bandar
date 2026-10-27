@@ -858,6 +858,11 @@ function ModelRow({
   tags: readonly ModelTag[];
   onRemove: () => void;
 }) {
+  const coolingUntil =
+    model.flaggedUntil !== null && new Date(model.flaggedUntil).getTime() > Date.now()
+      ? model.flaggedUntil
+      : null;
+
   return (
     <li className="group/model flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
       <code className="truncate font-medium">{model.alias}</code>
@@ -865,6 +870,17 @@ function ModelRow({
       {model.shadowed ? (
         <span className="text-xs text-muted-foreground">an alias with this name wins</span>
       ) : null}
+      {coolingUntil === null ? (
+        model.failures === 0 ? null : (
+          <span className="text-xs text-muted-foreground">
+            {model.failures} recent {model.failures === 1 ? "failure" : "failures"}
+          </span>
+        )
+      ) : (
+        <span className="text-xs text-destructive">
+          cooling down until {formatWhen(coolingUntil)}
+        </span>
+      )}
       {tags.map((tag) => (
         <span
           key={tag.slug}

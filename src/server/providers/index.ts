@@ -402,7 +402,7 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
   const slugs = new Set(rows.flatMap((row) => (row.slug === "" ? [] : [row.slug])));
   const now = new Date();
 
-  for (const definition of builtInProviders) {
+  for (const [index, definition] of builtInProviders.entries()) {
     if (present.has(definition.kind)) continue;
 
     // A custom row can already hold a slug that has since become reserved.
@@ -422,7 +422,8 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
         kind: definition.kind,
         baseUrl: definition.builtIn.baseUrl(),
         origin: "builtin",
-        createdAt: now,
+        // Distinct stamps keep the seeded order stable when a whole set lands at once.
+        createdAt: new Date(now.getTime() + index),
       })
       .onConflictDoNothing()
       .run();

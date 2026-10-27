@@ -60,7 +60,7 @@ export function OverviewPanel() {
           </CardHeader>
           <CardContent>
             <Button asChild variant="outline" size="sm">
-              <Link to="/providers">Add a provider</Link>
+              <Link to="/providers">Add a custom provider</Link>
             </Button>
           </CardContent>
         </Card>

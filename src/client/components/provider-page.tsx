@@ -17,7 +17,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ProviderUsage } from "../../shared/analytics";
 import {
-  PROVIDER_KINDS,
+  BUILT_IN_PROVIDERS,
+  GENERIC_PROVIDER_KINDS,
   type Provider,
   type ProviderKind,
   type ProviderModel,
@@ -54,7 +55,7 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
   google: "https://generativelanguage.googleapis.com/v1beta",
-  kilocode: "https://api.kilo.ai/api/openrouter",
+  kilocode: BUILT_IN_PROVIDERS.kilocode.baseUrl,
 };
 
 const KIND_LABELS: Record<ProviderKind, string> = {
@@ -122,7 +123,14 @@ export function ProviderPage({
                 <ProviderLogo kind={provider.kind} className="size-5" />
               </span>
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-semibold">{provider.name}</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="truncate text-lg font-semibold">{provider.name}</h1>
+                  {provider.origin === "builtin" ? (
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
+                      built-in
+                    </span>
+                  ) : null}
+                </div>
                 <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
                   <span>{KIND_LABELS[provider.kind]}</span>
                   <span aria-hidden="true">·</span>
@@ -273,11 +281,13 @@ function SettingsCard({
 }) {
   const settings = useProviderSettings(provider);
   const [saved, setSaved] = useState(false);
+  const builtIn = provider.origin === "builtin";
 
   const dirty =
-    settings.name.trim() !== provider.name ||
-    settings.kind !== provider.kind ||
-    settings.baseUrl.trim() !== provider.baseUrl;
+    !builtIn &&
+    (settings.name.trim() !== provider.name ||
+      settings.kind !== provider.kind ||
+      settings.baseUrl.trim() !== provider.baseUrl);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -296,34 +306,43 @@ function SettingsCard({
       <CardHeader>
         <CardTitle>Settings</CardTitle>
         <CardDescription>
-          Name, wire kind, and base URL. Changing the kind or URL affects every model on this
-          provider. The upstream key is on the API key tab.
+          {builtIn
+            ? "Built-in providers are defined in code. Their kind, name, and URL are fixed; the credential is on the Connection tab."
+            : "Name, wire kind, and base URL. Changing the kind or URL affects every model on this provider. The upstream key is on the API key tab."}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={submit} className="grid gap-4">
           <div className="grid gap-2">
             <Label>Kind</Label>
-            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Provider kind">
-              {PROVIDER_KINDS.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={settings.kind === value}
-                  onClick={() => settings.setKind(value)}
-                  className="group/kind flex flex-col items-center gap-1.5 rounded-lg border bg-background px-2 py-3 text-xs transition-[background-color,border-color] duration-150 ease-out hover:bg-muted/60 active:scale-[0.98] aria-checked:border-foreground/30 aria-checked:bg-muted"
-                >
-                  <ProviderLogo
-                    kind={value}
-                    className="size-5 transition-transform duration-150 ease-out group-hover/kind:scale-110"
-                  />
-                  <span className="font-medium">
-                    {KIND_LABELS[value].replace(" compatible", "")}
-                  </span>
-                </button>
-              ))}
-            </div>
+            {builtIn ? (
+              <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
+                <ProviderLogo kind={provider.kind} className="size-4" />
+                <span>{KIND_LABELS[provider.kind]}</span>
+                <span className="ms-auto text-xs text-muted-foreground">Defined in code</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Provider kind">
+                {GENERIC_PROVIDER_KINDS.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={settings.kind === value}
+                    onClick={() => settings.setKind(value)}
+                    className="group/kind flex flex-col items-center gap-1.5 rounded-lg border bg-background px-2 py-3 text-xs transition-[background-color,border-color] duration-150 ease-out hover:bg-muted/60 active:scale-[0.98] aria-checked:border-foreground/30 aria-checked:bg-muted"
+                  >
+                    <ProviderLogo
+                      kind={value}
+                      className="size-5 transition-transform duration-150 ease-out group-hover/kind:scale-110"
+                    />
+                    <span className="font-medium">
+                      {KIND_LABELS[value].replace(" compatible", "")}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -335,6 +354,7 @@ function SettingsCard({
                 onChange={(event) => settings.setName(event.target.value)}
                 maxLength={60}
                 required
+                disabled={builtIn}
               />
             </div>
             <div className="grid gap-2">
@@ -346,6 +366,7 @@ function SettingsCard({
                 onChange={(event) => settings.setBaseUrl(event.target.value)}
                 placeholder={PLACEHOLDERS[settings.kind]}
                 required
+                disabled={builtIn}
               />
             </div>
           </div>
@@ -354,16 +375,22 @@ function SettingsCard({
             <p className="text-sm text-destructive">{settings.error}</p>
           )}
 
-          <div className="flex items-center gap-3">
-            <Button type="submit" size="sm" disabled={!dirty || settings.pending}>
-              {settings.pending ? "Saving…" : "Save changes"}
-            </Button>
-            {saved ? (
-              <span className="text-xs text-muted-foreground">Saved.</span>
-            ) : dirty ? (
-              <span className="text-xs text-muted-foreground">Unsaved changes</span>
-            ) : null}
-          </div>
+          {builtIn ? (
+            <p className="text-xs text-muted-foreground">
+              Change the code definition to change a built-in provider.
+            </p>
+          ) : (
+            <div className="flex items-center gap-3">
+              <Button type="submit" size="sm" disabled={!dirty || settings.pending}>
+                {settings.pending ? "Saving…" : "Save changes"}
+              </Button>
+              {saved ? (
+                <span className="text-xs text-muted-foreground">Saved.</span>
+              ) : dirty ? (
+                <span className="text-xs text-muted-foreground">Unsaved changes</span>
+              ) : null}
+            </div>
+          )}
         </form>
       </CardContent>
     </Card>
@@ -531,31 +558,33 @@ function ApiKeyCard({
           </div>
         </form>
 
-        <div className="flex items-center justify-between gap-3 border-t pt-4">
-          <p className="text-xs text-muted-foreground">
-            Removing a provider deletes its models. Requests stay in analytics.
-          </p>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={pending || removing}
-            onClick={() => {
-              if (!window.confirm(`Remove ${provider.name} and all of its models?`)) return;
+        {provider.origin === "custom" ? (
+          <div className="flex items-center justify-between gap-3 border-t pt-4">
+            <p className="text-xs text-muted-foreground">
+              Removing a provider deletes its models. Requests stay in analytics.
+            </p>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={pending || removing}
+              onClick={() => {
+                if (!window.confirm(`Remove ${provider.name} and all of its models?`)) return;
 
-              setRemoving(true);
-              setError(null);
-              void onRemove()
-                .then((removed) => {
-                  if (!removed) setError("The provider could not be removed.");
-                })
-                .finally(() => setRemoving(false));
-            }}
-          >
-            <TrashIcon data-icon="inline-start" />
-            {removing ? "Removing…" : "Remove provider"}
-          </Button>
-        </div>
+                setRemoving(true);
+                setError(null);
+                void onRemove()
+                  .then((removed) => {
+                    if (!removed) setError("The provider could not be removed.");
+                  })
+                  .finally(() => setRemoving(false));
+              }}
+            >
+              <TrashIcon data-icon="inline-start" />
+              {removing ? "Removing…" : "Remove provider"}
+            </Button>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Provider, ProviderInput, ProviderModelInput } from "../shared/providers";
+import type { Provider, ProviderCreateInput, ProviderModelInput } from "../shared/providers";
 import { providerApi } from "./api";
 import { describeError, isError } from "./errors";
 
@@ -10,7 +10,7 @@ export type Providers = {
   readonly providers: readonly Provider[];
   readonly error: string | null;
   readonly pending: boolean;
-  readonly create: (input: ProviderInput) => Promise<Provider | null>;
+  readonly create: (input: ProviderCreateInput) => Promise<boolean>;
   readonly remove: (id: string) => Promise<boolean>;
   readonly apply: (provider: Provider) => void;
   readonly addModel: (id: string, input: ProviderModelInput) => Promise<boolean>;
@@ -58,7 +58,7 @@ export function useProviders(): Providers {
     };
   }, []);
 
-  const create = useCallback(async (input: ProviderInput): Promise<Provider | null> => {
+  const create = useCallback(async (input: ProviderCreateInput): Promise<boolean> => {
     setPending(true);
     setError(null);
 
@@ -68,11 +68,11 @@ export function useProviders(): Providers {
       setProviders((current) => current.concat(provider));
       setStatus("ready");
 
-      return provider;
+      return true;
     } catch (error) {
       setError(isError(error) ? describeError(error) : String(error));
 
-      return null;
+      return false;
     } finally {
       setPending(false);
     }

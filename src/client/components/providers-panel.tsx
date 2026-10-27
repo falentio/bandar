@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,15 +14,19 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PROVIDER_KINDS, type Provider, type ProviderKind } from "../../shared/providers";
+import {
+  GENERIC_PROVIDER_KINDS,
+  type GenericProviderKind,
+  type Provider,
+  type ProviderKind,
+} from "../../shared/providers";
 import { useProviders, type Providers } from "../use-providers";
 import { ProviderLogo } from "./provider-logo";
 
-const PLACEHOLDERS: Record<ProviderKind, string> = {
+const PLACEHOLDERS: Record<GenericProviderKind, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
   google: "https://generativelanguage.googleapis.com/v1beta",
-  kilocode: "https://api.kilo.ai/api/openrouter",
 };
 
 const KIND_LABELS: Record<ProviderKind, string> = {
@@ -34,7 +38,6 @@ const KIND_LABELS: Record<ProviderKind, string> = {
 
 export function ProvidersPanel() {
   const providers = useProviders();
-  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
 
   return (
@@ -43,12 +46,12 @@ export function ProvidersPanel() {
         <div>
           <h1 className="text-lg font-semibold">Providers</h1>
           <p className="text-sm text-muted-foreground">
-            Upstreams your gateway can call. Model aliases are added per provider.
+            Kilo Code is built in. Add custom OpenAI, Anthropic, or Google-compatible upstreams.
           </p>
         </div>
         <Button size="sm" onClick={() => setCreating(true)}>
           <PlusIcon data-icon="inline-start" />
-          Add provider
+          Add custom provider
         </Button>
       </div>
 
@@ -60,18 +63,6 @@ export function ProvidersPanel() {
         <CardContent>
           {providers.status === "loading" ? (
             <p className="py-6 text-center text-sm text-muted-foreground">Loading providers…</p>
-          ) : null}
-
-          {providers.status === "ready" && providers.providers.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-10 text-center">
-              <p className="text-sm text-muted-foreground">
-                No providers yet. Add one, then add models to it.
-              </p>
-              <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
-                <PlusIcon data-icon="inline-start" />
-                Add provider
-              </Button>
-            </div>
           ) : null}
 
           {providers.providers.length === 0 ? null : (
@@ -88,15 +79,6 @@ export function ProvidersPanel() {
         open={creating}
         providers={providers}
         onClose={() => setCreating(false)}
-        onCreated={(provider) => {
-          if (provider.kind !== "kilocode") return;
-
-          void navigate({
-            to: "/providers/$providerId",
-            params: { providerId: provider.id },
-            search: { tab: "api-key" },
-          });
-        }}
       />
     </div>
   );
@@ -119,9 +101,14 @@ function ProviderRow({ provider }: { provider: Provider }) {
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{provider.name}</span>
+            {provider.origin === "builtin" ? (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
+                built-in
+              </span>
+            ) : null}
             {provider.hasKey ? null : (
               <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[0.7rem] text-destructive">
-                {provider.kind === "kilocode" ? "not connected" : "no key"}
+                {provider.origin === "builtin" ? "not connected" : "no key"}
               </span>
             )}
           </span>
@@ -141,15 +128,13 @@ function CreateProviderDialog({
   open,
   providers,
   onClose,
-  onCreated,
 }: {
   open: boolean;
   providers: Providers;
   onClose: () => void;
-  onCreated: (provider: Provider) => void;
 }) {
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<ProviderKind>("openai");
+  const [kind, setKind] = useState<GenericProviderKind>("openai");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -171,10 +156,9 @@ function CreateProviderDialog({
       apiKey: apiKey.trim(),
     });
 
-    if (created !== null) {
+    if (created) {
       reset();
       onClose();
-      onCreated(created);
     }
   };
 
@@ -190,16 +174,16 @@ function CreateProviderDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add provider</DialogTitle>
+          <DialogTitle>Add custom provider</DialogTitle>
           <DialogDescription>
-            Pick the wire the upstream speaks. Models are added after the provider exists.
+            Pick the wire the custom upstream speaks. Models are added after the provider exists.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-4">
           <div className="grid gap-2">
             <Label>Kind</Label>
-            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Provider kind">
-              {PROVIDER_KINDS.map((value) => (
+            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Provider kind">
+              {GENERIC_PROVIDER_KINDS.map((value) => (
                 <button
                   key={value}
                   type="button"
@@ -251,28 +235,21 @@ function CreateProviderDialog({
             />
           </div>
 
-          {kind === "kilocode" ? (
-            <p className="rounded-lg border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
-              Kilo Code connects with a device code. After adding it, you will get a code to approve
-              at kilocode.ai.
+          <div className="grid gap-2">
+            <Label htmlFor="provider-key">API key</Label>
+            <Input
+              id="provider-key"
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder="Optional for local upstreams"
+              autoComplete="off"
+              disabled={providers.pending}
+            />
+            <p className="text-xs text-muted-foreground">
+              Sealed with AES-GCM before it reaches SQLite. It is never returned by the API.
             </p>
-          ) : (
-            <div className="grid gap-2">
-              <Label htmlFor="provider-key">API key</Label>
-              <Input
-                id="provider-key"
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder="Optional for local upstreams"
-                autoComplete="off"
-                disabled={providers.pending}
-              />
-              <p className="text-xs text-muted-foreground">
-                Sealed with AES-GCM before it reaches SQLite. It is never returned by the API.
-              </p>
-            </div>
-          )}
+          </div>
 
           {providers.error === null ? null : (
             <p className="text-sm text-destructive">{providers.error}</p>
@@ -293,7 +270,7 @@ function CreateProviderDialog({
                   setFormError("Name and base URL are required.");
               }}
             >
-              {providers.pending ? "Adding…" : "Add provider"}
+              {providers.pending ? "Adding…" : "Add custom provider"}
             </Button>
           </DialogFooter>
         </form>

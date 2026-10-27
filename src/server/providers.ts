@@ -1,12 +1,16 @@
 import { and, asc, eq } from "drizzle-orm";
 import * as v from "valibot";
-import type {
-  Provider,
-  ProviderAuthMode,
-  ProviderInput,
-  ProviderKind,
-  ProviderList,
-  ProviderModelInput,
+import {
+  BUILT_IN_PROVIDERS,
+  BUILT_IN_PROVIDER_KINDS,
+  GENERIC_PROVIDER_KINDS,
+  type Provider,
+  type ProviderAuthMode,
+  type ProviderCreateInput,
+  type ProviderInput,
+  type ProviderKind,
+  type ProviderList,
+  type ProviderModelInput,
 } from "../shared/providers";
 import { parseCredential, type Credential } from "./credential";
 import { KILO_MODELS_URL } from "./router/adapters/kilocode";
@@ -16,6 +20,13 @@ import { providerModels, providers } from "./db/schema";
 import type { Sealer } from "./seal";
 
 export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
+
+export class ProviderRuleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderRuleError";
+  }
+}
 
 type ProviderPatch = {
   name: string;
@@ -39,6 +50,8 @@ export type ResolvedTarget = {
 };
 
 export async function listProviders(deps: ProviderDeps, userId: string): Promise<ProviderList> {
+  await ensureBuiltInProviders(deps, userId);
+
   const providerRows = await deps.db
     .select()
     .from(providers)
@@ -65,11 +78,21 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
     grouped.set(row.providerId, list);
   }
 
+  const ordered = [...providerRows].sort((left, right) => {
+    const leftRank = left.origin === "builtin" ? 0 : 1;
+    const rightRank = right.origin === "builtin" ? 0 : 1;
+
+    if (leftRank !== rightRank) return leftRank - rightRank;
+
+    return left.createdAt.getTime() - right.createdAt.getTime();
+  });
+
   return {
-    providers: providerRows.map((row) => ({
+    providers: ordered.map((row) => ({
       id: row.id,
       name: row.name,
       kind: row.kind,
+      origin: row.origin,
       baseUrl: row.baseUrl,
       authMode: row.authMode,
       hasKey: row.apiKey !== "",
@@ -90,8 +113,10 @@ export async function readProvider(
 export async function createProvider(
   deps: ProviderDeps,
   userId: string,
-  input: ProviderInput,
+  input: ProviderCreateInput,
 ): Promise<Provider> {
+  await ensureBuiltInProviders(deps, userId);
+
   const id = crypto.randomUUID();
   const now = new Date();
 
@@ -112,6 +137,7 @@ export async function createProvider(
         baseUrl: input.baseUrl,
         apiKey,
         authMode: "api-key",
+        origin: "custom",
         createdAt: now,
       })
       .run();
@@ -133,6 +159,19 @@ export async function updateProvider(
   const existing = await findProvider(deps, userId, id);
 
   if (existing === null) return null;
+
+  if (
+    existing.origin === "builtin" &&
+    (input.name !== existing.name ||
+      input.kind !== existing.kind ||
+      input.baseUrl !== existing.baseUrl)
+  ) {
+    throw new ProviderRuleError("built-in provider settings come from the code");
+  }
+
+  if (existing.origin === "custom" && !GENERIC_PROVIDER_KINDS.some((kind) => kind === input.kind)) {
+    throw new ProviderRuleError("custom providers use one of the generic wires");
+  }
 
   const apiKey =
     input.apiKey === ""
@@ -386,6 +425,63 @@ export async function readCredential(deps: ProviderDeps, sealed: string): Promis
 
   // A key saved before credentials carried an auth mode is a bare key.
   return credential ?? { authMode: "api-key", apiKey: plaintext };
+}
+
+async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promise<void> {
+  const rows = await deps.db
+    .select({ kind: providers.kind, name: providers.name, origin: providers.origin })
+    .from(providers)
+    .where(eq(providers.userId, userId));
+
+  const present = new Set(rows.filter((row) => row.origin === "builtin").map((row) => row.kind));
+  const names = new Set(rows.map((row) => row.name));
+  const now = new Date();
+
+  for (const kind of BUILT_IN_PROVIDER_KINDS) {
+    if (present.has(kind)) continue;
+
+    const definition = BUILT_IN_PROVIDERS[kind];
+    const name = availableName(definition.name, names);
+
+    names.add(name);
+
+    deps.db
+      .insert(providers)
+      .values({
+        id: crypto.randomUUID(),
+        userId,
+        name,
+        kind,
+        baseUrl: builtInBaseUrl(kind),
+        apiKey: "",
+        authMode: "api-key",
+        origin: "builtin",
+        createdAt: now,
+      })
+      .onConflictDoNothing()
+      .run();
+  }
+}
+
+function builtInBaseUrl(kind: keyof typeof BUILT_IN_PROVIDERS): string {
+  const definition = BUILT_IN_PROVIDERS[kind];
+
+  if (kind !== "kilocode") return definition.baseUrl;
+
+  const origin =
+    Bun.env.BANDAR_KILOCODE_API?.replace(/\/+$/, "") ?? new URL(definition.baseUrl).origin;
+
+  return `${origin}/api/openrouter`;
+}
+
+function availableName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+
+  let suffix = 2;
+
+  while (taken.has(`${base} ${suffix}`)) suffix += 1;
+
+  return `${base} ${suffix}`;
 }
 
 export async function saveOAuthCredential(

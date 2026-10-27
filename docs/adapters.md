@@ -77,6 +77,25 @@ export function adapterFor(kind: ProviderKind): ProviderAdapter {
 the binary is compiled, so a static, exhaustive record is the registration
 mechanism.
 
+## Built-in and custom providers
+
+`GENERIC_PROVIDER_KINDS` is the list a user sees in **Add custom provider**:
+`openai`, `anthropic`, and `google`. A custom provider is a row in SQLite with
+`origin = "custom"` and one of those wires. Adding one never changes code.
+
+A built-in provider is defined by `BUILT_IN_PROVIDERS` and
+`BUILT_IN_PROVIDER_KINDS` in `src/shared/providers.ts`. Its row has
+`origin = "builtin"`, is seeded for every account by `ensureBuiltInProviders`,
+and carries a kind from the built-in list. Kilo Code is the current built-in:
+its gateway adapter is `kilocode`, its login is an `OAuthConnector`, and its
+name, kind, and base URL come from code. Built-in rows cannot be created through
+the provider API, edited in Settings, or removed; they reappear on the next
+listing if deleted directly.
+
+The distinction is about existence, not wire shape. A built-in may speak an
+OpenAI-compatible wire, as Kilo Code does, but it still gets its own adapter so
+its OAuth headers, catalog, and account header stay in one place.
+
 ## Errors
 
 Adapters throw one type:
@@ -143,7 +162,9 @@ not measure time, and non-streaming requests have no TTFT.
 
 ## Adding a kind
 
-1. Add the literal to `PROVIDER_KINDS` in `src/shared/providers.ts`.
+1. For a generic wire, add the literal to `GENERIC_PROVIDER_KINDS` in
+   `src/shared/providers.ts`. For a built-in, add it to
+   `BUILT_IN_PROVIDER_KINDS` and add a definition to `BUILT_IN_PROVIDERS`.
 2. Create `src/server/router/adapters/<kind>.ts`. Import the helpers, implement
    `chat` and `stream`, and keep every wire type inside the file.
 3. Register it in `src/server/router/adapters/index.ts`. The `satisfies` record
@@ -156,14 +177,15 @@ not measure time, and non-streaming requests have no TTFT.
 No database migration is needed for a new kind: `providers.kind` is text and its
 TypeScript type comes from `ProviderKind`. Credentials already have an
 `auth_mode` column and a sealed bundle, so an API-key kind and an OAuth kind use
-the same row shape. The dashboard's kind picker and the provider logo table read
-`PROVIDER_KINDS`, so a new kind appears in both once it has a path in
+the same row shape. `origin` separates a seeded built-in from a custom row. The
+dashboard's kind picker, the add dialog, and the provider logo table read the
+generic and built-in lists, so a new kind appears once it has a path in
 `./src/client/components/provider-logo.tsx`.
 
-## OAuth kinds
+## OAuth built-ins
 
-Kilo Code is the first kind that logs in instead of accepting a key. The shared
-contract adds it to `OAUTH_PROVIDER_KINDS`; a kind in that list gets the
+Kilo Code is the first provider that logs in instead of accepting a key. The
+shared contract adds it to `OAUTH_PROVIDER_KINDS`; a kind in that list gets the
 **Connection** tab and the `/api/providers/:id/oauth/{start,poll}` routes.
 
 `src/server/oauth.ts` holds one `OAuthConnector` per OAuth kind:
@@ -181,7 +203,8 @@ device code server-side, keyed by user and provider; the start response returns
 only the short user code and the verification URL. The poll stores the token
 with `saveOAuthCredential`, which seals the OAuth bundle and sets
 `providers.auth_mode = "oauth"`. An API key saved later replaces the connection
-and switches the mode back to `"api-key"`.
+and switches the mode back to `"api-key"`. A built-in provider's row is seeded
+before login, so the Connection tab works on the first visit.
 
 An OAuth connector that needs an account identifier should look it up during
 `poll` and return it in the bundle, as Kilo Code does with `organizationId`. The
@@ -190,13 +213,15 @@ adapter then decides whether that identifier becomes a header.
 ## Contract tests
 
 The smoke run is the adapter conformance suite. It boots the compiled binary,
-points one provider of each kind at a local fake upstream, drives the gateway with
-a gateway key, and reads the analytics row back. That covers key decryption,
-header construction, request translation, non-stream parsing, SSE parsing,
-usage extraction, finish normalization, TTFT, and tokens-per-second. The Kilo
-Code checks go through a fake device-auth server, store the OAuth bundle, import
-a catalog that collides with an existing alias, and call both stream and
-non-stream gateway routes with the organization header.
+points one custom provider of each generic wire at a local fake upstream, checks
+that the built-in Kilo Code row was seeded, drives the gateway with a gateway key,
+and reads the analytics row back. That covers key decryption, header construction,
+request translation, non-stream parsing, SSE parsing, usage extraction, finish
+normalization, TTFT, and tokens-per-second. The Kilo Code checks go through a fake
+device-auth server, store the OAuth bundle, import a catalog that collides with an
+existing alias, call both stream and non-stream gateway routes with the
+organization header, and prove the built-in row cannot be added, edited, removed,
+or seeded twice.
 
 Adapters whose wire differs in a way the fake does not model (for example, a
 provider that sends usage only on a final event) should extend the fake and add

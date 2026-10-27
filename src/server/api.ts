@@ -5,6 +5,7 @@ import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
   OAUTH_PROVIDER_KINDS,
+  ProviderCreateInputSchema,
   ProviderModelRefreshSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
@@ -30,6 +31,7 @@ import {
   readProvider,
   removeProvider,
   removeProviderModel,
+  ProviderRuleError,
   saveOAuthCredential,
   updateProvider,
   type ProviderDeps,
@@ -131,7 +133,7 @@ export function createApi(deps: ApiDeps) {
       if (caller instanceof Response) return caller;
 
       // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
-      const input = parseInput(ProviderInputSchema, body as ParseableInput);
+      const input = parseInput(ProviderCreateInputSchema, body as ParseableInput);
 
       try {
         const provider = await createProvider(deps.providers, caller.userId, input);
@@ -169,6 +171,12 @@ export function createApi(deps: ApiDeps) {
 
         return provider;
       } catch (error) {
+        if (error instanceof ProviderRuleError) {
+          set.status = 400;
+
+          return failure("built_in", error.message);
+        }
+
         if (error instanceof Error && isUniqueViolation(error)) {
           set.status = 409;
 
@@ -360,12 +368,21 @@ export function createApi(deps: ApiDeps) {
       if (caller instanceof Response) return caller;
 
       const { id } = parseInput(ProviderParamsSchema, params);
+      const provider = await readProvider(deps.providers, caller.userId, id);
 
-      if (!(await removeProvider(deps.providers, caller.userId, id))) {
+      if (provider === null) {
         set.status = 404;
 
         return failure("not_found", `provider ${id} not found`);
       }
+
+      if (provider.origin === "builtin") {
+        set.status = 400;
+
+        return failure("built_in", "a built-in provider cannot be removed");
+      }
+
+      await removeProvider(deps.providers, caller.userId, id);
 
       set.status = 204;
     })

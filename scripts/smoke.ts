@@ -149,6 +149,21 @@ try {
     cookie = sessionCookie(response);
   });
 
+  await check("GET /api/providers seeds the built-in Kilo Code provider", async () => {
+    const list = await getJson(providerPaths.list, ProviderListSchema, 200);
+    const builtIn = list.providers.find((provider) => provider.origin === "builtin");
+
+    if (builtIn === undefined) throw new Error("the built-in Kilo Code provider is missing");
+
+    assert.equal(builtIn.kind, "kilocode");
+    assert.equal(builtIn.name, "Kilo Code");
+    assert.equal(builtIn.baseUrl, `${kilocodeOrigin}/api/openrouter`);
+    assert.equal(builtIn.hasKey, false);
+    assert.deepEqual(builtIn.models, []);
+
+    kiloProvider.provider = builtIn;
+  });
+
   await check("POST /api/providers creates a provider without models", async () => {
     openaiProvider.provider = await postJson(
       providerPaths.list,
@@ -223,11 +238,16 @@ try {
     );
   });
 
-  await check("GET /api/providers lists three providers without secrets", async () => {
+  await check("GET /api/providers lists three custom providers and the built-in Kilo", async () => {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);
+    const custom = list.providers.filter((provider) => provider.origin === "custom");
+    const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
-    assert.equal(list.providers.length, 3);
-    assert.ok(list.providers.every((provider) => provider.hasKey));
+    assert.equal(custom.length, 3);
+    assert.equal(builtIn.length, 1);
+    assert.equal(list.providers[0]?.origin, "builtin");
+    assert.ok(custom.every((provider) => provider.hasKey));
+    assert.equal(builtIn[0]?.hasKey, false);
     assert.ok(list.providers.every((provider) => !Object.hasOwn(provider, "apiKey")));
   });
 
@@ -426,20 +446,42 @@ try {
     );
   });
 
-  await check("POST /api/providers creates a Kilo Code provider without a key", async () => {
-    kiloProvider.provider = await postJson(
-      providerPaths.list,
-      {
-        name: "Fake Kilo",
-        kind: "kilocode",
-        baseUrl: `${upstreamOrigin}/kilo`,
-      },
-      ProviderSchema,
-      201,
-    );
+  await check("POST /api/providers cannot create another built-in provider", async () => {
+    const response = await post(providerPaths.list, {
+      name: "Another Kilo",
+      kind: "kilocode",
+      baseUrl: `${kilocodeOrigin}/api/openrouter`,
+    });
 
-    assert.equal(kiloProvider.provider.authMode, "api-key");
-    assert.equal(kiloProvider.provider.hasKey, false);
+    assert.equal(response.status, 422);
+  });
+
+  await check("built-in provider settings and removal are protected", async () => {
+    const id = kiloProvider.provider?.id ?? "";
+
+    const update = await fetch(new URL(providerPaths.update(id), origin), {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...sessionHeaders() },
+      body: JSON.stringify({
+        name: "Renamed Kilo",
+        kind: "kilocode",
+        baseUrl: "https://example.com",
+      }),
+    });
+
+    assert.equal(update.status, 400);
+
+    const remove = await fetch(new URL(providerPaths.remove(id), origin), {
+      method: "DELETE",
+      headers: sessionHeaders(),
+    });
+
+    assert.equal(remove.status, 400);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.equal(detail.provider.name, "Kilo Code");
+    assert.equal(detail.provider.baseUrl, `${kilocodeOrigin}/api/openrouter`);
   });
 
   await check("POST /api/providers/:id/oauth/start returns a device code", async () => {
@@ -642,6 +684,14 @@ try {
     );
 
     assert.ok(analytics.summary.requests >= 3, "analytics did not survive the restart");
+
+    const list = await getJson(providerPaths.list, ProviderListSchema, 200, second.origin);
+
+    assert.equal(
+      list.providers.filter((provider) => provider.origin === "builtin").length,
+      1,
+      "the built-in Kilo Code provider was seeded twice",
+    );
   });
 } finally {
   await second.stop();
@@ -650,12 +700,15 @@ try {
   rmSync(workDir, { recursive: true, force: true });
 }
 
+if (process.env.BANDAR_SMOKE_DEBUG === "1") {
+  console.log(first.log());
+  console.log(second.log());
+}
+
 if (failures > 0) {
   console.error(`smoke failed: ${failures} check(s)`);
   process.exit(1);
 }
-
-if (process.env.BANDAR_SMOKE_DEBUG === "1") console.log(first.log());
 
 console.log("smoke ok");
 
@@ -1023,7 +1076,21 @@ function startUpstream() {
         ]);
       }
 
-      if (url.pathname === "/kilo/chat/completions") {
+      return jsonError(404, `no fake upstream for ${url.pathname}`);
+    },
+  });
+}
+
+function startKilocode() {
+  let polls = 0;
+
+  return Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+
+      if (url.pathname === "/api/openrouter/chat/completions") {
         if (request.headers.get("authorization") !== "Bearer kilo-device-token") {
           return jsonError(401, "bad kilo connection");
         }
@@ -1031,6 +1098,13 @@ function startUpstream() {
         if (request.headers.get("x-kilocode-organizationid") !== "org-smoke") {
           return jsonError(401, "missing kilo organization");
         }
+
+        const body = v.safeParse(
+          v.object({ stream: v.optional(v.boolean()) }),
+          await request.json(),
+        );
+
+        const stream = body.success ? (body.output.stream ?? false) : false;
 
         if (!stream) {
           return Response.json({
@@ -1053,20 +1127,6 @@ function startUpstream() {
           "[DONE]",
         ]);
       }
-
-      return jsonError(404, `no fake upstream for ${url.pathname}`);
-    },
-  });
-}
-
-function startKilocode() {
-  let polls = 0;
-
-  return Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch(request) {
-      const url = new URL(request.url);
 
       if (url.pathname === "/api/device-auth/codes" && request.method === "POST") {
         return Response.json({

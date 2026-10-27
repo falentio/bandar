@@ -1,5 +1,5 @@
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { ProviderAuthMode, ProviderKind } from "../../shared/providers";
+import type { ProviderAuthMode, ProviderKind, ProviderOrigin } from "../../shared/providers";
 import { user } from "./auth-schema";
 
 export const providers = sqliteTable(
@@ -14,6 +14,7 @@ export const providers = sqliteTable(
     baseUrl: text("base_url").notNull(),
     apiKey: text("api_key").notNull().default(""),
     authMode: text("auth_mode").$type<ProviderAuthMode>().notNull().default("api-key"),
+    origin: text("origin").$type<ProviderOrigin>().notNull().default("custom"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [uniqueIndex("providers_user_name").on(table.userId, table.name)],

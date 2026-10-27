@@ -26,6 +26,7 @@ import {
   type SignUpInput,
 } from "../shared/auth";
 import {
+  ProviderCreateInputSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
   ProviderListSchema,
@@ -36,6 +37,7 @@ import {
   ProviderSchema,
   providerPaths,
   type Provider,
+  type ProviderCreateInput,
   type ProviderDetail,
   type ProviderInput,
   type ProviderList,
@@ -61,10 +63,10 @@ export const providerApi = {
   list: (): Promise<ProviderList> => request(providerPaths.list, ProviderListSchema),
   detail: (id: string, days: number): Promise<ProviderDetail> =>
     request(`${providerPaths.detail(id)}?days=${days}`, ProviderDetailSchema),
-  create: (input: ProviderInput): Promise<Provider> =>
+  create: (input: ProviderCreateInput): Promise<Provider> =>
     request(providerPaths.list, ProviderSchema, {
       method: "POST",
-      body: JSON.stringify(v.parse(ProviderInputSchema, input)),
+      body: JSON.stringify(v.parse(ProviderCreateInputSchema, input)),
     }),
   update: (id: string, input: ProviderInput): Promise<Provider> =>
     request(providerPaths.update(id), ProviderSchema, {

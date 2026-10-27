@@ -1,8 +1,9 @@
 import { and, asc, eq } from "drizzle-orm";
 import type {
   Provider,
-  ProviderAuthMode,
   ProviderCreateInput,
+  ProviderCredential,
+  ProviderCredentialInput,
   ProviderInput,
   ProviderKind,
   ProviderList,
@@ -11,7 +12,7 @@ import type {
 import { availableSlug, providerRefOf, slugify, TAG_REF_PREFIX } from "../../shared/slugs";
 import { parseCredential, type Credential } from "../credential";
 import type { Db } from "../db/client";
-import { providerModels, providers } from "../db/schema";
+import { providerCredentials, providerModels, providers } from "../db/schema";
 import type { Sealer } from "../seal";
 import { renumberTagPriorities } from "../tags";
 import { builtInProviders, definitionFor, reservedProviderSlugs } from "./registry";
@@ -36,8 +37,6 @@ type ProviderPatch = {
   slug?: string;
   kind: ProviderKind;
   baseUrl: string;
-  authMode?: ProviderAuthMode;
-  apiKey?: string;
 };
 
 export async function listProviders(deps: ProviderDeps, userId: string): Promise<ProviderList> {
@@ -54,6 +53,28 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
     .from(providerModels)
     .where(eq(providerModels.userId, userId))
     .orderBy(asc(providerModels.createdAt));
+
+  const credentialRows = await deps.db
+    .select()
+    .from(providerCredentials)
+    .where(eq(providerCredentials.userId, userId))
+    .orderBy(asc(providerCredentials.createdAt), asc(providerCredentials.id));
+
+  const groupedCredentials = new Map<string, ProviderCredential[]>();
+
+  for (const row of credentialRows) {
+    const list = groupedCredentials.get(row.providerId) ?? [];
+
+    list.push({
+      id: row.id,
+      name: row.name,
+      authMode: row.authMode,
+      failures: row.failures,
+      flaggedUntil: row.flaggedUntil === null ? null : row.flaggedUntil.toISOString(),
+      createdAt: row.createdAt.toISOString(),
+    });
+    groupedCredentials.set(row.providerId, list);
+  }
 
   const enabledAliases = new Set(modelRows.filter((row) => row.enabled).map((row) => row.alias));
   const providerSlugs = new Map(providerRows.map((row) => [row.id, row.slug]));
@@ -86,18 +107,22 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
   });
 
   return {
-    providers: ordered.map((row) => ({
-      id: row.id,
-      name: row.name,
-      slug: row.slug,
-      kind: row.kind,
-      origin: row.origin,
-      baseUrl: row.baseUrl,
-      authMode: row.authMode,
-      hasKey: row.apiKey !== "",
-      models: grouped.get(row.id) ?? [],
-      createdAt: row.createdAt.toISOString(),
-    })),
+    providers: ordered.map((row) => {
+      const credentials = groupedCredentials.get(row.id) ?? [];
+
+      return {
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        kind: row.kind,
+        origin: row.origin,
+        baseUrl: row.baseUrl,
+        hasKey: credentials.length > 0,
+        credentials,
+        models: grouped.get(row.id) ?? [],
+        createdAt: row.createdAt.toISOString(),
+      };
+    }),
   };
 }
 
@@ -120,9 +145,9 @@ export async function createProvider(
   const now = new Date();
   const slug = availableSlug(slugify(input.name), await takenSlugs(deps, userId));
 
-  const apiKey =
+  const sealedKey =
     input.apiKey === ""
-      ? ""
+      ? null
       : await deps.sealer.seal(
           JSON.stringify({ authMode: "api-key", apiKey: input.apiKey } satisfies Credential),
         );
@@ -136,12 +161,24 @@ export async function createProvider(
         slug,
         kind: input.kind,
         baseUrl: input.baseUrl,
-        apiKey,
-        authMode: "api-key",
         origin: "custom",
         createdAt: now,
       })
       .run();
+
+    if (sealedKey !== null) {
+      tx.insert(providerCredentials)
+        .values({
+          id: crypto.randomUUID(),
+          userId,
+          providerId: id,
+          name: "",
+          sealedKey,
+          authMode: "api-key",
+          createdAt: now,
+        })
+        .run();
+    }
   });
 
   const created = await findProvider(deps, userId, id);
@@ -175,13 +212,6 @@ export async function updateProvider(
     throw new ProviderRuleError("custom providers use one of the generic wires", "validation");
   }
 
-  const apiKey =
-    input.apiKey === ""
-      ? undefined
-      : await deps.sealer.seal(
-          JSON.stringify({ authMode: "api-key", apiKey: input.apiKey } satisfies Credential),
-        );
-
   const patch: ProviderPatch = {
     name: input.name,
     kind: input.kind,
@@ -194,11 +224,6 @@ export async function updateProvider(
     }
 
     patch.slug = input.slug;
-  }
-
-  if (apiKey !== undefined) {
-    patch.apiKey = apiKey;
-    patch.authMode = "api-key";
   }
 
   deps.db.transaction((tx) => {
@@ -374,8 +399,6 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
         slug,
         kind: definition.kind,
         baseUrl: definition.builtIn.baseUrl(),
-        apiKey: "",
-        authMode: "api-key",
         origin: "builtin",
         createdAt: now,
       })
@@ -471,21 +494,79 @@ function builtInSlugOf(kind: ProviderKind): string | null {
   return definitionFor(kind).builtIn?.slug ?? null;
 }
 
-export async function saveOAuthCredential(
+export async function addCredential(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  input: ProviderCredentialInput,
+): Promise<Provider | null> {
+  return insertCredential(deps, userId, providerId, {
+    name: input.name,
+    authMode: "api-key",
+    credential: { authMode: "api-key", apiKey: input.apiKey },
+  });
+}
+
+export async function addOAuthCredential(
   deps: ProviderDeps,
   userId: string,
   providerId: string,
   credential: Credential,
 ): Promise<Provider | null> {
+  return insertCredential(deps, userId, providerId, {
+    name: "",
+    authMode: credential.authMode,
+    credential,
+  });
+}
+
+export async function removeCredential(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  credentialId: string,
+): Promise<Provider | null> {
   if ((await findProvider(deps, userId, providerId)) === null) return null;
 
   deps.db
-    .update(providers)
-    .set({
-      apiKey: await deps.sealer.seal(JSON.stringify(credential)),
-      authMode: credential.authMode,
+    .delete(providerCredentials)
+    .where(
+      and(
+        eq(providerCredentials.id, credentialId),
+        eq(providerCredentials.providerId, providerId),
+        eq(providerCredentials.userId, userId),
+      ),
+    )
+    .run();
+
+  return findProvider(deps, userId, providerId);
+}
+
+type NewCredential = {
+  readonly name: string;
+  readonly authMode: Credential["authMode"];
+  readonly credential: Credential;
+};
+
+async function insertCredential(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  input: NewCredential,
+): Promise<Provider | null> {
+  if ((await findProvider(deps, userId, providerId)) === null) return null;
+
+  deps.db
+    .insert(providerCredentials)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      providerId,
+      name: input.name,
+      sealedKey: await deps.sealer.seal(JSON.stringify(input.credential)),
+      authMode: input.authMode,
+      createdAt: new Date(),
     })
-    .where(and(eq(providers.id, providerId), eq(providers.userId, userId)))
     .run();
 
   return findProvider(deps, userId, providerId);

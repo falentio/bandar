@@ -592,7 +592,8 @@ try {
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
-    assert.equal(detail.provider.authMode, "oauth");
+    assert.equal(detail.provider.credentials[0]?.authMode, "oauth");
+    assert.equal(detail.provider.credentials.length, 1);
     assert.equal(detail.provider.hasKey, true);
     assert.equal(Object.hasOwn(detail.provider, "apiKey"), false);
   });
@@ -608,6 +609,33 @@ try {
 
     assert.equal((await post(providerPaths.oauthStart(id), {})).status, 400);
     assert.equal((await post(providerPaths.refreshModels(id), {})).status, 400);
+  });
+
+  await check("POST /api/providers/:id/credentials appends and deletes a key", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const added = await postJson(
+      providerPaths.credentials(id),
+      { name: "Backup", apiKey: "openai-key-2" },
+      ProviderSchema,
+      201,
+    );
+
+    assert.deepEqual(
+      added.credentials.map((credential) => credential.name),
+      ["", "Backup"],
+    );
+    assert.equal(added.hasKey, true);
+
+    const removed = await deleteJson(
+      providerPaths.credential(id, added.credentials[1]?.id ?? ""),
+      ProviderSchema,
+    );
+
+    assert.deepEqual(
+      removed.credentials.map((credential) => credential.name),
+      [""],
+    );
   });
 
   await check("POST /api/providers/:id/models/refresh imports the catalog once", async () => {

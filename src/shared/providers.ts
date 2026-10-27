@@ -51,6 +51,15 @@ export const ProviderModelSchema = v.object({
   outputPricePerMtok: v.nullable(v.number()),
 });
 
+export const ProviderCredentialSchema = v.object({
+  id: v.string(),
+  name: v.string(),
+  authMode: ProviderAuthModeSchema,
+  failures: v.number(),
+  flaggedUntil: v.nullable(v.string()),
+  createdAt: v.string(),
+});
+
 export const ProviderSchema = v.object({
   id: v.string(),
   name: v.string(),
@@ -58,8 +67,8 @@ export const ProviderSchema = v.object({
   kind: ProviderKindSchema,
   origin: ProviderOriginSchema,
   baseUrl: v.string(),
-  authMode: ProviderAuthModeSchema,
   hasKey: v.boolean(),
+  credentials: v.array(ProviderCredentialSchema),
   models: v.array(ProviderModelSchema),
   createdAt: v.string(),
 });
@@ -95,8 +104,17 @@ export const ProviderInputSchema = v.object({
   name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(60)),
   kind: ProviderKindSchema,
   baseUrl: v.pipe(v.string(), v.trim(), v.url()),
-  apiKey: v.optional(v.pipe(v.string(), v.maxLength(500)), ""),
   slug: v.optional(SlugSchema),
+});
+
+export const ProviderCredentialInputSchema = v.object({
+  name: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(60)), ""),
+  apiKey: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(500)),
+});
+
+export const ProviderCredentialParamsSchema = v.object({
+  id: v.string(),
+  credentialId: v.string(),
 });
 
 export const ProviderCreateInputSchema = v.object({
@@ -133,6 +151,9 @@ export const providerPaths = {
   remove: (id: string) => `/api/providers/${id}`,
   oauthStart: (id: string) => `/api/providers/${id}/oauth/start`,
   oauthPoll: (id: string) => `/api/providers/${id}/oauth/poll`,
+  credentials: (id: string) => `/api/providers/${id}/credentials`,
+  credential: (id: string, credentialId: string) =>
+    `/api/providers/${id}/credentials/${credentialId}`,
   models: (id: string) => `/api/providers/${id}/models`,
   refreshModels: (id: string) => `/api/providers/${id}/models/refresh`,
   model: (id: string, modelId: string) => `/api/providers/${id}/models/${modelId}`,
@@ -158,6 +179,12 @@ export type ProviderOAuthPoll = v.InferOutput<typeof ProviderOAuthPollSchema>;
 export type ProviderModelRefresh = v.InferOutput<typeof ProviderModelRefreshSchema>;
 
 export type ProviderModel = v.InferOutput<typeof ProviderModelSchema>;
+
+export type ProviderCredential = v.InferOutput<typeof ProviderCredentialSchema>;
+
+export type ProviderCredentialInput = v.InferOutput<typeof ProviderCredentialInputSchema>;
+
+export type ProviderCredentialParams = v.InferOutput<typeof ProviderCredentialParamsSchema>;
 
 export type Provider = v.InferOutput<typeof ProviderSchema>;
 

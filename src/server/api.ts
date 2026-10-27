@@ -5,6 +5,8 @@ import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
   ProviderCreateInputSchema,
+  ProviderCredentialInputSchema,
+  ProviderCredentialParamsSchema,
   ProviderModelRefreshSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
@@ -21,16 +23,18 @@ import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
 import {
+  addCredential,
+  addOAuthCredential,
   addProviderModel,
   createProvider,
   definitionFor,
   syncProviderModels,
   listProviders,
   readProvider,
+  removeCredential,
   removeProvider,
   removeProviderModel,
   ProviderRuleError,
-  saveOAuthCredential,
   updateProvider,
   type ProviderDeps,
 } from "./providers";
@@ -266,7 +270,7 @@ export function createApi(deps: ApiDeps) {
 
       pendingLogins.delete(key);
 
-      const saved = await saveOAuthCredential(deps.providers, caller.userId, id, result.credential);
+      const saved = await addOAuthCredential(deps.providers, caller.userId, id, result.credential);
 
       if (saved === null) {
         set.status = 404;
@@ -352,6 +356,42 @@ export function createApi(deps: ApiDeps) {
         added: updated.models.length - before,
         skipped: models.length - (updated.models.length - before),
       });
+    })
+    .post("/providers/:id/credentials", async ({ body, params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(ProviderCredentialInputSchema, body as ParseableInput);
+      const provider = await addCredential(deps.providers, caller.userId, id, input);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      set.status = 201;
+
+      return provider;
+    })
+    .delete("/providers/:id/credentials/:credentialId", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id, credentialId } = parseInput(ProviderCredentialParamsSchema, params);
+      const provider = await removeCredential(deps.providers, caller.userId, id, credentialId);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      return provider;
     })
     .delete("/providers/:id/models/:modelId", async ({ params, request, set }) => {
       const caller = await authenticate(deps.auth, request);

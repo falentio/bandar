@@ -1,4 +1,21 @@
 import * as v from "valibot";
+import { SlugSchema } from "./slugs";
+
+export const ANALYTICS_FILTER_DIMENSIONS = ["providerKind", "providerId", "model", "tag"] as const;
+
+const AnalyticsFilterValuesSchema = v.pipe(
+  v.array(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200))),
+  v.maxLength(50),
+);
+
+const AnalyticsFilterTagsSchema = v.pipe(v.array(SlugSchema), v.maxLength(50));
+
+export const AnalyticsFiltersSchema = v.object({
+  providerKind: AnalyticsFilterValuesSchema,
+  providerId: AnalyticsFilterValuesSchema,
+  model: AnalyticsFilterValuesSchema,
+  tag: AnalyticsFilterTagsSchema,
+});
 
 export const AnalyticsSummarySchema = v.object({
   requests: v.number(),
@@ -91,8 +108,27 @@ export type ModelUsage = v.InferOutput<typeof ModelUsageSchema>;
 
 export type Analytics = v.InferOutput<typeof AnalyticsSchema>;
 
+export type AnalyticsFilterDimension = (typeof ANALYTICS_FILTER_DIMENSIONS)[number];
+
+export type AnalyticsFilters = Readonly<Record<AnalyticsFilterDimension, readonly string[]>>;
+
 export type ProviderUsage = v.InferOutput<typeof ProviderUsageSchema>;
 
 export type RequestEvent = v.InferOutput<typeof RequestEventSchema>;
 
 export type RequestList = v.InferOutput<typeof RequestListSchema>;
+
+export const EMPTY_ANALYTICS_FILTERS: AnalyticsFilters = {
+  providerKind: [],
+  providerId: [],
+  model: [],
+  tag: [],
+};
+
+export function hasAnalyticsFilters(filters: AnalyticsFilters): boolean {
+  for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
+    if (filters[dimension].length > 0) return true;
+  }
+
+  return false;
+}

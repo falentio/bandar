@@ -9,10 +9,12 @@ import {
   type CreatedApiKey,
 } from "../shared/api-keys";
 import {
+  ANALYTICS_FILTER_DIMENSIONS,
   AnalyticsSchema,
   RequestListSchema,
   analyticsPaths,
   type Analytics,
+  type AnalyticsFilters,
   type RequestList,
 } from "../shared/analytics";
 import {
@@ -115,8 +117,15 @@ export const tagApi = {
 };
 
 export const analyticsApi = {
-  overview: (days: number): Promise<Analytics> =>
-    request(`${analyticsPaths.analytics}?days=${days}`, AnalyticsSchema),
+  overview: (days: number, filters: AnalyticsFilters): Promise<Analytics> => {
+    const params = new URLSearchParams({ days: String(days) });
+
+    for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
+      for (const value of filters[dimension]) params.append(dimension, value);
+    }
+
+    return request(`${analyticsPaths.analytics}?${params.toString()}`, AnalyticsSchema);
+  },
   requests: (limit = 50, providerId?: string): Promise<RequestList> =>
     request(
       providerId === undefined

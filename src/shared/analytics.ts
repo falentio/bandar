@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { SlugSchema } from "./slugs";
 
 export const ANALYTICS_FILTER_DIMENSIONS = ["providerKind", "providerId", "model", "tag"] as const;
 
@@ -7,11 +8,13 @@ const AnalyticsFilterValuesSchema = v.pipe(
   v.maxLength(50),
 );
 
+const AnalyticsFilterTagsSchema = v.pipe(v.array(SlugSchema), v.maxLength(50));
+
 export const AnalyticsFiltersSchema = v.object({
   providerKind: AnalyticsFilterValuesSchema,
   providerId: AnalyticsFilterValuesSchema,
   model: AnalyticsFilterValuesSchema,
-  tag: AnalyticsFilterValuesSchema,
+  tag: AnalyticsFilterTagsSchema,
 });
 
 export const AnalyticsSummarySchema = v.object({

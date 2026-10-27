@@ -1,12 +1,6 @@
 import { Elysia } from "elysia";
 import * as v from "valibot";
-import {
-  ANALYTICS_FILTER_DIMENSIONS,
-  AnalyticsFiltersSchema,
-  AnalyticsSchema,
-  RequestListSchema,
-  type AnalyticsFilterDimension,
-} from "../shared/analytics";
+import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
@@ -25,6 +19,7 @@ import {
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
+import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
@@ -484,7 +479,7 @@ export function createApi(deps: ApiDeps) {
       const { days } = parseInput(AnalyticsQuerySchema, query);
 
       const filters = parseInput(
-        AnalyticsFiltersSchema,
+        AnalyticsFiltersInputSchema,
         filterParams(new URL(request.url).searchParams),
       );
 
@@ -510,21 +505,6 @@ export function createApi(deps: ApiDeps) {
 
 function loginKey(userId: string, providerId: string): string {
   return `${userId}:${providerId}`;
-}
-
-function filterParams(search: URLSearchParams): Record<AnalyticsFilterDimension, string[]> {
-  const raw: Record<AnalyticsFilterDimension, string[]> = {
-    providerKind: [],
-    providerId: [],
-    model: [],
-    tag: [],
-  };
-
-  for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
-    raw[dimension] = search.getAll(dimension);
-  }
-
-  return raw;
 }
 
 function oauthKindOf(kind: ProviderKind): OAuthProviderKind | null {

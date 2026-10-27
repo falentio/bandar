@@ -91,6 +91,7 @@ capabilities only. A built-in also carries the settings its row is seeded with:
 ```ts
 type ProviderCapabilities = {
   readonly adapter: ProviderAdapter;
+  readonly authModes: readonly ProviderAuthMode[];
   readonly oauth?: OAuthConnector;
   readonly catalog?: ProviderCatalog;
 };
@@ -107,6 +108,13 @@ export type BuiltInProviderDefinition<K extends BuiltInProviderKind = BuiltInPro
     readonly builtIn: BuiltInProviderSettings;
   };
 ```
+
+`authModes` is the credential modes the kind can accept, and it is the only source
+for them: a custom kind declares `["api-key"]`, and Kilo Code declares
+`["api-key", "oauth"]` because a device login and a pasted key both reach the
+same bearer header. The `Provider` value on the wire carries the same list, which
+is what turns into the credential dialog's tabs. `registry.test.ts` requires a
+kind that lists `oauth` to have a connector, so the two cannot drift apart.
 
 `GenericProviderDefinitions` and `BuiltInProviderDefinitions` make the compiler
 fail when a kind list gains a member without a definition, when an entry carries
@@ -237,7 +245,7 @@ generic and built-in lists, so a new kind appears once it has a path in
 
 ## OAuth built-ins
 
-Kilo Code is the first provider that logs in instead of accepting a key. A
+Kilo Code is the first provider that can log in. A
 definition with an `oauth` connector serves the
 `/api/providers/:id/oauth/{start,poll}` routes; without one, both routes answer 400. The dashboard shows the **Connection** tab for Kilo Code by kind, so a new
 OAuth kind also needs a branch in `src/client/components/provider-page.tsx`.

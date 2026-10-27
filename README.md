@@ -150,7 +150,9 @@ appends each in order, and, for a provider with a device login, an **OAuth** tab
 - A provider with no credentials still takes one attempt with no credential
   header, which is how a local server that needs no key keeps working.
 - Connecting Kilo Code adds a credential. A second Kilo account becomes the next
-  entry in the chain instead of replacing the first.
+  entry in the chain instead of replacing the first. A pasted Kilo Code API key is
+  another credential beside a device login, and the chain falls from one to the
+  other like any other key.
 
 ## Analytics
 

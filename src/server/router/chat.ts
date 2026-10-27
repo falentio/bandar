@@ -428,11 +428,20 @@ function attemptPlan(providers: ProviderDeps, plan: ResolvedPlan, startedAt: Dat
 
       if (subject === null) return;
 
-      recordFailure(providers.db, subject, at);
+      try {
+        recordFailure(providers.db, subject, at);
+      } catch (error) {
+        console.error("gateway: could not record upstream failure", error);
+      }
+
       cooling.add(subjectKey(subject));
     },
     succeeded: (attempt) => {
-      recordSuccess(providers.db, subjectsOf(attempt));
+      try {
+        recordSuccess(providers.db, subjectsOf(attempt));
+      } catch (error) {
+        console.error("gateway: could not clear upstream health", error);
+      }
     },
   };
 }

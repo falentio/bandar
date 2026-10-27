@@ -236,13 +236,13 @@ export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
   openai: "OpenAI compatible",
   anthropic: "Anthropic compatible",
   google: "Google GenAI compatible",
-  kilocode: "Kilo Code",
-  tokenharbor: "Token Harbor",
-  yeta: "Yeta",
-  river: "River",
-  nous: "Nous Portal",
-  hyper: "Hyper",
-  opencode: "OpenCode Go",
+  kilocode: BUILT_IN_PROVIDERS.kilocode.name,
+  tokenharbor: BUILT_IN_PROVIDERS.tokenharbor.name,
+  yeta: BUILT_IN_PROVIDERS.yeta.name,
+  river: BUILT_IN_PROVIDERS.river.name,
+  nous: BUILT_IN_PROVIDERS.nous.name,
+  hyper: BUILT_IN_PROVIDERS.hyper.name,
+  opencode: BUILT_IN_PROVIDERS.opencode.name,
 };
 
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
-import { BUILT_IN_PROVIDER_KINDS, PROVIDER_KINDS } from "../../shared/providers";
+import {
+  BUILT_IN_PROVIDER_KINDS,
+  PROVIDER_KINDS,
+  PROVIDER_KIND_LABELS,
+} from "../../shared/providers";
 import { TAG_SLUG } from "../../shared/slugs";
 import { builtInProviders, definitionFor, reservedProviderSlugs } from "./registry";
 
@@ -32,6 +36,12 @@ describe("provider registry", () => {
 
     expect(new Set(names).size).toBe(names.length);
     expect(new Set(slugs).size).toBe(slugs.length);
+  });
+
+  test("a built-in's label is the name it seeds", () => {
+    for (const definition of builtInProviders) {
+      expect(PROVIDER_KIND_LABELS[definition.kind]).toBe(definition.builtIn.name);
+    }
   });
 
   test("reserved slugs cover the tag route and every built-in", () => {

@@ -2,7 +2,12 @@ import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
 import { entryOf, NO_PRICE, readModelIds } from "../catalog";
 import { apiBaseUrl } from "../env";
 import { bearerAdapter } from "../openai/compatible";
-import type { BuiltInProviderDefinition, CatalogRequest, ModelCatalogEntry } from "../types";
+import {
+  UpstreamError,
+  type BuiltInProviderDefinition,
+  type CatalogRequest,
+  type ModelCatalogEntry,
+} from "../types";
 import { fetchYetaPricing } from "./pricing";
 
 const settings = BUILT_IN_PROVIDERS.yeta;
@@ -23,7 +28,11 @@ async function fetchYetaCatalog(request: CatalogRequest): Promise<readonly Model
   const ids = await readModelIds(request);
 
   // Prices are metadata: a failed join leaves the models unpriced rather than unimported.
-  const prices = await fetchYetaPricing(request).catch(() => null);
+  const prices = await fetchYetaPricing(request).catch(() => {
+    if (request.signal.aborted) throw new UpstreamError("request aborted", "network");
+
+    return null;
+  });
 
   return ids.map((id) => entryOf(id, prices?.get(id) ?? NO_PRICE));
 }

@@ -6,7 +6,7 @@ import { UpstreamError } from "../types";
 import type { DeviceLogin, DevicePollResult, OAuthConnector } from "../types";
 
 const PORTAL = "https://portal.nousresearch.com";
-const CLIENT_ID = "hermes-cli";
+export const CLIENT_ID = "hermes-cli";
 const SCOPE = "inference:invoke";
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 
@@ -30,6 +30,12 @@ const FailureSchema = v.object({ error: v.string() });
 
 const PENDING = new Set(["authorization_pending", "slow_down"]);
 const TERMINAL = new Set(["expired_token", "access_denied"]);
+
+export async function oauthFailureReason(response: Response): Promise<string> {
+  const failure = v.safeParse(FailureSchema, await response.json().catch(() => null));
+
+  return failure.success ? failure.output.error : "";
+}
 
 export const nousConnector: OAuthConnector = {
   async start(signal: AbortSignal): Promise<DeviceLogin> {
@@ -58,6 +64,7 @@ export const nousConnector: OAuthConnector = {
       userCode: parsed.output.user_code,
       verificationUrl: parsed.output.verification_uri_complete ?? parsed.output.verification_uri,
       expiresInSeconds: parsed.output.expires_in,
+      intervalSeconds: Math.max(1, parsed.output.interval ?? 5),
     };
   },
 
@@ -70,8 +77,7 @@ export const nousConnector: OAuthConnector = {
     });
 
     if (response.status === 400) {
-      const failure = v.safeParse(FailureSchema, await response.json().catch(() => null));
-      const reason = failure.success ? failure.output.error : "";
+      const reason = await oauthFailureReason(response);
 
       if (PENDING.has(reason)) return { state: "pending" };
 

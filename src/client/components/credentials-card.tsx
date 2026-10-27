@@ -181,8 +181,8 @@ function cardCopy(provider: Provider): CardCopy {
   return {
     title: `${provider.name} connection`,
     description: provider.authModes.includes("api-key")
-      ? `${description}, or save an API key. Each connection joins the chain.`
-      : `${description}. Each connection joins the chain.`,
+      ? `${description}, or save an API key. A connection joins the chain or replaces an expiring one.`
+      : `${description}. A connection joins the chain or replaces an expiring one.`,
   };
 }
 

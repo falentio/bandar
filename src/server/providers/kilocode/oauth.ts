@@ -7,6 +7,7 @@ const DeviceLoginSchema = v.object({
   user_code: v.string(),
   verificationUrl: v.string(),
   expiresIn: v.optional(v.number(), 600),
+  interval: v.optional(v.number(), 5),
 });
 
 const PendingSchema = v.object({ status: v.literal("pending") });
@@ -45,6 +46,7 @@ export const kilocodeConnector: OAuthConnector = {
       userCode: parsed.output.user_code,
       verificationUrl: parsed.output.verificationUrl,
       expiresInSeconds: parsed.output.expiresIn,
+      intervalSeconds: Math.max(1, parsed.output.interval),
     };
   },
 

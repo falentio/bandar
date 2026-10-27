@@ -11,18 +11,16 @@ export type ModelPrices = {
 
 export const NO_PRICE: ModelPrices = { inputPricePerMtok: null, outputPricePerMtok: null };
 
-export async function readModelIds({
-  baseUrl,
-  credential,
-  signal,
-}: CatalogRequest): Promise<readonly string[]> {
+export async function readModelIds(request: CatalogRequest): Promise<readonly string[]> {
+  const credential = await request.credential();
+
   if (credential === null) {
     throw new UpstreamError("add a key before importing the catalog", "invalid_request");
   }
 
-  const response = await fetch(joinUrl(baseUrl, "models"), {
+  const response = await fetch(joinUrl(request.baseUrl, "models"), {
     headers: { authorization: `Bearer ${secretOf(credential)}` },
-    signal,
+    signal: request.signal,
   }).catch((error: Error) => {
     throw new UpstreamError(`could not read the model catalog: ${error.message}`, "network");
   });
@@ -35,7 +33,7 @@ export async function readModelIds({
     );
   }
 
-  const parsed = v.safeParse(ModelIdsSchema, await response.json());
+  const parsed = v.safeParse(ModelIdsSchema, await response.json().catch(() => null));
 
   if (!parsed.success) throw new UpstreamError("the model catalog is not readable", "protocol");
 

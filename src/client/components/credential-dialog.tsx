@@ -203,7 +203,7 @@ export function AddCredentialDialog({
           <DialogDescription>
             {provider.authModes.includes("api-key")
               ? `A new credential joins the end of the chain for ${provider.name}.`
-              : `A new connection joins the end of the chain for ${provider.name}.`}
+              : `A new connection joins the chain for ${provider.name} or replaces an expiring one.`}
           </DialogDescription>
         </DialogHeader>
         <Tabs

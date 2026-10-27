@@ -55,11 +55,22 @@ async function renewOnce(
   // Another request rotated it while this one waited for the slot.
   if (stored !== attempt.sealedKey) return readCredential(deps, stored);
 
-  const renewed = await renewer.renew({
-    providerId: attempt.providerId,
-    credential: current,
-    signal: AbortSignal.timeout(RENEWAL_TIMEOUT_MS),
-  });
+  let renewed: Credential;
+
+  try {
+    renewed = await renewer.renew({
+      credential: current,
+      signal: AbortSignal.timeout(RENEWAL_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // A rotating token is spent before the portal answers. If another process
+    // wrote the fresh bundle, call with that one instead of reporting the loser.
+    const moved = await sealedCredential(deps, credentialId);
+
+    if (moved !== null && moved !== attempt.sealedKey) return readCredential(deps, moved);
+
+    throw error;
+  }
 
   const sealed = await deps.sealer.seal(JSON.stringify(renewed));
 

@@ -1,13 +1,9 @@
-import * as v from "valibot";
 import type { Credential } from "../../credential";
 import { postForm } from "../http";
 import { UpstreamError, type CredentialRenewer } from "../types";
-import { credentialOf, portalUrl } from "./oauth";
+import { CLIENT_ID, credentialOf, oauthFailureReason, portalUrl } from "./oauth";
 
-const CLIENT_ID = "hermes-cli";
 const REFRESH_SKEW_MS = 120_000;
-
-const FailureSchema = v.object({ error: v.string() });
 
 export const nousRenewal: CredentialRenewer = {
   due(credential, now) {
@@ -27,8 +23,7 @@ export const nousRenewal: CredentialRenewer = {
     });
 
     if (response.status === 400) {
-      const failure = v.safeParse(FailureSchema, await response.json().catch(() => null));
-      const reason = failure.success ? failure.output.error : "";
+      const reason = await oauthFailureReason(response);
 
       throw new UpstreamError(
         reason === "invalid_grant"

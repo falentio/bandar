@@ -1,12 +1,13 @@
 import { and, asc, eq } from "drizzle-orm";
-import type {
-  Provider,
-  ProviderCredential,
-  ProviderCreateInput,
-  ProviderInput,
-  ProviderKind,
-  ProviderList,
-  ProviderModelInput,
+import {
+  BUILT_IN_PROVIDER_KINDS,
+  type Provider,
+  type ProviderCredential,
+  type ProviderCreateInput,
+  type ProviderInput,
+  type ProviderKind,
+  type ProviderList,
+  type ProviderModelInput,
 } from "../../shared/providers";
 import { availableSlug, providerRefOf, slugify, TAG_REF_PREFIX } from "../../shared/slugs";
 import { parseCredential, type Credential } from "../credential";
@@ -20,6 +21,10 @@ import type { ModelCatalogEntry } from "./types";
 export { definitionFor };
 
 export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
+
+const BUILT_IN_RANK = new Map<string, number>(
+  BUILT_IN_PROVIDER_KINDS.map((kind, index) => [kind, index] as const),
+);
 
 export class ProviderRuleError extends Error {
   readonly code: "built_in" | "validation" | "conflict";
@@ -108,6 +113,13 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
     const rightRank = right.origin === "builtin" ? 0 : 1;
 
     if (leftRank !== rightRank) return leftRank - rightRank;
+
+    if (left.origin === "builtin" && right.origin === "builtin") {
+      const leftOrder = BUILT_IN_RANK.get(left.kind) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = BUILT_IN_RANK.get(right.kind) ?? Number.MAX_SAFE_INTEGER;
+
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    }
 
     return left.createdAt.getTime() - right.createdAt.getTime();
   });
@@ -402,7 +414,7 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
   const slugs = new Set(rows.flatMap((row) => (row.slug === "" ? [] : [row.slug])));
   const now = new Date();
 
-  for (const [index, definition] of builtInProviders.entries()) {
+  for (const definition of builtInProviders) {
     if (present.has(definition.kind)) continue;
 
     // A custom row can already hold a slug that has since become reserved.
@@ -422,8 +434,7 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
         kind: definition.kind,
         baseUrl: definition.builtIn.baseUrl(),
         origin: "builtin",
-        // Distinct stamps keep the seeded order stable when a whole set lands at once.
-        createdAt: new Date(now.getTime() + index),
+        createdAt: now,
       })
       .onConflictDoNothing()
       .run();

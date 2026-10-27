@@ -184,6 +184,7 @@ export const ProviderOAuthStartSchema = v.object({
   userCode: v.string(),
   verificationUrl: v.string(),
   expiresInSeconds: v.number(),
+  intervalSeconds: v.pipe(v.number(), v.minValue(1)),
 });
 
 export const ProviderOAuthPollSchema = v.object({

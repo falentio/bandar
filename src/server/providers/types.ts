@@ -84,7 +84,8 @@ export type ModelCatalogEntry = {
 
 export type CatalogRequest = {
   readonly baseUrl: string;
-  readonly credential: Credential | null;
+  /** Read lazily so a public catalog never decrypts a saved credential. */
+  readonly credential: () => Promise<Credential | null>;
   readonly signal: AbortSignal;
 };
 
@@ -95,6 +96,7 @@ export type DeviceLogin = {
   readonly userCode: string;
   readonly verificationUrl: string;
   readonly expiresInSeconds: number;
+  readonly intervalSeconds: number;
 };
 
 export type DevicePollResult =
@@ -107,7 +109,6 @@ export interface OAuthConnector {
 }
 
 export type CredentialRenewal = {
-  readonly providerId: string;
   readonly credential: OAuthCredential;
   readonly signal: AbortSignal;
 };

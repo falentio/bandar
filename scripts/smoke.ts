@@ -175,13 +175,10 @@ try {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
-    assert.deepEqual(builtIn.map((provider) => provider.kind).sort(), [
-      "kilocode",
-      "nous",
-      "river",
-      "tokenharbor",
-      "yeta",
-    ]);
+    assert.deepEqual(
+      builtIn.map((provider) => provider.kind),
+      ["kilocode", "tokenharbor", "yeta", "river", "nous"],
+    );
 
     const byKind = new Map(builtIn.map((provider) => [provider.kind, provider]));
     const kilo = byKind.get("kilocode");
@@ -892,6 +889,7 @@ try {
       "https://portal.nousresearch.com/manage-subscription?code=NOUS-CODE",
     );
     assert.equal(start.expiresInSeconds, 600);
+    assert.equal(start.intervalSeconds, 5);
 
     const pending = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
 
@@ -1041,6 +1039,28 @@ try {
 
     assert.equal(response.status, 502);
     assert.equal((await openAiError(response)).code, "auth");
+  });
+
+  await check("a reconnect replaces the expiring Nous connection", async () => {
+    const id = nousProvider.provider?.id ?? "";
+    const before = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+    const credentialId = before.provider.credentials[0]?.id ?? "";
+
+    await postJson(providerPaths.oauthStart(id), {}, ProviderOAuthStartSchema, 200);
+    const connected = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(connected.state, "connected");
+
+    const after = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.equal(after.provider.credentials.length, 1);
+    assert.equal(after.provider.credentials[0]?.id, credentialId);
+
+    nousState.refreshToken = "rt-1";
+
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 200);
   });
 
   await check("providers carry derived slugs and model refs", async () => {

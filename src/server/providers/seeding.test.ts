@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { BUILT_IN_PROVIDER_KINDS } from "../../shared/providers";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +59,22 @@ describe("built-in seeding", () => {
     expect(nous?.name).toBe("Nous Portal 2");
     expect(nous?.slug).toBe("nous-2");
     expect(custom?.slug).toBe("nous");
+  });
+
+  test("a built-in seeded later keeps its registry position", async () => {
+    const { sqlite, deps } = await freshDb();
+    const expected = [...BUILT_IN_PROVIDER_KINDS];
+
+    const kinds = async (userId: string) =>
+      (await listProviders(deps, userId)).providers
+        .filter((provider) => provider.origin === "builtin")
+        .map((provider) => provider.kind);
+
+    expect(await kinds("user-3")).toEqual(expected);
+
+    sqlite.query("DELETE FROM providers WHERE user_id = 'user-3' AND kind = 'tokenharbor'").run();
+
+    expect(await kinds("user-3")).toEqual(expected);
   });
 
   test("seeding on every read adds no second row", async () => {

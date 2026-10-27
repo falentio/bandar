@@ -26,6 +26,14 @@ describe("provider registry", () => {
     }
   });
 
+  test("built-in names and slugs are distinct", () => {
+    const names = builtInProviders.map((definition) => definition.builtIn.name);
+    const slugs = builtInProviders.map((definition) => definition.builtIn.slug);
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(new Set(slugs).size).toBe(slugs.length);
+  });
+
   test("reserved slugs cover the tag route and every built-in", () => {
     expect(reservedProviderSlugs.has(TAG_SLUG)).toBe(true);
 

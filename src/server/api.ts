@@ -230,6 +230,7 @@ export function createApi(deps: ApiDeps) {
         userCode: login.userCode,
         verificationUrl: login.verificationUrl,
         expiresInSeconds: login.expiresInSeconds,
+        intervalSeconds: login.intervalSeconds,
       });
     })
     .post("/providers/:id/oauth/poll", async ({ params, request, set }) => {
@@ -425,7 +426,7 @@ export function createApi(deps: ApiDeps) {
 
       const models = await catalog({
         baseUrl: provider.baseUrl,
-        credential: await readFirstCredential(deps.providers, id),
+        credential: () => readFirstCredential(deps.providers, id),
         signal: request.signal,
       });
 

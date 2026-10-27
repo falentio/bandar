@@ -5,8 +5,6 @@ import type { Provider, ProviderOAuthStart } from "../../shared/providers";
 import { providerApi } from "../api";
 import { describeError, isError } from "../errors";
 
-const POLL_INTERVAL_MS = 3000;
-
 function hostOf(verificationUrl: string): string {
   try {
     return new URL(verificationUrl).host;
@@ -45,6 +43,7 @@ export function ConnectFlow({
     if (phase.kind !== "waiting") return;
 
     const run = attempt.current;
+    const login = phase.login;
 
     const timer = setInterval(() => {
       void providerApi
@@ -69,7 +68,7 @@ export function ConnectFlow({
           // The poll returns 200 while pending, so any failure ends this wait.
           setPhase({ kind: "failed", message });
         });
-    }, POLL_INTERVAL_MS);
+    }, login.intervalSeconds * 1000);
 
     return () => clearInterval(timer);
   }, [phase, provider.id, onConnected]);

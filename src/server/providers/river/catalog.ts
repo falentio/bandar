@@ -20,7 +20,11 @@ const PricingSchema = v.object({
 export async function fetchRiverCatalog(
   request: CatalogRequest,
 ): Promise<readonly ModelCatalogEntry[]> {
-  const priced = await readPricing(request).catch(() => null);
+  const priced = await readPricing(request).catch(() => {
+    if (request.signal.aborted) throw new UpstreamError("request aborted", "network");
+
+    return null;
+  });
 
   // The console's public pricing JSON is the model list; the keyed ids are the fallback.
   if (priced !== null) return priced;

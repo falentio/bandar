@@ -97,7 +97,7 @@ export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Respons
   const id = `chatcmpl-${crypto.randomUUID()}`;
   const created = Math.floor(startedAt.getTime() / 1000);
   const start = performance.now();
-  const attempts = attemptPlan(deps.providers, plan, startedAt);
+  const attempts = attemptPlan(deps.providers, plan, input.userId, startedAt);
 
   if (!input.stream) return complete(deps, input, plan, attempts, id, created);
 
@@ -397,7 +397,12 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
   });
 }
 
-function attemptPlan(providers: ProviderDeps, plan: ResolvedPlan, startedAt: Date): AttemptPlan {
+function attemptPlan(
+  providers: ProviderDeps,
+  plan: ResolvedPlan,
+  userId: string,
+  startedAt: Date,
+): AttemptPlan {
   const attempts = attemptsOf(plan);
   const now = startedAt.getTime();
   const cooling = new Set<string>();
@@ -421,16 +426,32 @@ function attemptPlan(providers: ProviderDeps, plan: ResolvedPlan, startedAt: Dat
     suppressed: (attempt) =>
       !probe && subjectsOf(attempt).some((subject) => cooling.has(subjectKey(subject))),
     failed: (attempt, kind, at) => {
+      const credential = attempt.credential;
+
       const subject = subjectFor(kind, {
         providerId: attempt.candidate.providerId,
         modelId: attempt.candidate.modelId,
-        credentialId: attempt.credential === null ? null : attempt.credential.id,
+        credentialId: credential === null ? null : credential.id,
       });
 
       if (subject === null) return;
 
       try {
-        recordFailure(providers.db, subject, at);
+        recordFailure(providers.db, {
+          subject,
+          context: {
+            userId,
+            reference: plan.ref,
+            errorKind: kind,
+            providerId: attempt.candidate.providerId,
+            providerName: attempt.candidate.providerName,
+            modelId: attempt.candidate.modelId,
+            modelAlias: attempt.candidate.alias,
+            credentialId: credential === null ? null : credential.id,
+            credentialName: credential === null ? null : credential.name,
+          },
+          now: at,
+        });
       } catch (error) {
         console.error("gateway: could not record upstream failure", error);
       }

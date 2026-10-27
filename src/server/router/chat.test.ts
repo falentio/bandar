@@ -7,7 +7,7 @@ import * as v from "valibot";
 import { user } from "../db/auth-schema";
 import { openDatabase, type DatabaseHandle } from "../db/client";
 import { applyMigrations, type Migration } from "../db/migrate";
-import { providerCredentials, providerModels, providers } from "../db/schema";
+import { cooldownEvents, providerCredentials, providerModels, providers } from "../db/schema";
 import { DuckDb } from "../duck/client";
 import { applyDuckMigrations } from "../duck/migrate";
 import { addCredential, addProviderModel, createProvider, type ProviderDeps } from "../providers";
@@ -107,6 +107,13 @@ describe("runChat credentials", () => {
 
     expect(providerRow?.failures).toBe(0);
     expect(providerRow?.flaggedUntil).toBeNull();
+
+    const history = harness.db.select().from(cooldownEvents).all();
+
+    expect(history).toHaveLength(1);
+    expect(history[0]?.subject).toBe("credential");
+    expect(history[0]?.errorKind).toBe("auth");
+    expect(history[0]?.reference).toBe("fast");
   });
 
   test("skips a cooling credential on the next request", async () => {

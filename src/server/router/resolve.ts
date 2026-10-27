@@ -6,6 +6,7 @@ import type { ProviderDeps } from "../providers";
 
 export type ResolvedCredential = {
   readonly id: string;
+  readonly name: string;
   readonly sealedKey: string;
   readonly authMode: ProviderAuthMode;
   readonly failures: number;
@@ -19,6 +20,7 @@ export type ResolvedCandidate = {
   readonly inputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;
   readonly providerId: string;
+  readonly providerName: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
   readonly providerFailures: number;
@@ -43,6 +45,7 @@ type CandidateRow = {
   readonly inputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;
   readonly providerId: string;
+  readonly providerName: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
   readonly providerFailures: number;
@@ -58,6 +61,7 @@ const candidateColumns = {
   inputPricePerMtok: providerModels.inputPricePerMtok,
   outputPricePerMtok: providerModels.outputPricePerMtok,
   providerId: providers.id,
+  providerName: providers.name,
   kind: providers.kind,
   baseUrl: providers.baseUrl,
   providerFailures: providers.failures,
@@ -152,6 +156,7 @@ async function withCredentials(
     .select({
       id: providerCredentials.id,
       providerId: providerCredentials.providerId,
+      name: providerCredentials.name,
       sealedKey: providerCredentials.sealedKey,
       authMode: providerCredentials.authMode,
       failures: providerCredentials.failures,
@@ -168,6 +173,7 @@ async function withCredentials(
 
     list.push({
       id: row.id,
+      name: row.name,
       sealedKey: row.sealedKey,
       authMode: row.authMode,
       failures: row.failures,

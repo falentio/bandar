@@ -1,10 +1,11 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "./db/client";
-import { providerCredentials, providerModels, providers } from "./db/schema";
+import { cooldownEvents, providerCredentials, providerModels, providers } from "./db/schema";
 import type { UpstreamErrorKind } from "./providers/types";
 
 export const COOLDOWN_BASE_MS = 30_000;
 export const COOLDOWN_CAP_MS = 24 * 60 * 60 * 1000;
+export const COOLDOWN_HISTORY_LIMIT = 500;
 
 export type Health = { failures: number; flaggedUntil: Date | null };
 
@@ -17,6 +18,24 @@ export type FailureTarget = {
   readonly providerId: string;
   readonly modelId: string;
   readonly credentialId: string | null;
+};
+
+export type FailureContext = {
+  readonly userId: string;
+  readonly reference: string;
+  readonly errorKind: UpstreamErrorKind;
+  readonly providerId: string;
+  readonly providerName: string;
+  readonly modelId: string;
+  readonly modelAlias: string;
+  readonly credentialId: string | null;
+  readonly credentialName: string | null;
+};
+
+export type FailureRecord = {
+  readonly subject: Subject;
+  readonly context: FailureContext;
+  readonly now: Date;
 };
 
 export function cooldownMs(failures: number): number {
@@ -65,10 +84,51 @@ export function subjectKey(subject: Subject): string {
   return `${subject.kind}:${subject.id}`;
 }
 
-export function recordFailure(db: Db, subject: Subject, now: Date): void {
-  const failures = failuresOf(db, subject) + 1;
-  const flaggedUntil = new Date(now.getTime() + cooldownMs(failures));
+export function recordFailure(db: Db, record: FailureRecord): void {
+  const { subject, context, now } = record;
 
+  db.transaction((tx) => {
+    const failures = failuresOf(tx, subject) + 1;
+    const cooldown = cooldownMs(failures);
+    const flaggedUntil = new Date(now.getTime() + cooldown);
+
+    updateSubject(tx, subject, failures, flaggedUntil);
+
+    tx.insert(cooldownEvents)
+      .values({
+        id: crypto.randomUUID(),
+        userId: context.userId,
+        subject: subject.kind,
+        subjectName: subjectNameOf(subject, context),
+        providerId: context.providerId,
+        providerName: context.providerName,
+        modelId: context.modelId,
+        modelAlias: context.modelAlias,
+        credentialId: context.credentialId,
+        credentialName: context.credentialName,
+        errorKind: context.errorKind,
+        reference: context.reference,
+        failures,
+        cooldownMs: cooldown,
+        flaggedUntil,
+        createdAt: now,
+      })
+      .run();
+
+    tx.delete(cooldownEvents)
+      .where(
+        sql`${cooldownEvents.userId} = ${context.userId} AND ${cooldownEvents.id} NOT IN (
+          SELECT ${cooldownEvents.id} FROM ${cooldownEvents}
+          WHERE ${cooldownEvents.userId} = ${context.userId}
+          ORDER BY ${cooldownEvents.createdAt} DESC, ${cooldownEvents.id} DESC
+          LIMIT ${COOLDOWN_HISTORY_LIMIT}
+        )`,
+      )
+      .run();
+  });
+}
+
+function updateSubject(db: Db, subject: Subject, failures: number, flaggedUntil: Date): void {
   switch (subject.kind) {
     case "provider": {
       db.update(providers)
@@ -137,6 +197,28 @@ export function recordSuccess(db: Db, subjects: readonly Subject[]): void {
 
         return _exhaustive;
       }
+    }
+  }
+}
+
+function subjectNameOf(subject: Subject, context: FailureContext): string {
+  switch (subject.kind) {
+    case "provider": {
+      return context.providerName;
+    }
+
+    case "model": {
+      return context.modelAlias;
+    }
+
+    case "credential": {
+      return context.credentialName ?? "";
+    }
+
+    default: {
+      const _exhaustive: never = subject;
+
+      return _exhaustive;
     }
   }
 }

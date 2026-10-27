@@ -54,7 +54,8 @@ export default defineConfig({
     // MagicDNS names resolve to this machine on the tailnet; Vite rejects unknown Host headers.
     allowedHosts: [".ts.net"],
     proxy: {
-      "/api": { target: loopbackOrigin(apiPort), changeOrigin: true },
+      // Segment match, not a prefix: /api-keys is a client route, not the API.
+      "^/api(?:/|$)": { target: loopbackOrigin(apiPort), changeOrigin: true },
     },
   },
   fmt: { ignorePatterns: ignored },

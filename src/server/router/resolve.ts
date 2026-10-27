@@ -1,10 +1,19 @@
-import { and, asc, eq } from "drizzle-orm";
-import type { ProviderKind } from "../../shared/providers";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import type { ProviderAuthMode, ProviderKind } from "../../shared/providers";
 import { TAG_REF_PREFIX, providerRefOf, tagRefOf } from "../../shared/slugs";
-import { providerModels, providers, tagModels, tags } from "../db/schema";
+import { providerCredentials, providerModels, providers, tagModels, tags } from "../db/schema";
 import type { ProviderDeps } from "../providers";
 
+export type ResolvedCredential = {
+  readonly id: string;
+  readonly sealedKey: string;
+  readonly authMode: ProviderAuthMode;
+  readonly failures: number;
+  readonly flaggedUntil: Date | null;
+};
+
 export type ResolvedCandidate = {
+  readonly modelId: string;
   readonly alias: string;
   readonly upstreamModel: string;
   readonly inputPricePerMtok: number | null;
@@ -12,7 +21,11 @@ export type ResolvedCandidate = {
   readonly providerId: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
-  readonly sealedKey: string;
+  readonly providerFailures: number;
+  readonly providerFlaggedUntil: Date | null;
+  readonly modelFailures: number;
+  readonly modelFlaggedUntil: Date | null;
+  readonly credentials: readonly ResolvedCredential[];
 };
 
 export type ResolvedPlan = {
@@ -23,7 +36,23 @@ export type ResolvedPlan = {
 
 export type ModelRef = { readonly id: string; readonly createdAt: Date };
 
+type CandidateRow = {
+  readonly modelId: string;
+  readonly alias: string;
+  readonly upstreamModel: string;
+  readonly inputPricePerMtok: number | null;
+  readonly outputPricePerMtok: number | null;
+  readonly providerId: string;
+  readonly kind: ProviderKind;
+  readonly baseUrl: string;
+  readonly providerFailures: number;
+  readonly providerFlaggedUntil: Date | null;
+  readonly modelFailures: number;
+  readonly modelFlaggedUntil: Date | null;
+};
+
 const candidateColumns = {
+  modelId: providerModels.id,
   alias: providerModels.alias,
   upstreamModel: providerModels.upstreamModel,
   inputPricePerMtok: providerModels.inputPricePerMtok,
@@ -31,7 +60,10 @@ const candidateColumns = {
   providerId: providers.id,
   kind: providers.kind,
   baseUrl: providers.baseUrl,
-  sealedKey: providers.apiKey,
+  providerFailures: providers.failures,
+  providerFlaggedUntil: providers.flaggedUntil,
+  modelFailures: providerModels.failures,
+  modelFlaggedUntil: providerModels.flaggedUntil,
 };
 
 export async function resolvePlan(
@@ -54,7 +86,9 @@ export async function resolvePlan(
 
   const alias = aliasRows[0];
 
-  if (alias !== undefined) return { ref, tag: null, candidates: [alias] };
+  if (alias !== undefined) {
+    return { ref, tag: null, candidates: await withCredentials(deps, [alias]) };
+  }
 
   if (ref.startsWith(TAG_REF_PREFIX)) {
     const slug = ref.slice(TAG_REF_PREFIX.length);
@@ -77,7 +111,7 @@ export async function resolvePlan(
       .where(and(eq(tagModels.tagId, tag.id), eq(providerModels.enabled, true)))
       .orderBy(asc(tagModels.priority));
 
-    return { ref, tag: slug, candidates: rows };
+    return { ref, tag: slug, candidates: await withCredentials(deps, rows) };
   }
 
   const slash = ref.indexOf("/");
@@ -99,7 +133,50 @@ export async function resolvePlan(
     .orderBy(asc(providerModels.createdAt))
     .limit(1);
 
-  return { ref, tag: null, candidates: rows };
+  return { ref, tag: null, candidates: await withCredentials(deps, rows) };
+}
+
+async function withCredentials(
+  deps: ProviderDeps,
+  rows: readonly CandidateRow[],
+): Promise<readonly ResolvedCandidate[]> {
+  if (rows.length === 0) return [];
+
+  const providerIds: string[] = [];
+
+  for (const row of rows) {
+    if (!providerIds.includes(row.providerId)) providerIds.push(row.providerId);
+  }
+
+  const credentialRows = await deps.db
+    .select({
+      id: providerCredentials.id,
+      providerId: providerCredentials.providerId,
+      sealedKey: providerCredentials.sealedKey,
+      authMode: providerCredentials.authMode,
+      failures: providerCredentials.failures,
+      flaggedUntil: providerCredentials.flaggedUntil,
+    })
+    .from(providerCredentials)
+    .where(inArray(providerCredentials.providerId, providerIds))
+    .orderBy(asc(providerCredentials.createdAt), asc(providerCredentials.id));
+
+  const grouped = new Map<string, ResolvedCredential[]>();
+
+  for (const row of credentialRows) {
+    const list = grouped.get(row.providerId) ?? [];
+
+    list.push({
+      id: row.id,
+      sealedKey: row.sealedKey,
+      authMode: row.authMode,
+      failures: row.failures,
+      flaggedUntil: row.flaggedUntil,
+    });
+    grouped.set(row.providerId, list);
+  }
+
+  return rows.map((row) => ({ ...row, credentials: grouped.get(row.providerId) ?? [] }));
 }
 
 export async function listModelRefs(

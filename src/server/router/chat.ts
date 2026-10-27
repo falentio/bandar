@@ -1,7 +1,21 @@
 import type { DuckDb } from "../duck/client";
+import {
+  isCoolingDown,
+  recordFailure,
+  recordSuccess,
+  subjectFor,
+  subjectKey,
+  type Health,
+  type Subject,
+} from "../health";
 import { definitionFor, readCredential, type ProviderDeps } from "../providers";
 import { recordRequest, type RequestEventInput, type RequestOutcome } from "./record";
-import { resolvePlan, type ResolvedCandidate, type ResolvedPlan } from "./resolve";
+import {
+  resolvePlan,
+  type ResolvedCandidate,
+  type ResolvedCredential,
+  type ResolvedPlan,
+} from "./resolve";
 import {
   UpstreamError,
   type CanonicalRequest,
@@ -49,6 +63,18 @@ type Outcome = {
   durationMs: number;
 };
 
+type Attempt = {
+  readonly candidate: ResolvedCandidate;
+  readonly credential: ResolvedCredential | null;
+};
+
+type AttemptPlan = {
+  readonly attempts: readonly Attempt[];
+  suppressed(attempt: Attempt): boolean;
+  failed(attempt: Attempt, kind: UpstreamErrorKind, now: Date): void;
+  succeeded(attempt: Attempt): void;
+};
+
 const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
   "auth",
   "rate_limit",
@@ -70,33 +96,40 @@ export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Respons
   const id = `chatcmpl-${crypto.randomUUID()}`;
   const created = Math.floor(startedAt.getTime() / 1000);
   const start = performance.now();
+  const attempts = attemptPlan(deps.providers, plan, startedAt);
 
-  if (!input.stream) return complete(deps, input, plan, id, created);
+  if (!input.stream) return complete(deps, input, plan, attempts, id, created);
 
-  return streamResponse(deps, { input, plan, id, created, start });
+  return streamResponse(deps, { input, plan, attempts, id, created, start });
 }
 
 async function complete(
   deps: ChatDeps,
   input: ChatInput,
   plan: ResolvedPlan,
+  attempts: AttemptPlan,
   id: string,
   created: number,
 ): Promise<Response> {
-  for (const [index, candidate] of plan.candidates.entries()) {
+  let lastFailure: UpstreamError | null = null;
+
+  for (const attempt of attempts.attempts) {
+    if (attempts.suppressed(attempt)) continue;
+
     const startedAt = new Date();
     const started = performance.now();
-    const base = eventBase(input, plan.ref, candidate, startedAt);
-    const last = index === plan.candidates.length - 1;
+    const base = eventBase(input, plan.ref, attempt.candidate, startedAt);
 
     try {
-      const target = await targetOf(deps.providers, candidate);
+      const target = await targetOf(deps.providers, attempt);
 
-      const result = await definitionFor(candidate.kind).adapter.chat({
+      const result = await definitionFor(attempt.candidate.kind).adapter.chat({
         target,
         request: input.request,
         signal: input.signal,
       });
+
+      attempts.succeeded(attempt);
 
       const response = completionResponse({ id, created, model: plan.ref, result });
 
@@ -129,7 +162,7 @@ async function complete(
         durationMs: performance.now() - started,
       });
 
-      if (aborted || last || !RETRYABLE.has(failed.kind)) {
+      if (aborted || !RETRYABLE.has(failed.kind)) {
         return openAiError(
           aborted ? 400 : statusFor(failed),
           aborted ? "request aborted" : failed.message,
@@ -137,7 +170,19 @@ async function complete(
           "upstream_error",
         );
       }
+
+      attempts.failed(attempt, failed.kind, new Date());
+      lastFailure = failed;
     }
+  }
+
+  if (lastFailure !== null) {
+    return openAiError(
+      statusFor(lastFailure),
+      lastFailure.message,
+      lastFailure.kind,
+      "upstream_error",
+    );
   }
 
   return openAiError(502, "no upstream answered", "unavailable", "upstream_error");
@@ -146,13 +191,14 @@ async function complete(
 type StreamInput = {
   readonly input: ChatInput;
   readonly plan: ResolvedPlan;
+  readonly attempts: AttemptPlan;
   readonly id: string;
   readonly created: number;
   readonly start: number;
 };
 
 function streamResponse(deps: ChatDeps, context: StreamInput): Response {
-  const { input, plan } = context;
+  const { input, plan, attempts } = context;
   const abort = new AbortController();
   const onAbort = () => abort.abort();
   const detach = () => input.signal.removeEventListener("abort", onAbort);
@@ -182,11 +228,14 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         close();
       };
 
-      for (const [index, candidate] of plan.candidates.entries()) {
+      let lastFailure: UpstreamError | null = null;
+
+      for (const attempt of attempts.attempts) {
+        if (attempts.suppressed(attempt)) continue;
+
         const startedAt = new Date();
         const started = performance.now();
-        const base = eventBase(input, plan.ref, candidate, startedAt);
-        const last = index === plan.candidates.length - 1;
+        const base = eventBase(input, plan.ref, attempt.candidate, startedAt);
 
         let chunksSent = 0;
         let roleSent = false;
@@ -213,9 +262,9 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         };
 
         try {
-          const target = await targetOf(deps.providers, candidate);
+          const target = await targetOf(deps.providers, attempt);
 
-          for await (const event of definitionFor(candidate.kind).adapter.stream({
+          for await (const event of definitionFor(attempt.candidate.kind).adapter.stream({
             target,
             request: input.request,
             signal: abort.signal,
@@ -275,6 +324,8 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
           send("data: [DONE]\n\n");
           close();
 
+          attempts.succeeded(attempt);
+
           recordSafe(deps, base, {
             status: "success",
             httpStatus: 200,
@@ -310,12 +361,21 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             return;
           }
 
-          if (chunksSent > 0 || last || !RETRYABLE.has(failed.kind)) {
+          if (chunksSent > 0 || !RETRYABLE.has(failed.kind)) {
             fail(failed.message, failed.kind);
 
             return;
           }
+
+          attempts.failed(attempt, failed.kind, new Date());
+          lastFailure = failed;
         }
+      }
+
+      if (lastFailure !== null) {
+        fail(lastFailure.message, lastFailure.kind);
+
+        return;
       }
 
       fail("no upstream answered", "unavailable");
@@ -336,16 +396,109 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
   });
 }
 
-async function targetOf(
-  providers: ProviderDeps,
-  candidate: ResolvedCandidate,
-): Promise<ProviderTarget> {
+function attemptPlan(providers: ProviderDeps, plan: ResolvedPlan, startedAt: Date): AttemptPlan {
+  const attempts = attemptsOf(plan);
+  const now = startedAt.getTime();
+  const cooling = new Set<string>();
+  let probe = true;
+
+  for (const attempt of attempts) {
+    let skippable = false;
+
+    for (const subject of subjectsOf(attempt)) {
+      if (isCoolingDown(healthOf(attempt, subject), now)) {
+        cooling.add(subjectKey(subject));
+        skippable = true;
+      }
+    }
+
+    if (!skippable) probe = false;
+  }
+
   return {
-    providerId: candidate.providerId,
-    kind: candidate.kind,
-    baseUrl: candidate.baseUrl,
-    credential: await readCredential(providers, candidate.sealedKey),
-    upstreamModel: candidate.upstreamModel,
+    attempts,
+    suppressed: (attempt) =>
+      !probe && subjectsOf(attempt).some((subject) => cooling.has(subjectKey(subject))),
+    failed: (attempt, kind, at) => {
+      const subject = subjectFor(kind, {
+        providerId: attempt.candidate.providerId,
+        modelId: attempt.candidate.modelId,
+        credentialId: attempt.credential === null ? null : attempt.credential.id,
+      });
+
+      if (subject === null) return;
+
+      recordFailure(providers.db, subject, at);
+      cooling.add(subjectKey(subject));
+    },
+    succeeded: (attempt) => {
+      recordSuccess(providers.db, subjectsOf(attempt));
+    },
+  };
+}
+
+function attemptsOf(plan: ResolvedPlan): readonly Attempt[] {
+  return plan.candidates.flatMap((candidate): Attempt[] => {
+    if (candidate.credentials.length === 0) return [{ candidate, credential: null }];
+
+    return candidate.credentials.map((credential) => ({ candidate, credential }));
+  });
+}
+
+function subjectsOf(attempt: Attempt): readonly Subject[] {
+  const subjects: Subject[] = [
+    { kind: "provider", id: attempt.candidate.providerId },
+    { kind: "model", id: attempt.candidate.modelId },
+  ];
+
+  if (attempt.credential !== null) subjects.push({ kind: "credential", id: attempt.credential.id });
+
+  return subjects;
+}
+
+function healthOf(attempt: Attempt, subject: Subject): Health {
+  switch (subject.kind) {
+    case "provider": {
+      return {
+        failures: attempt.candidate.providerFailures,
+        flaggedUntil: attempt.candidate.providerFlaggedUntil,
+      };
+    }
+
+    case "model": {
+      return {
+        failures: attempt.candidate.modelFailures,
+        flaggedUntil: attempt.candidate.modelFlaggedUntil,
+      };
+    }
+
+    case "credential": {
+      return attempt.credential === null
+        ? { failures: 0, flaggedUntil: null }
+        : {
+            failures: attempt.credential.failures,
+            flaggedUntil: attempt.credential.flaggedUntil,
+          };
+    }
+
+    default: {
+      const _exhaustive: never = subject;
+
+      return _exhaustive;
+    }
+  }
+}
+
+async function targetOf(providers: ProviderDeps, attempt: Attempt): Promise<ProviderTarget> {
+  return {
+    providerId: attempt.candidate.providerId,
+    kind: attempt.candidate.kind,
+    baseUrl: attempt.candidate.baseUrl,
+    credential: await readCredential(
+      providers,
+      attempt.credential === null ? "" : attempt.credential.sealedKey,
+    ),
+    upstreamModel: attempt.candidate.upstreamModel,
   };
 }
 

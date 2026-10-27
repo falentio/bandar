@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -40,40 +40,61 @@ export function ProvidersPanel() {
   const providers = useProviders();
   const [creating, setCreating] = useState(false);
 
+  const builtIn = providers.providers.filter((provider) => provider.origin === "builtin");
+  const custom = providers.providers.filter((provider) => provider.origin === "custom");
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold">Providers</h1>
-          <p className="text-sm text-muted-foreground">
-            Kilo Code is built in. Add custom OpenAI, Anthropic, or Google-compatible upstreams.
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setCreating(true)}>
-          <PlusIcon data-icon="inline-start" />
-          Add custom provider
-        </Button>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold">Providers</h1>
+        <p className="text-sm text-muted-foreground">
+          Kilo Code is included. Add custom OpenAI, Anthropic, or Google-compatible upstreams.
+        </p>
       </div>
 
       {providers.error === null ? null : (
         <p className="text-sm text-destructive">{providers.error}</p>
       )}
 
-      <Card>
-        <CardContent>
-          {providers.status === "loading" ? (
+      {providers.status === "loading" ? (
+        <Card>
+          <CardContent>
             <p className="py-6 text-center text-sm text-muted-foreground">Loading providers…</p>
-          ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
-          {providers.providers.length === 0 ? null : (
-            <ul className="-mx-1 divide-y">
-              {providers.providers.map((provider) => (
-                <ProviderRow key={provider.id} provider={provider} />
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      {providers.status === "ready" ? (
+        <>
+          <ProviderSection title="Built-in" description="Included with bandar and defined in code.">
+            <ProviderList providers={builtIn} />
+          </ProviderSection>
+
+          <ProviderSection
+            title="Custom"
+            description="OpenAI, Anthropic, or Google-compatible upstreams you add."
+            action={
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <PlusIcon data-icon="inline-start" />
+                Add custom provider
+              </Button>
+            }
+          >
+            {custom.length === 0 ? (
+              <Card>
+                <CardContent className="py-10 text-center">
+                  <p className="text-sm font-medium">No custom providers</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Add an upstream to route your own model aliases.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <ProviderList providers={custom} />
+            )}
+          </ProviderSection>
+        </>
+      ) : null}
 
       <CreateProviderDialog
         open={creating}
@@ -81,6 +102,45 @@ export function ProvidersPanel() {
         onClose={() => setCreating(false)}
       />
     </div>
+  );
+}
+
+function ProviderSection({
+  title,
+  description,
+  action,
+  children,
+}: {
+  title: string;
+  description: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-2.5">
+      <div className="flex flex-wrap items-end justify-between gap-3 px-0.5">
+        <div>
+          <h2 className="text-sm font-medium">{title}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ProviderList({ providers }: { providers: readonly Provider[] }) {
+  return (
+    <Card>
+      <CardContent>
+        <ul className="-mx-1 divide-y">
+          {providers.map((provider) => (
+            <ProviderRow key={provider.id} provider={provider} />
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -101,11 +161,6 @@ function ProviderRow({ provider }: { provider: Provider }) {
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{provider.name}</span>
-            {provider.origin === "builtin" ? (
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
-                built-in
-              </span>
-            ) : null}
             {provider.hasKey ? null : (
               <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[0.7rem] text-destructive">
                 {provider.origin === "builtin" ? "not connected" : "no key"}

@@ -123,14 +123,7 @@ export function ProviderPage({
                 <ProviderLogo kind={provider.kind} className="size-5" />
               </span>
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h1 className="truncate text-lg font-semibold">{provider.name}</h1>
-                  {provider.origin === "builtin" ? (
-                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
-                      built-in
-                    </span>
-                  ) : null}
-                </div>
+                <h1 className="truncate text-lg font-semibold">{provider.name}</h1>
                 <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
                   <span>{KIND_LABELS[provider.kind]}</span>
                   <span aria-hidden="true">·</span>

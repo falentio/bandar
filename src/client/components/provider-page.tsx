@@ -1,11 +1,20 @@
 import { type FormEvent, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeftIcon, PlusIcon, TrashIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  BoxesIcon,
+  KeyRoundIcon,
+  LayoutDashboardIcon,
+  PlusIcon,
+  SlidersHorizontalIcon,
+  TrashIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ProviderUsage } from "../../shared/analytics";
 import {
   PROVIDER_KINDS,
@@ -31,6 +40,14 @@ import { ProviderLogo } from "./provider-logo";
 
 const RANGES = [7, 30, 90] as const;
 
+export const PROVIDER_TABS = ["overview", "settings", "models", "api-key"] as const;
+
+export type ProviderTab = (typeof PROVIDER_TABS)[number];
+
+export function isProviderTab(value: string): value is ProviderTab {
+  return PROVIDER_TABS.some((tab) => tab === value);
+}
+
 const PLACEHOLDERS: Record<ProviderKind, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
@@ -43,7 +60,15 @@ const KIND_LABELS: Record<ProviderKind, string> = {
   google: "Google GenAI compatible",
 };
 
-export function ProviderPage({ providerId }: { providerId: string }) {
+export function ProviderPage({
+  providerId,
+  tab,
+  onTabChange,
+}: {
+  providerId: string;
+  tab: ProviderTab;
+  onTabChange: (tab: ProviderTab) => void;
+}) {
   const providers = useProviders();
   const detail = useProviderDetail(providerId);
 
@@ -99,36 +124,87 @@ export function ProviderPage({ providerId }: { providerId: string }) {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-1">
-              {RANGES.map((days) => (
-                <Button
-                  key={days}
-                  variant={detail.days === days ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => detail.setDays(days)}
-                >
-                  {days}d
+            {tab === "overview" ? (
+              <div className="flex items-center gap-1">
+                {RANGES.map((days) => (
+                  <Button
+                    key={days}
+                    variant={detail.days === days ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => detail.setDays(days)}
+                  >
+                    {days}d
+                  </Button>
+                ))}
+                <Button variant="ghost" size="sm" onClick={detail.refresh}>
+                  Refresh
                 </Button>
-              ))}
-              <Button variant="ghost" size="sm" onClick={detail.refresh}>
-                Refresh
-              </Button>
-            </div>
+              </div>
+            ) : null}
           </div>
 
-          <UsageSection usage={detail.detail?.usage ?? null} />
-
-          <SettingsCard
-            provider={provider}
-            onSaved={(updated) => {
-              providers.apply(updated);
-              detail.refresh();
+          <Tabs
+            value={tab}
+            onValueChange={(next) => {
+              if (isProviderTab(next)) onTabChange(next);
             }}
-          />
+          >
+            <TabsList>
+              <TabsTrigger value="overview">
+                <LayoutDashboardIcon data-icon="inline-start" />
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="settings">
+                <SlidersHorizontalIcon data-icon="inline-start" />
+                Settings
+              </TabsTrigger>
+              <TabsTrigger value="models">
+                <BoxesIcon data-icon="inline-start" />
+                Models
+                {provider.models.length === 0 ? null : (
+                  <span className="rounded-full bg-foreground/10 px-1.5 text-xs tabular-nums">
+                    {provider.models.length}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="api-key">
+                <KeyRoundIcon data-icon="inline-start" />
+                API key
+                {provider.hasKey ? (
+                  <span className="size-1.5 rounded-full bg-emerald-500" aria-label="key saved" />
+                ) : null}
+              </TabsTrigger>
+            </TabsList>
 
-          <ModelsCard provider={provider} providers={providers} onChanged={detail.refresh} />
+            <TabsContent value="overview">
+              <UsageSection usage={detail.detail?.usage ?? null} />
+              <RequestsCard providerId={provider.id} providerName={provider.name} />
+            </TabsContent>
 
-          <RequestsCard providerId={provider.id} providerName={provider.name} />
+            <TabsContent value="settings">
+              <SettingsCard
+                provider={provider}
+                onSaved={(updated) => {
+                  providers.apply(updated);
+                  detail.refresh();
+                }}
+              />
+            </TabsContent>
+
+            <TabsContent value="models">
+              <ModelsCard provider={provider} providers={providers} onChanged={detail.refresh} />
+            </TabsContent>
+
+            <TabsContent value="api-key">
+              <ApiKeyCard
+                provider={provider}
+                onSaved={(updated) => {
+                  providers.apply(updated);
+                  detail.refresh();
+                }}
+              />
+            </TabsContent>
+          </Tabs>
         </>
       )}
     </div>
@@ -185,8 +261,7 @@ function SettingsCard({
   const dirty =
     settings.name.trim() !== provider.name ||
     settings.kind !== provider.kind ||
-    settings.baseUrl.trim() !== provider.baseUrl ||
-    settings.apiKey.trim() !== "";
+    settings.baseUrl.trim() !== provider.baseUrl;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -205,7 +280,8 @@ function SettingsCard({
       <CardHeader>
         <CardTitle>Settings</CardTitle>
         <CardDescription>
-          Changing the kind or base URL affects every model on this provider.
+          Name, wire kind, and base URL. Changing the kind or URL affects every model on this
+          provider. The upstream key is on the API key tab.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -258,23 +334,6 @@ function SettingsCard({
             </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="settings-key">
-              Upstream key
-              <span className="ms-1 font-normal text-muted-foreground">
-                {provider.hasKey ? "(saved, leave empty to keep)" : "(none saved)"}
-              </span>
-            </Label>
-            <Input
-              id="settings-key"
-              type="password"
-              value={settings.apiKey}
-              onChange={(event) => settings.setApiKey(event.target.value)}
-              placeholder={provider.hasKey ? "Saved key" : "Optional for local upstreams"}
-              autoComplete="off"
-            />
-          </div>
-
           {settings.error === null ? null : (
             <p className="text-sm text-destructive">{settings.error}</p>
           )}
@@ -299,13 +358,11 @@ type Settings = {
   readonly name: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
-  readonly apiKey: string;
   readonly pending: boolean;
   readonly error: string | null;
   readonly setName: (value: string) => void;
   readonly setKind: (value: ProviderKind) => void;
   readonly setBaseUrl: (value: string) => void;
-  readonly setApiKey: (value: string) => void;
   readonly save: () => Promise<Provider | null>;
 };
 
@@ -313,7 +370,6 @@ function useProviderSettings(provider: Provider): Settings {
   const [name, setName] = useState(provider.name);
   const [kind, setKind] = useState<ProviderKind>(provider.kind);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
-  const [apiKey, setApiKey] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -322,16 +378,12 @@ function useProviderSettings(provider: Provider): Settings {
     setError(null);
 
     try {
-      const updated = await providerApi.update(provider.id, {
+      return await providerApi.update(provider.id, {
         name: name.trim(),
         kind,
         baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
+        apiKey: "",
       });
-
-      setApiKey("");
-
-      return updated;
     } catch (saveError) {
       setError(isError(saveError) ? describeError(saveError) : String(saveError));
 
@@ -341,19 +393,118 @@ function useProviderSettings(provider: Provider): Settings {
     }
   };
 
-  return {
-    name,
-    kind,
-    baseUrl,
-    apiKey,
-    pending,
-    error,
-    setName,
-    setKind,
-    setBaseUrl,
-    setApiKey,
-    save,
+  return { name, kind, baseUrl, pending, error, setName, setKind, setBaseUrl, save };
+}
+
+function ApiKeyCard({
+  provider,
+  onSaved,
+}: {
+  provider: Provider;
+  onSaved: (provider: Provider) => void;
+}) {
+  const [apiKey, setApiKey] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    setSaved(false);
+
+    try {
+      const updated = await providerApi.update(provider.id, {
+        name: provider.name,
+        kind: provider.kind,
+        baseUrl: provider.baseUrl,
+        apiKey: apiKey.trim(),
+      });
+
+      setApiKey("");
+      setSaved(true);
+      onSaved(updated);
+    } catch (saveError) {
+      setError(isError(saveError) ? describeError(saveError) : String(saveError));
+    } finally {
+      setPending(false);
+    }
   };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Upstream API key</CardTitle>
+        <CardDescription>
+          The credential the gateway sends to {KIND_LABELS[provider.kind].toLowerCase()} when it
+          calls this provider.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
+          <KeyRoundIcon className="size-4 shrink-0 text-muted-foreground" />
+          {provider.hasKey ? (
+            <span>
+              A key is saved. It is sealed with AES-GCM and never returned by the API, so it cannot
+              be shown again.
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              No key saved. Requests to this provider are sent without credentials.
+            </span>
+          )}
+        </div>
+
+        <form onSubmit={save} className="grid gap-3">
+          <div className="grid gap-2">
+            <Label htmlFor="api-key-value">{provider.hasKey ? "Replace key" : "Add key"}</Label>
+            <Input
+              id="api-key-value"
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={provider.hasKey ? "Paste a new key to replace it" : "sk-…"}
+              autoComplete="off"
+              maxLength={500}
+            />
+            <p className="text-xs text-muted-foreground">
+              Required by hosted upstreams. Leave empty for a local server that takes no key.
+            </p>
+          </div>
+
+          {error === null ? null : <p className="text-sm text-destructive">{error}</p>}
+
+          <div className="flex items-center gap-3">
+            <Button type="submit" size="sm" disabled={pending || apiKey.trim() === ""}>
+              {pending ? "Saving…" : provider.hasKey ? "Replace key" : "Save key"}
+            </Button>
+            {saved ? <span className="text-xs text-muted-foreground">Saved.</span> : null}
+          </div>
+        </form>
+
+        <div className="flex items-center justify-between gap-3 border-t pt-4">
+          <p className="text-xs text-muted-foreground">
+            Removing a provider deletes its models. Requests stay in analytics.
+          </p>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={pending}
+            onClick={() => {
+              if (!window.confirm(`Remove ${provider.name} and all of its models?`)) return;
+
+              window.location.assign("/providers");
+            }}
+          >
+            <TrashIcon data-icon="inline-start" />
+            Remove provider
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function ModelsCard({
@@ -451,28 +602,6 @@ function ModelsCard({
             ))}
           </ul>
         )}
-
-        <div className="flex items-center justify-between gap-3 border-t pt-4">
-          <p className="text-xs text-muted-foreground">
-            Removing a provider deletes its models. Requests stay in analytics.
-          </p>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={providers.pending}
-            onClick={() => {
-              if (!window.confirm(`Remove ${provider.name} and all of its models?`)) return;
-
-              void providers.remove(provider.id).then(() => {
-                window.location.assign("/providers");
-              });
-            }}
-          >
-            <TrashIcon data-icon="inline-start" />
-            Remove provider
-          </Button>
-        </div>
       </CardContent>
     </Card>
   );

@@ -13,7 +13,7 @@ import { ApiKeysPanel } from "./components/api-keys-panel";
 import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
 import { OverviewPanel } from "./components/overview-panel";
-import { ProviderPage } from "./components/provider-page";
+import { isProviderTab, ProviderPage } from "./components/provider-page";
 import { ProvidersPanel } from "./components/providers-panel";
 import { RequestsPanel } from "./components/requests-panel";
 import { SessionProvider, useSession } from "./use-session";
@@ -74,9 +74,18 @@ const providersRoute = createRoute({
   component: ProvidersPanel,
 });
 
+const providerTabSearch = v.object({
+  tab: v.optional(v.picklist(["overview", "settings", "models", "api-key"]), "overview"),
+});
+
 const providerRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/providers/$providerId",
+  validateSearch: (search): v.InferOutput<typeof providerTabSearch> => {
+    const parsed = v.safeParse(providerTabSearch, search);
+
+    return parsed.success ? parsed.output : { tab: "overview" };
+  },
   component: ProviderDetailRoute,
 });
 
@@ -108,8 +117,20 @@ declare module "@tanstack/react-router" {
 
 function ProviderDetailRoute() {
   const { providerId } = providerRoute.useParams();
+  const { tab } = providerRoute.useSearch();
+  const navigate = providerRoute.useNavigate();
 
-  return <ProviderPage providerId={providerId} />;
+  return (
+    <ProviderPage
+      providerId={providerId}
+      tab={tab}
+      onTabChange={(next) => {
+        if (!isProviderTab(next)) return;
+
+        void navigate({ search: { tab: next }, replace: true });
+      }}
+    />
+  );
 }
 
 function LoginPage() {

@@ -257,7 +257,7 @@ bandar/
 │   └── components/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
 │       ├── providers-panel.tsx     # provider list and add dialog
-│       ├── provider-page.tsx       # one provider: usage, settings, models, requests
+│       ├── provider-page.tsx       # one provider: overview, settings, models, api key
 │       ├── token-chart.tsx         # shared daily token bars
 │       ├── provider-logo.tsx       # mark per provider kind
 │       ├── requests-panel.tsx      # recent attempts
@@ -285,9 +285,11 @@ bandar/
 | `GET /api/health`                           | none                   | Both current migration tags.                        |
 | `/api/auth/*`                               | better-auth            | Sign-up, sign-in, sessions, key create/list/delete. |
 
-Each provider has its own page at `/providers/<id>`: usage for 7, 30, or 90
-days, settings (name, kind, base URL, upstream key), its models, and its recent
-requests. A provider is created empty and grows models one at a time, so a new
+Each provider has its own page at `/providers/<id>` with four tabs:
+**Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
+(name, kind, base URL), **Models** (aliases and their removal), and **API key**
+(set or replace the sealed upstream key, remove the provider). The tab lives in
+the URL as `?tab=`, so a reload or a shared link opens the same tab. A provider is created empty and grows models one at a time, so a new
 upstream is reachable before it has any alias. `PUT /api/providers/:id` replaces name, kind,
 and base URL, and leaves the key unchanged when `apiKey` is empty. Model prices
 are accepted by the model endpoints (`inputPricePerMtok`,

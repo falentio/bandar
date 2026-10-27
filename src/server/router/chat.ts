@@ -84,8 +84,6 @@ async function complete(
   id: string,
   created: number,
 ): Promise<Response> {
-  let failure: UpstreamError | null = null;
-
   for (const [index, candidate] of plan.candidates.entries()) {
     const startedAt = new Date();
     const started = performance.now();
@@ -120,8 +118,6 @@ async function complete(
 
       const aborted = input.signal.aborted;
 
-      failure = failed;
-
       recordSafe(deps, base, {
         status: aborted ? "aborted" : "error",
         httpStatus: failed.status,
@@ -143,9 +139,7 @@ async function complete(
     }
   }
 
-  const failed = failure ?? new UpstreamError("no upstream answered", "unavailable");
-
-  return openAiError(statusFor(failed), failed.message, failed.kind, "upstream_error");
+  return openAiError(502, "no upstream answered", "unavailable", "upstream_error");
 }
 
 type StreamInput = {

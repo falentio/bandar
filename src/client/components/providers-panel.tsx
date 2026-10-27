@@ -154,11 +154,11 @@ function ProviderRow({ provider }: { provider: Provider }) {
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{provider.name}</span>
-            {provider.hasKey ? null : (
+            {provider.credentials.length === 0 ? (
               <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[0.7rem] text-destructive">
                 {provider.origin === "builtin" ? "not connected" : "no key"}
               </span>
-            )}
+            ) : null}
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>{PROVIDER_KIND_LABELS[provider.kind]}</span>

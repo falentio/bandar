@@ -1,7 +1,7 @@
 import type { DuckDb } from "../duck/client";
 import { definitionFor, readCredential, type ProviderDeps } from "../providers";
 import { recordRequest, type RequestEventInput, type RequestOutcome } from "./record";
-import { resolvePlan, type ResolvedCandidate, type ResolvedPlan } from "./resolve";
+import { resolvePlan, type ResolvedAttempt, type ResolvedPlan } from "./resolve";
 import {
   UpstreamError,
   type CanonicalRequest,
@@ -60,7 +60,7 @@ const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
 export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Response> {
   const plan = await resolvePlan(deps.providers, input.userId, input.ref);
 
-  if (plan.candidates.length === 0) {
+  if (plan.attempts.length === 0) {
     return plan.tag === null
       ? openAiError(404, `model ${input.ref} is not configured`, "model_not_found")
       : openAiError(404, `tag ${plan.tag} has no enabled models`, "model_not_found");
@@ -83,16 +83,16 @@ async function complete(
   id: string,
   created: number,
 ): Promise<Response> {
-  for (const [index, candidate] of plan.candidates.entries()) {
+  for (const [index, attempt] of plan.attempts.entries()) {
     const startedAt = new Date();
     const started = performance.now();
-    const base = eventBase(input, plan.ref, candidate, startedAt);
-    const last = index === plan.candidates.length - 1;
+    const base = eventBase(input, plan.ref, attempt, startedAt);
+    const last = index === plan.attempts.length - 1;
 
     try {
-      const target = await targetOf(deps.providers, candidate);
+      const target = await targetOf(deps.providers, attempt);
 
-      const result = await definitionFor(candidate.kind).adapter.chat({
+      const result = await definitionFor(attempt.kind).adapter.chat({
         target,
         request: input.request,
         signal: input.signal,
@@ -182,11 +182,11 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         close();
       };
 
-      for (const [index, candidate] of plan.candidates.entries()) {
+      for (const [index, attempt] of plan.attempts.entries()) {
         const startedAt = new Date();
         const started = performance.now();
-        const base = eventBase(input, plan.ref, candidate, startedAt);
-        const last = index === plan.candidates.length - 1;
+        const base = eventBase(input, plan.ref, attempt, startedAt);
+        const last = index === plan.attempts.length - 1;
 
         let chunksSent = 0;
         let roleSent = false;
@@ -213,9 +213,9 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         };
 
         try {
-          const target = await targetOf(deps.providers, candidate);
+          const target = await targetOf(deps.providers, attempt);
 
-          for await (const event of definitionFor(candidate.kind).adapter.stream({
+          for await (const event of definitionFor(attempt.kind).adapter.stream({
             target,
             request: input.request,
             signal: abort.signal,
@@ -338,33 +338,33 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
 
 async function targetOf(
   providers: ProviderDeps,
-  candidate: ResolvedCandidate,
+  attempt: ResolvedAttempt,
 ): Promise<ProviderTarget> {
   return {
-    providerId: candidate.providerId,
-    kind: candidate.kind,
-    baseUrl: candidate.baseUrl,
-    credential: await readCredential(providers, candidate.sealedKey),
-    upstreamModel: candidate.upstreamModel,
+    providerId: attempt.providerId,
+    kind: attempt.kind,
+    baseUrl: attempt.baseUrl,
+    credential: await readCredential(providers, attempt.sealedKey),
+    upstreamModel: attempt.upstreamModel,
   };
 }
 
 function eventBase(
   input: ChatInput,
   reference: string,
-  candidate: ResolvedCandidate,
+  attempt: ResolvedAttempt,
   startedAt: Date,
 ): EventBase {
   return {
     userId: input.userId,
     apiKeyId: input.apiKeyId,
-    providerId: candidate.providerId,
-    providerKind: candidate.kind,
-    model: candidate.alias,
-    upstreamModel: candidate.upstreamModel,
+    providerId: attempt.providerId,
+    providerKind: attempt.kind,
+    model: attempt.alias,
+    upstreamModel: attempt.upstreamModel,
     streamed: input.stream,
-    inputPricePerMtok: candidate.inputPricePerMtok,
-    outputPricePerMtok: candidate.outputPricePerMtok,
+    inputPricePerMtok: attempt.inputPricePerMtok,
+    outputPricePerMtok: attempt.outputPricePerMtok,
     reference,
     startedAt,
   };

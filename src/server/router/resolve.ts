@@ -1,10 +1,10 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { ProviderKind } from "../../shared/providers";
 import { TAG_REF_PREFIX, providerRefOf, tagRefOf } from "../../shared/slugs";
-import { providerModels, providers, tagModels, tags } from "../db/schema";
+import { providerCredentials, providerModels, providers, tagModels, tags } from "../db/schema";
 import type { ProviderDeps } from "../providers";
 
-export type ResolvedCandidate = {
+export type ResolvedAttempt = {
   readonly alias: string;
   readonly upstreamModel: string;
   readonly inputPricePerMtok: number | null;
@@ -12,18 +12,31 @@ export type ResolvedCandidate = {
   readonly providerId: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
+  readonly credentialId: string | null;
   readonly sealedKey: string;
 };
 
 export type ResolvedPlan = {
   readonly ref: string;
   readonly tag: string | null;
-  readonly candidates: readonly ResolvedCandidate[];
+  readonly attempts: readonly ResolvedAttempt[];
 };
 
 export type ModelRef = { readonly id: string; readonly createdAt: Date };
 
-const candidateColumns = {
+type AttemptRow = {
+  readonly alias: string;
+  readonly upstreamModel: string;
+  readonly inputPricePerMtok: number | null;
+  readonly outputPricePerMtok: number | null;
+  readonly providerId: string;
+  readonly kind: ProviderKind;
+  readonly baseUrl: string;
+  readonly credentialId: string | null;
+  readonly sealedKey: string | null;
+};
+
+const attemptColumns = {
   alias: providerModels.alias,
   upstreamModel: providerModels.upstreamModel,
   inputPricePerMtok: providerModels.inputPricePerMtok,
@@ -31,8 +44,14 @@ const candidateColumns = {
   providerId: providers.id,
   kind: providers.kind,
   baseUrl: providers.baseUrl,
-  sealedKey: providers.apiKey,
+  credentialId: providerCredentials.id,
+  sealedKey: providerCredentials.credential,
 };
+
+/** A provider with no credential row still answers, with an empty key. */
+function attemptsOf(rows: readonly AttemptRow[]): readonly ResolvedAttempt[] {
+  return rows.map((row) => ({ ...row, sealedKey: row.sealedKey ?? "" }));
+}
 
 export async function resolvePlan(
   deps: ProviderDeps,
@@ -40,9 +59,10 @@ export async function resolvePlan(
   ref: string,
 ): Promise<ResolvedPlan> {
   const aliasRows = await deps.db
-    .select(candidateColumns)
+    .select(attemptColumns)
     .from(providerModels)
     .innerJoin(providers, eq(providers.id, providerModels.providerId))
+    .leftJoin(providerCredentials, eq(providerCredentials.providerId, providers.id))
     .where(
       and(
         eq(providerModels.userId, userId),
@@ -50,11 +70,9 @@ export async function resolvePlan(
         eq(providerModels.enabled, true),
       ),
     )
-    .limit(1);
+    .orderBy(asc(providerCredentials.priority));
 
-  const alias = aliasRows[0];
-
-  if (alias !== undefined) return { ref, tag: null, candidates: [alias] };
+  if (aliasRows.length > 0) return { ref, tag: null, attempts: attemptsOf(aliasRows) };
 
   if (ref.startsWith(TAG_REF_PREFIX)) {
     const slug = ref.slice(TAG_REF_PREFIX.length);
@@ -67,27 +85,29 @@ export async function resolvePlan(
 
     const tag = tagRows[0];
 
-    if (tag === undefined) return { ref, tag: null, candidates: [] };
+    if (tag === undefined) return { ref, tag: null, attempts: [] };
 
     const rows = await deps.db
-      .select(candidateColumns)
+      .select(attemptColumns)
       .from(tagModels)
       .innerJoin(providerModels, eq(providerModels.id, tagModels.modelId))
       .innerJoin(providers, eq(providers.id, providerModels.providerId))
+      .leftJoin(providerCredentials, eq(providerCredentials.providerId, providers.id))
       .where(and(eq(tagModels.tagId, tag.id), eq(providerModels.enabled, true)))
-      .orderBy(asc(tagModels.priority));
+      .orderBy(asc(tagModels.priority), asc(providerCredentials.priority));
 
-    return { ref, tag: slug, candidates: rows };
+    return { ref, tag: slug, attempts: attemptsOf(rows) };
   }
 
   const slash = ref.indexOf("/");
 
-  if (slash <= 0) return { ref, tag: null, candidates: [] };
+  if (slash <= 0) return { ref, tag: null, attempts: [] };
 
   const rows = await deps.db
-    .select(candidateColumns)
+    .select(attemptColumns)
     .from(providerModels)
     .innerJoin(providers, eq(providers.id, providerModels.providerId))
+    .leftJoin(providerCredentials, eq(providerCredentials.providerId, providers.id))
     .where(
       and(
         eq(providerModels.userId, userId),
@@ -96,10 +116,9 @@ export async function resolvePlan(
         eq(providerModels.enabled, true),
       ),
     )
-    .orderBy(asc(providerModels.createdAt))
-    .limit(1);
+    .orderBy(asc(providerCredentials.priority));
 
-  return { ref, tag: null, candidates: rows };
+  return { ref, tag: null, attempts: attemptsOf(rows) };
 }
 
 export async function listModelRefs(

@@ -1,6 +1,7 @@
 import type {
   BuiltInProviderKind,
   GenericProviderKind,
+  ProviderAuthMode,
   ProviderKind,
 } from "../../shared/providers";
 import type { Credential } from "../credential";
@@ -107,6 +108,7 @@ export type BuiltInProviderSettings = {
 
 type ProviderCapabilities = {
   readonly adapter: ProviderAdapter;
+  readonly authModes: readonly ProviderAuthMode[];
   readonly oauth?: OAuthConnector;
   readonly catalog?: ProviderCatalog;
 };

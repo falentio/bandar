@@ -5,6 +5,10 @@ import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
   ProviderCreateInputSchema,
+  ProviderCredentialBulkInputSchema,
+  ProviderCredentialInputSchema,
+  ProviderCredentialOrderInputSchema,
+  ProviderCredentialParamsSchema,
   ProviderModelRefreshSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
@@ -21,6 +25,14 @@ import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
 import {
+  addProviderCredential,
+  addProviderCredentials,
+  removeProviderCredential,
+  reorderProviderCredentials,
+  addOAuthCredential,
+  type CredentialWriteResult,
+} from "./credentials";
+import {
   addProviderModel,
   createProvider,
   definitionFor,
@@ -30,7 +42,6 @@ import {
   removeProvider,
   removeProviderModel,
   ProviderRuleError,
-  saveOAuthCredential,
   updateProvider,
   type ProviderDeps,
 } from "./providers";
@@ -266,7 +277,7 @@ export function createApi(deps: ApiDeps) {
 
       pendingLogins.delete(key);
 
-      const saved = await saveOAuthCredential(deps.providers, caller.userId, id, result.credential);
+      const saved = await addOAuthCredential(deps.providers, caller.userId, id, result.credential);
 
       if (saved === null) {
         set.status = 404;
@@ -278,6 +289,75 @@ export function createApi(deps: ApiDeps) {
         state: "connected",
         authMode: result.credential.authMode,
       });
+    })
+    .post("/providers/:id/credentials", async ({ body, params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(ProviderCredentialInputSchema, body as ParseableInput);
+      const result = await addProviderCredential(deps.providers, caller.userId, id, input);
+
+      if (result.kind !== "ok") return providerFailure(id);
+
+      set.status = 201;
+
+      return result.provider;
+    })
+    .post("/providers/:id/credentials/bulk", async ({ body, params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(ProviderCredentialBulkInputSchema, body as ParseableInput);
+
+      const result = await addProviderCredentials(deps.providers, caller.userId, id, input.apiKeys);
+
+      if (result.kind !== "ok") return providerFailure(id);
+
+      set.status = 201;
+
+      return result.provider;
+    })
+    .put("/providers/:id/credentials/order", async ({ body, params, request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(ProviderCredentialOrderInputSchema, body as ParseableInput);
+
+      const result = await reorderProviderCredentials(
+        deps.providers,
+        caller.userId,
+        id,
+        input.credentialIds,
+      );
+
+      if (result.kind === "ok") return result.provider;
+
+      return result.kind === "invalid_order" ? invalidCredentialOrder() : providerFailure(id);
+    })
+    .delete("/providers/:id/credentials/:credentialId", async ({ params, request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id, credentialId } = parseInput(ProviderCredentialParamsSchema, params);
+
+      const result = await removeProviderCredential(
+        deps.providers,
+        caller.userId,
+        id,
+        credentialId,
+      );
+
+      return result.kind === "ok" ? result.provider : credentialFailure(result, id, credentialId);
     })
     .post("/providers/:id/models", async ({ body, params, request, set }) => {
       const caller = await authenticate(deps.auth, request);
@@ -535,6 +615,26 @@ async function authenticate(auth: Auth, request: Request): Promise<Caller | Resp
   return user === null
     ? Response.json(failure("unauthorized", "sign in to use the API"), { status: 401 })
     : { userId: user.id, apiKeyId: null };
+}
+
+function credentialFailure(
+  result: Exclude<CredentialWriteResult, { kind: "ok" }>,
+  providerId: string,
+  credentialId: string,
+): Response {
+  return result.kind === "missing_credential"
+    ? Response.json(failure("not_found", `credential ${credentialId} not found`), { status: 404 })
+    : providerFailure(providerId);
+}
+
+function invalidCredentialOrder(): Response {
+  return Response.json(failure("validation", "send every credential of this provider, in order"), {
+    status: 422,
+  });
+}
+
+function providerFailure(providerId: string): Response {
+  return Response.json(failure("not_found", `provider ${providerId} not found`), { status: 404 });
 }
 
 function providerRuleStatus(error: ProviderRuleError): number {

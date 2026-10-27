@@ -29,6 +29,9 @@ import {
 } from "../shared/auth";
 import {
   ProviderCreateInputSchema,
+  ProviderCredentialBulkInputSchema,
+  ProviderCredentialInputSchema,
+  ProviderCredentialOrderInputSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
   ProviderListSchema,
@@ -40,6 +43,7 @@ import {
   providerPaths,
   type Provider,
   type ProviderCreateInput,
+  type ProviderCredentialInput,
   type ProviderDetail,
   type ProviderInput,
   type ProviderList,
@@ -85,6 +89,23 @@ export const providerApi = {
   remove: async (id: string): Promise<void> => {
     await send(providerPaths.remove(id), { method: "DELETE" });
   },
+  addCredential: (id: string, input: ProviderCredentialInput): Promise<Provider> =>
+    request(providerPaths.credentials(id), ProviderSchema, {
+      method: "POST",
+      body: JSON.stringify(v.parse(ProviderCredentialInputSchema, input)),
+    }),
+  addCredentials: (id: string, apiKeys: readonly string[]): Promise<Provider> =>
+    request(providerPaths.credentialsBulk(id), ProviderSchema, {
+      method: "POST",
+      body: JSON.stringify(v.parse(ProviderCredentialBulkInputSchema, { apiKeys })),
+    }),
+  reorderCredentials: (id: string, credentialIds: readonly string[]): Promise<Provider> =>
+    request(providerPaths.credentialOrder(id), ProviderSchema, {
+      method: "PUT",
+      body: JSON.stringify(v.parse(ProviderCredentialOrderInputSchema, { credentialIds })),
+    }),
+  removeCredential: (id: string, credentialId: string): Promise<Provider> =>
+    request(providerPaths.credential(id, credentialId), ProviderSchema, { method: "DELETE" }),
   addModel: (id: string, input: ProviderModelInput): Promise<Provider> =>
     request(providerPaths.models(id), ProviderSchema, {
       method: "POST",

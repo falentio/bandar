@@ -16,6 +16,16 @@ describe("provider registry", () => {
     ]);
   });
 
+  test("a kind declares every credential mode it can accept", () => {
+    for (const kind of PROVIDER_KINDS) {
+      const definition = definitionFor(kind);
+
+      expect(new Set(definition.authModes).size).toBe(definition.authModes.length);
+      expect(definition.authModes.length).toBeGreaterThan(0);
+      expect(definition.authModes.includes("oauth")).toBe(definition.oauth !== undefined);
+    }
+  });
+
   test("reserved slugs cover the tag route and every built-in", () => {
     expect(reservedProviderSlugs.has(TAG_SLUG)).toBe(true);
 

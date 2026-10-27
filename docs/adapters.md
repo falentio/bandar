@@ -27,10 +27,10 @@ export type ProviderTarget = {
   readonly credential: Credential;
   readonly upstreamModel: string;
 };
+```
 
 `credential` is the attempt's credential. The gateway opens it immediately before
 the call and never passes more than one to an adapter.
-```
 
 `Credential` is a sealed-bundle union from `src/server/credential.ts`:
 

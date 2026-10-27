@@ -5,6 +5,7 @@ import { google } from "./google";
 import { kilocode } from "./kilocode";
 import { openai } from "./openai";
 import { tokenharbor } from "./tokenharbor";
+import { yeta } from "./yeta";
 import type {
   BuiltInProviderDefinition,
   BuiltInProviderDefinitions,
@@ -21,6 +22,7 @@ const genericDefinitions = {
 const builtInDefinitions = {
   kilocode,
   tokenharbor,
+  yeta,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {

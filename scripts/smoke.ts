@@ -108,6 +108,7 @@ let openaiProvider: ProviderSlot = { provider: null, modelId: "" };
 let claudeProvider: ProviderSlot = { provider: null, modelId: "" };
 const kiloProvider: ProviderSlot = { provider: null, modelId: "" };
 const tokenharborProvider: ProviderSlot = { provider: null, modelId: "" };
+const yetaProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -163,7 +164,11 @@ try {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
-    assert.deepEqual(builtIn.map((provider) => provider.kind).sort(), ["kilocode", "tokenharbor"]);
+    assert.deepEqual(builtIn.map((provider) => provider.kind).sort(), [
+      "kilocode",
+      "tokenharbor",
+      "yeta",
+    ]);
 
     const byKind = new Map(builtIn.map((provider) => [provider.kind, provider]));
     const kilo = byKind.get("kilocode");
@@ -188,8 +193,19 @@ try {
     assert.deepEqual(harbor.authModes, ["api-key"]);
     assert.equal(harbor.hasCatalog, true);
 
+    const yeta = byKind.get("yeta");
+
+    if (yeta === undefined) throw new Error("the built-in Yeta provider is missing");
+
+    assert.equal(yeta.name, "Yeta");
+    assert.equal(yeta.slug, "yeta");
+    assert.equal(yeta.baseUrl, `${builtInsOrigin}/yeta/v1`);
+    assert.deepEqual(yeta.authModes, ["api-key"]);
+    assert.equal(yeta.hasCatalog, true);
+
     kiloProvider.provider = kilo;
     tokenharborProvider.provider = harbor;
+    yetaProvider.provider = yeta;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -275,7 +291,7 @@ try {
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 2);
+    assert.equal(builtIn.length, 3);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -753,6 +769,41 @@ try {
     assert.equal(body.choices[0]?.message.content, "Hello from Token Harbor");
     assert.equal(body.usage?.prompt_tokens, 5);
     assert.equal(body.usage?.completion_tokens, 2);
+  });
+
+  await check("Yeta joins its pricing ratios and streams chat", async () => {
+    const id = yetaProvider.provider?.id ?? "";
+
+    await postJson(providerPaths.credentials(id), { apiKey: "yeta_test" }, ProviderSchema, 201);
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 2);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+    const large = detail.provider.models.find((model) => model.alias === "yeta-large");
+    const image = detail.provider.models.find((model) => model.alias === "yeta-image");
+
+    assert.equal(large?.inputPricePerMtok, 3);
+    assert.equal(large?.outputPricePerMtok, 12);
+    assert.equal(image?.inputPricePerMtok, null);
+    assert.equal(image?.outputPricePerMtok, null);
+
+    const response = await chatRequest("yeta-large", true);
+
+    assert.equal(response.status, 200);
+
+    const stream = await readStream(response);
+
+    assert.equal(stream.text, "Hello from Yeta");
+    assert.equal(stream.usage?.prompt_tokens, 7);
+    assert.equal(stream.usage?.completion_tokens, 3);
+    assert.equal(stream.done, true);
   });
 
   await check("providers carry derived slugs and model refs", async () => {
@@ -1511,7 +1562,7 @@ try {
         .filter((provider) => provider.origin === "builtin")
         .map((provider) => provider.kind)
         .sort(),
-      ["kilocode", "tokenharbor"],
+      ["kilocode", "tokenharbor", "yeta"],
       "a built-in provider was seeded twice",
     );
   });
@@ -1568,6 +1619,7 @@ async function boot(port = 0): Promise<Booted> {
       BANDAR_KILOCODE_API: kilocodeOrigin,
       BANDAR_KILOCODE_MODELS_URL: `${kilocodeOrigin}/api/gateway/models`,
       BANDAR_TOKENHARBOR_API: `${builtInsOrigin}/tokenharbor`,
+      BANDAR_YETA_API: `${builtInsOrigin}/yeta`,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -2061,7 +2113,7 @@ function startBuiltIns() {
   return Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch(request) {
+    async fetch(request) {
       const url = new URL(request.url);
       const authorization = request.headers.get("authorization") ?? "";
 
@@ -2089,6 +2141,61 @@ function startBuiltIns() {
           ],
           usage: { prompt_tokens: 5, completion_tokens: 2 },
         });
+      }
+
+      if (url.pathname === "/yeta/v1/models") {
+        if (authorization !== "Bearer yeta_test") return jsonError(401, "bad yeta key");
+
+        return Response.json({
+          object: "list",
+          data: [
+            { id: "yeta-large", object: "model" },
+            { id: "yeta-image", object: "model" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/api/pricing") {
+        return Response.json({
+          success: true,
+          data: [
+            { model_name: "yeta-large", model_ratio: 1.5, completion_ratio: 4, quota_type: 0 },
+            { model_name: "yeta-image", model_ratio: 1, completion_ratio: 1, quota_type: 1 },
+            { model_name: "yeta-retired", model_ratio: 9, completion_ratio: 9, quota_type: 0 },
+          ],
+        });
+      }
+
+      if (url.pathname === "/yeta/v1/chat/completions") {
+        if (authorization !== "Bearer yeta_test") return jsonError(401, "bad yeta key");
+
+        const body = v.safeParse(
+          v.object({ stream: v.optional(v.boolean()) }),
+          await request.json(),
+        );
+
+        const stream = body.success ? (body.output.stream ?? false) : false;
+
+        if (!stream) {
+          return Response.json({
+            choices: [
+              {
+                message: { role: "assistant", content: "Hello from Yeta" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 7, completion_tokens: 3 },
+          });
+        }
+
+        return sse([
+          { choices: [{ delta: { role: "assistant", content: "Hello" } }] },
+          {
+            choices: [{ delta: { content: " from Yeta" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 7, completion_tokens: 3 },
+          },
+          "[DONE]",
+        ]);
       }
 
       return jsonError(404, `no fake built-in route for ${url.pathname}`);

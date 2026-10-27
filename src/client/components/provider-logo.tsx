@@ -33,4 +33,6 @@ const LOGO_PATHS: Record<ProviderKind, string> = {
   // Token Harbor's anchor: a ring, a shaft, a stock, and two flukes.
   tokenharbor:
     "M12 2.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Zm0 1.9a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4ZM11 8.8h2v11.6h-2zm-5 2.6h12v1.9H6zm-1.6 3.1 1.7-1 2.9 5-1.7 1zm13.2 0 1.7 1-2.9 4.9-1.7-1z",
+  // Yeta's mark is a Y chevron.
+  yeta: "M4 4h4.6l3.4 6 3.4-6H20l-6.2 10.4V20h-3.6v-5.6z",
 };

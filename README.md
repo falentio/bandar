@@ -134,7 +134,9 @@ replaces the whole list, so priorities are always 1-based and contiguous.
 
 A provider holds an ordered list of credentials: several accounts or API keys for
 the same upstream. The gateway calls with the first credential and falls back to
-the next one when the failure is one a different key might fix.
+the next one when the failure is one a different key might fix. **Add credential**
+opens a dialog with a **Single** tab, a **Bulk** tab that takes one key per line and
+appends each in order, and, for a provider with a device login, an **OAuth** tab.
 
 - Ordering is 1-based and contiguous per provider. Move a credential on the
   **Credentials** tab, and the write replaces the whole order.
@@ -312,7 +314,7 @@ semicolons out of string literals in a migration.
 | `bun run check`          | Format, lint, and type-check.                                                    |
 | `bun run check:fix`      | The same with fixes.                                                             |
 | `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                       |
-| `bun run smoke`          | Boot `dist/bandar` and run 48 end-to-end checks against fake upstreams.          |
+| `bun run smoke`          | Boot `dist/bandar` and run 53 end-to-end checks against fake upstreams.          |
 | `bun run verify`         | `check`, `test`, `build`, `smoke`.                                               |
 | `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                    |
 | `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                       |
@@ -389,7 +391,8 @@ bandar/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
 │       ├── providers-panel.tsx     # provider list and add dialog
 │       ├── provider-page.tsx       # one provider: overview, settings, models, credentials
-│       ├── credentials-card.tsx    # ordered credential list for one provider
+│       ├── credentials-card.tsx    # ordered credential list for one provider, with the add dialog
+│       ├── credential-dialog.tsx   # add credential: single, bulk, and OAuth tabs
 │       ├── tags-panel.tsx          # tag chains: create, reorder, remove
 │       ├── connect-flow.tsx        # Kilo Code device-code approval
 │       ├── token-chart.tsx         # shared daily token bars
@@ -412,6 +415,7 @@ bandar/
 | `GET/POST /api/providers`                             | Session or `x-api-key` | List providers, or add a custom provider.               |
 | `PUT/DELETE /api/providers/:id`                       | Session or `x-api-key` | Edit a custom provider's settings, or remove it.        |
 | `POST /api/providers/:id/credentials`                 | Session or `x-api-key` | Add a credential at the end of the provider's order.    |
+| `POST /api/providers/:id/credentials/bulk`            | Session or `x-api-key` | Add up to 100 credentials at the end in one write.      |
 | `PUT /api/providers/:id/credentials/order`            | Session or `x-api-key` | Replace the credential order; returns the provider.     |
 | `DELETE /api/providers/:id/credentials/:credentialId` | Session or `x-api-key` | Remove a credential and compact the order.              |
 | `GET /api/providers/:id?days=30`                      | Session or `x-api-key` | One provider plus its window usage.                     |

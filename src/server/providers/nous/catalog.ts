@@ -1,6 +1,5 @@
 import * as v from "valibot";
-import { entryOf, fromPerToken } from "../catalog";
-import { joinUrl } from "../http";
+import { entryOf, fromPerToken, readPublicModelResponse } from "../catalog";
 import { UpstreamError } from "../types";
 import type { CatalogRequest, ModelCatalogEntry } from "../types";
 
@@ -26,21 +25,10 @@ const CatalogSchema = v.object({
   ),
 });
 
-export async function fetchNousCatalog({
-  baseUrl,
-  signal,
-}: CatalogRequest): Promise<readonly ModelCatalogEntry[]> {
-  const response = await fetch(joinUrl(baseUrl, "models"), { signal }).catch((error: Error) => {
-    throw new UpstreamError(`could not read the Nous Portal catalog: ${error.message}`, "network");
-  });
-
-  if (!response.ok) {
-    throw new UpstreamError(
-      `could not read the Nous Portal catalog (${response.status})`,
-      "unavailable",
-      response.status,
-    );
-  }
+export async function fetchNousCatalog(
+  request: CatalogRequest,
+): Promise<readonly ModelCatalogEntry[]> {
+  const response = await readPublicModelResponse(request);
 
   const parsed = v.safeParse(CatalogSchema, await response.json().catch(() => null));
 

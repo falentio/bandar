@@ -768,6 +768,15 @@ try {
     assert.equal(body.usage.completion_tokens, 4);
   });
 
+  await check("a keyed catalog refuses to import without a key", async () => {
+    const id = tokenharborProvider.provider?.id ?? "";
+
+    const refused = await post(providerPaths.refreshModels(id), {});
+
+    assert.equal(refused.status, 400);
+    assert.equal((await errorBody(refused)).code, "upstream_invalid_request");
+  });
+
   await check("Token Harbor imports its keyed catalog and answers chat", async () => {
     const id = tokenharborProvider.provider?.id ?? "";
 

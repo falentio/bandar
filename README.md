@@ -6,9 +6,9 @@ it; it creates its SQLite file beside itself and serves the whole app on one por
 No `node_modules`, no `dist/`, no migration folder beside the binary.
 
 The app in the box is a notes demo: email + password sign-up, three notes
-routes, and one screen. It exists to prove every layer (browser → API → Drizzle
-→ SQLite file → back, with a session cookie in the middle) in code you can read
-in one sitting.
+routes, and a signed-in shell with two views. It exists to prove every layer
+(browser → API → Drizzle → SQLite file → back, with a session cookie in the
+middle) in code you can read in one sitting.
 
 ## Run it
 
@@ -100,6 +100,10 @@ port is bound.
 
 ## Layout
 
+The signed-out page and the signed-in shell are the shadcn `login-03` and
+`sidebar-07` blocks, adapted here: sign-up gains a confirm field, and the sidebar
+carries this app's two views instead of the demo's teams and projects.
+
 ```
 bandar/
 ├── index.html                    # mounts /src/client/main.tsx at #root
@@ -136,16 +140,36 @@ bandar/
 │   └── generated/                # gitignored; written by scripts/gen.ts
 ├── src/client/
 │   ├── main.tsx                  # createRoot
-│   ├── app.tsx                   # session gate, then notes
+│   ├── app.tsx                   # session gate, then the app shell
+│   ├── views.tsx                 # sidebar, breadcrumb, and panel registry
 │   ├── api.ts                    # fetch + valibot parse + ApiError
 │   ├── use-session.ts            # SessionState machine + auth actions
 │   ├── use-notes.ts              # NotesState machine, one pending flag
 │   ├── use-api-keys.ts           # ApiKeysState machine, create/revoke
+│   ├── components/app-shell.tsx  # sidebar provider, breadcrumb header, active view
+│   ├── components/app-sidebar.tsx # brand, NavMain, NavUser
+│   ├── components/nav-main.tsx   # flat view list
+│   ├── components/nav-user.tsx   # account menu and sign out
+│   ├── components/auth-page.tsx  # signed-out split shell
+│   ├── components/login-form.tsx # sign-in / create-account card
 │   ├── components/notes-panel.tsx
 │   ├── components/api-keys-panel.tsx # mint, show once, revoke
-│   ├── components/auth-panel.tsx # sign-in / create-account card
 │   └── index.css                 # tailwind + shadcn tokens
-├── src/components/ui/            # shadcn primitives, untouched
+├── src/components/ui/            # shadcn primitives (login-03 / sidebar-07 blocks)
+│   ├── avatar.tsx
+│   ├── breadcrumb.tsx
+│   ├── button.tsx
+│   ├── card.tsx
+│   ├── dropdown-menu.tsx
+│   ├── field.tsx
+│   ├── input.tsx
+│   ├── label.tsx
+│   ├── separator.tsx
+│   ├── sheet.tsx
+│   ├── sidebar.tsx
+│   ├── skeleton.tsx
+│   └── tooltip.tsx
+├── src/hooks/use-mobile.ts       # sidebar breakpoint hook
 ├── src/lib/utils.ts              # re-exports cn
 └── tools/oxlint/anti-slop/       # vendored anti-slop rules (MIT)
 ```
@@ -253,8 +277,9 @@ one place that asserts the new routes end to end; add a check per new route.
 
 The scaffold stays useful with the notes demo gone. Delete, in this order:
 
-1. Auth: `src/client/components/auth-panel.tsx`, `src/client/use-session.ts`,
-   and the session gate in `src/client/app.tsx`; `src/shared/auth.ts` and
+1. Auth: `src/client/components/auth-page.tsx`,
+   `src/client/components/login-form.tsx`, `src/client/use-session.ts`, and the
+   session gate in `src/client/app.tsx`; `src/shared/auth.ts` and
    `authApi` in `src/client/api.ts`; `src/server/auth.ts`, the `/auth/*` route,
    and `authenticate` in `src/server/api.ts`. The API keys card goes with it:
    `src/client/components/api-keys-panel.tsx`, `src/client/use-api-keys.ts`,
@@ -263,7 +288,7 @@ The scaffold stays useful with the notes demo gone. Delete, in this order:
    `verification`, and `apikey` tables), `scripts/auth-schema.config.ts`, and the
    `db:auth-schema` script.
 3. `src/client/components/notes-panel.tsx`, `src/client/use-notes.ts` — and the
-   `<NotesPanel />` in `src/client/app.tsx`.
+   `notes` entry in `src/client/views.tsx`.
 4. `src/shared/notes.ts`, and the notes calls and `ApiError` usage in
    `src/client/api.ts` (keep `request`, `send`, and `ApiError`).
 5. `src/server/notes.ts`, and its routes in `src/server/api.ts`.

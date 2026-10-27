@@ -1,14 +1,15 @@
-import { Outlet, useRouterState } from "@tanstack/react-router";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
   Breadcrumb,
   BreadcrumbItem,
+  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { views } from "../views";
+import { activeView } from "../views";
 import { AppSidebar } from "./app-sidebar";
 
 export function AppShell({
@@ -21,7 +22,7 @@ export function AppShell({
   onSignOut: () => Promise<void>;
 }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const activeView = views.find((view) => view.to === pathname) ?? views[0];
+  const current = activeView(pathname);
 
   return (
     <SidebarProvider>
@@ -36,7 +37,15 @@ export function AppShell({
                 <BreadcrumbItem>bandar</BreadcrumbItem>
                 <BreadcrumbSeparator />
                 <BreadcrumbItem>
-                  <BreadcrumbPage>{activeView.label}</BreadcrumbPage>
+                  {current === undefined ? (
+                    <BreadcrumbPage>Provider</BreadcrumbPage>
+                  ) : pathname === current.to ? (
+                    <BreadcrumbPage>{current.label}</BreadcrumbPage>
+                  ) : (
+                    <BreadcrumbLink asChild>
+                      <Link to={current.to}>{current.label}</Link>
+                    </BreadcrumbLink>
+                  )}
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>

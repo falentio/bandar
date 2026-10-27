@@ -7,10 +7,11 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { views } from "../views";
+import { activeView, views } from "../views";
 
 export function NavMain() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const current = activeView(pathname);
   const { setOpenMobile } = useSidebar();
 
   return (
@@ -19,7 +20,7 @@ export function NavMain() {
       <SidebarMenu>
         {views.map((view) => (
           <SidebarMenuItem key={view.to}>
-            <SidebarMenuButton asChild isActive={view.to === pathname} tooltip={view.label}>
+            <SidebarMenuButton asChild isActive={view === current} tooltip={view.label}>
               <Link to={view.to} onClick={() => setOpenMobile(false)}>
                 <view.icon />
                 <span>{view.label}</span>

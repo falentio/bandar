@@ -5,14 +5,14 @@ import { describeError, isError } from "./errors";
 
 type Status = "loading" | "ready" | "error";
 
-export type RequestsState = {
+export type Requests = {
   readonly status: Status;
   readonly requests: readonly RequestEvent[];
   readonly error: string | null;
   readonly refresh: () => void;
 };
 
-export function useRequests(limit = 50): RequestsState {
+export function useRequests(limit = 50, providerId?: string): Requests {
   const [requests, setRequests] = useState<readonly RequestEvent[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +26,7 @@ export function useRequests(limit = 50): RequestsState {
       setError(null);
 
       try {
-        const list = await analyticsApi.requests(limit);
+        const list = await analyticsApi.requests(limit, providerId);
 
         if (!live) return;
 
@@ -45,7 +45,7 @@ export function useRequests(limit = 50): RequestsState {
     return () => {
       live = false;
     };
-  }, [limit, reload]);
+  }, [limit, providerId, reload]);
 
   const refresh = useCallback(() => setReload((value) => value + 1), []);
 

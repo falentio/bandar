@@ -12,6 +12,7 @@ export type Providers = {
   readonly pending: boolean;
   readonly create: (input: ProviderInput) => Promise<boolean>;
   readonly remove: (id: string) => Promise<void>;
+  readonly apply: (provider: Provider) => void;
   readonly addModel: (id: string, input: ProviderModelInput) => Promise<boolean>;
   readonly removeModel: (id: string, modelId: string) => Promise<void>;
 };
@@ -121,5 +122,7 @@ export function useProviders(): Providers {
     }
   }, []);
 
-  return { status, providers, error, pending, create, remove, addModel, removeModel };
+  const apply = useCallback((provider: Provider) => replace(provider), []);
+
+  return { status, providers, error, pending, create, remove, apply, addModel, removeModel };
 }

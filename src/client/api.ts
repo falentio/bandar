@@ -26,12 +26,14 @@ import {
   type SignUpInput,
 } from "../shared/auth";
 import {
+  ProviderDetailSchema,
   ProviderInputSchema,
   ProviderListSchema,
   ProviderModelInputSchema,
   ProviderSchema,
   providerPaths,
   type Provider,
+  type ProviderDetail,
   type ProviderInput,
   type ProviderList,
   type ProviderModelInput,
@@ -51,9 +53,16 @@ export class ApiError extends Error {
 
 export const providerApi = {
   list: (): Promise<ProviderList> => request(providerPaths.list, ProviderListSchema),
+  detail: (id: string, days: number): Promise<ProviderDetail> =>
+    request(`${providerPaths.detail(id)}?days=${days}`, ProviderDetailSchema),
   create: (input: ProviderInput): Promise<Provider> =>
     request(providerPaths.list, ProviderSchema, {
       method: "POST",
+      body: JSON.stringify(v.parse(ProviderInputSchema, input)),
+    }),
+  update: (id: string, input: ProviderInput): Promise<Provider> =>
+    request(providerPaths.update(id), ProviderSchema, {
+      method: "PUT",
       body: JSON.stringify(v.parse(ProviderInputSchema, input)),
     }),
   remove: async (id: string): Promise<void> => {
@@ -71,8 +80,13 @@ export const providerApi = {
 export const analyticsApi = {
   overview: (days: number): Promise<Analytics> =>
     request(`${analyticsPaths.analytics}?days=${days}`, AnalyticsSchema),
-  requests: (limit = 50): Promise<RequestList> =>
-    request(`${analyticsPaths.requests}?limit=${limit}`, RequestListSchema),
+  requests: (limit = 50, providerId?: string): Promise<RequestList> =>
+    request(
+      providerId === undefined
+        ? `${analyticsPaths.requests}?limit=${limit}`
+        : `${analyticsPaths.requests}?limit=${limit}&providerId=${encodeURIComponent(providerId)}`,
+      RequestListSchema,
+    ),
 };
 
 export const apiKeyApi = {

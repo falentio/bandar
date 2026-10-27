@@ -14,3 +14,7 @@ export type ViewPath = View["to"];
 export function isViewPath(path: string): path is ViewPath {
   return views.some((view) => view.to === path);
 }
+
+export function activeView(path: string): View | undefined {
+  return views.find((view) => path === view.to || path.startsWith(`${view.to}/`));
+}

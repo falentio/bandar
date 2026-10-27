@@ -72,6 +72,14 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
   };
 }
 
+export async function readProvider(
+  deps: ProviderDeps,
+  userId: string,
+  id: string,
+): Promise<Provider | null> {
+  return findProvider(deps, userId, id);
+}
+
 export async function createProvider(
   deps: ProviderDeps,
   userId: string,

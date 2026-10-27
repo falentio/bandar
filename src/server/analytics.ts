@@ -1,5 +1,5 @@
 import type { DuckDb, QueryRow } from "./duck/client";
-import { sqlInt, sqlText } from "./duck/client";
+import { SQL_NULL, sqlInt, sqlText, type SqlValue } from "./duck/client";
 import { errorRate, round } from "./router/metrics";
 
 export type AnalyticsQuery = {
@@ -11,6 +11,14 @@ export type AnalyticsQuery = {
 export type RequestsQuery = {
   readonly userId: string;
   readonly limit: number;
+  readonly providerId?: string;
+};
+
+export type ProviderUsageQuery = {
+  readonly userId: string;
+  readonly providerId: string;
+  readonly days: number;
+  readonly now?: Date;
 };
 
 export type Analytics = {
@@ -47,10 +55,26 @@ export type Analytics = {
   }[];
 };
 
+export type ProviderUsage = {
+  readonly days: number;
+  readonly requests: number;
+  readonly errors: number;
+  readonly errorRate: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+  readonly avgTokensPerDay: number;
+  readonly avgTps: number | null;
+  readonly avgTtftMs: number | null;
+  readonly costUsd: number;
+  readonly lastRequestAt: string | null;
+};
+
 export type RequestEvent = {
   readonly id: string;
   readonly model: string;
   readonly providerKind: string;
+  readonly apiKeyId: string | null;
   readonly status: string;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
@@ -166,16 +190,23 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
 }
 
 export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
+  const providerId = query.providerId ?? null;
+
   const rows = db.query(
     `SELECT
-       id, model, provider_kind, status, input_tokens, output_tokens, total_tokens,
+       id, model, provider_kind, api_key_id, status, input_tokens, output_tokens, total_tokens,
        ttft_ms, duration_ms, tokens_per_second, cost_usd, error_kind, streamed,
        epoch_ms(started_at) AS started_at_ms
      FROM request_events
-     WHERE user_id = ?
+     WHERE user_id = ? AND (? IS NULL OR provider_id = ?)
      ORDER BY started_at DESC
      LIMIT ?`,
-    [sqlText(query.userId), sqlInt(query.limit)],
+    [
+      sqlText(query.userId),
+      providerParam(providerId),
+      providerParam(providerId),
+      sqlInt(query.limit),
+    ],
   );
 
   return {
@@ -183,6 +214,7 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
       id: string(row, "id"),
       model: string(row, "model"),
       providerKind: string(row, "provider_kind"),
+      apiKeyId: stringOrNull(row, "api_key_id"),
       status: string(row, "status"),
       inputTokens: nullableNumber(row, "input_tokens"),
       outputTokens: nullableNumber(row, "output_tokens"),
@@ -196,6 +228,53 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
       startedAt: new Date(number(row, "started_at_ms")).toISOString(),
     })),
   };
+}
+
+export function readProviderUsage(db: DuckDb, query: ProviderUsageQuery): ProviderUsage {
+  const end = startOfUtcDay(query.now ?? new Date());
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - (query.days - 1));
+
+  const row = db.query(
+    `SELECT
+       count(*) AS requests,
+       count(*) FILTER (WHERE status <> 'success') AS errors,
+       coalesce(sum(input_tokens), 0) AS input_tokens,
+       coalesce(sum(output_tokens), 0) AS output_tokens,
+       coalesce(sum(cost_usd), 0) AS cost_usd,
+       avg(ttft_ms) AS avg_ttft_ms,
+       avg(tokens_per_second) AS avg_tps,
+       max(started_at) AS last_request_at
+     FROM request_events
+     WHERE user_id = ? AND provider_id = ? AND started_at >= ?::TIMESTAMP`,
+    [sqlText(query.userId), sqlText(query.providerId), sqlText(start.toISOString())],
+  )[0];
+
+  if (row === undefined) throw new Error("provider usage returned no row");
+
+  const requests = number(row, "requests");
+  const inputTokens = number(row, "input_tokens");
+  const outputTokens = number(row, "output_tokens");
+  const lastRequestAt = stringOrNull(row, "last_request_at");
+
+  return {
+    days: query.days,
+    requests,
+    errors: number(row, "errors"),
+    errorRate: errorRate(number(row, "errors"), requests),
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    avgTokensPerDay: round((inputTokens + outputTokens) / query.days, 2),
+    avgTps: nullableNumber(row, "avg_tps"),
+    avgTtftMs: nullableNumber(row, "avg_ttft_ms"),
+    costUsd: round(number(row, "cost_usd"), 6),
+    lastRequestAt: lastRequestAt === null ? null : new Date(lastRequestAt).toISOString(),
+  };
+}
+
+function providerParam(value: string | null): SqlValue {
+  return value === null ? SQL_NULL : sqlText(value);
 }
 
 function startOfUtcDay(value: Date): Date {

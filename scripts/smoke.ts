@@ -13,6 +13,7 @@ import { ApiErrorBodySchema, HealthSchema } from "../src/shared/api";
 import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
 import { AuthResultSchema } from "../src/shared/auth";
 import {
+  ProviderDetailSchema,
   ProviderListSchema,
   ProviderSchema,
   providerPaths,
@@ -395,6 +396,37 @@ try {
       streaming.tokensPerSecond !== null && streaming.tokensPerSecond > 0,
       "streaming request has no tokens per second",
     );
+  });
+
+  await check("GET /api/providers/:id returns the provider and its usage", async () => {
+    const id = claudeProvider.provider?.id ?? "";
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.equal(detail.provider.id, id);
+    assert.equal(detail.usage.days, 30);
+    assert.equal(detail.usage.requests, 1);
+    assert.ok(detail.usage.inputTokens > 0);
+    assert.ok(detail.usage.lastRequestAt !== null);
+
+    const requests = await getJson(
+      `${analyticsPaths.requests}?limit=10&providerId=${id}`,
+      RequestListSchema,
+      200,
+    );
+
+    assert.deepEqual(
+      requests.requests.map((request) => request.model),
+      ["claude"],
+    );
+  });
+
+  await check("GET /api/providers/:id hides another account's provider", async () => {
+    const response = await fetch(
+      new URL(`${providerPaths.detail("00000000-0000-0000-0000-000000000000")}?days=30`, origin),
+      { headers: sessionHeaders() },
+    );
+
+    assert.equal(response.status, 404);
   });
 
   await check("POST /api/auth/sign-out ends the session", async () => {

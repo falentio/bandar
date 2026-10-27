@@ -13,6 +13,7 @@ import { ApiKeysPanel } from "./components/api-keys-panel";
 import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
 import { OverviewPanel } from "./components/overview-panel";
+import { ProviderPage } from "./components/provider-page";
 import { ProvidersPanel } from "./components/providers-panel";
 import { RequestsPanel } from "./components/requests-panel";
 import { SessionProvider, useSession } from "./use-session";
@@ -73,6 +74,12 @@ const providersRoute = createRoute({
   component: ProvidersPanel,
 });
 
+const providerRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/providers/$providerId",
+  component: ProviderDetailRoute,
+});
+
 const requestsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/requests",
@@ -88,7 +95,7 @@ const apiKeysRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
-  appRoute.addChildren([overviewRoute, providersRoute, requestsRoute, apiKeysRoute]),
+  appRoute.addChildren([overviewRoute, providersRoute, providerRoute, requestsRoute, apiKeysRoute]),
 ]);
 
 export const router = createRouter({ routeTree });
@@ -97,6 +104,12 @@ declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;
   }
+}
+
+function ProviderDetailRoute() {
+  const { providerId } = providerRoute.useParams();
+
+  return <ProviderPage providerId={providerId} />;
 }
 
 function LoginPage() {

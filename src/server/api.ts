@@ -4,12 +4,13 @@ import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
+  ProviderDetailSchema,
   ProviderInputSchema,
   ProviderModelInputSchema,
   ProviderModelParamsSchema,
   ProviderParamsSchema,
 } from "../shared/providers";
-import { readAnalytics, readRequests } from "./analytics";
+import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
@@ -17,6 +18,7 @@ import {
   addProviderModel,
   createProvider,
   listProviders,
+  readProvider,
   removeProvider,
   removeProviderModel,
   updateProvider,
@@ -46,6 +48,7 @@ const RequestsQuerySchema = v.object({
     v.pipe(v.string(), v.transform(Number), v.integer(), v.minValue(1), v.maxValue(200)),
     "50",
   ),
+  providerId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(100))),
 });
 
 export function createApi(deps: ApiDeps) {
@@ -76,6 +79,31 @@ export function createApi(deps: ApiDeps) {
       if (caller instanceof Response) return caller;
 
       return listProviders(deps.providers, caller.userId);
+    })
+    .get("/providers/:id", async ({ params, query, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      const provider = await readProvider(deps.providers, caller.userId, id);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      const { days } = parseInput(AnalyticsQuerySchema, query);
+
+      return v.parse(ProviderDetailSchema, {
+        provider,
+        usage: readProviderUsage(deps.duck, {
+          userId: caller.userId,
+          providerId: id,
+          days,
+        }),
+      });
     })
     .post("/providers", async ({ body, request, set }) => {
       const caller = await authenticate(deps.auth, request);
@@ -207,9 +235,12 @@ export function createApi(deps: ApiDeps) {
 
       if (caller instanceof Response) return caller;
 
-      const { limit } = parseInput(RequestsQuerySchema, query);
+      const { limit, providerId } = parseInput(RequestsQuerySchema, query);
 
-      return v.parse(RequestListSchema, readRequests(deps.duck, { userId: caller.userId, limit }));
+      return v.parse(
+        RequestListSchema,
+        readRequests(deps.duck, { userId: caller.userId, limit, providerId }),
+      );
     });
 
   return app;

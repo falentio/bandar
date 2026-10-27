@@ -1,9 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { DailyUsage } from "../../shared/analytics";
 import {
-  formatDay,
   formatExactTokens,
   formatMs,
   formatPercent,
@@ -12,6 +10,7 @@ import {
   formatUsd,
 } from "../format";
 import { useAnalytics } from "../use-analytics";
+import { TokenChart } from "./token-chart";
 
 const RANGES = [7, 30, 90] as const;
 
@@ -156,47 +155,5 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
         {hint === undefined ? null : <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>
-  );
-}
-
-function TokenChart({ daily }: { daily: readonly DailyUsage[] }) {
-  const max = Math.max(...daily.map((day) => day.inputTokens + day.outputTokens), 1);
-  const first = daily[0];
-  const last = daily.at(-1);
-
-  return (
-    <div>
-      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1">
-          <span className="size-2 rounded-sm bg-primary/40" /> input
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="size-2 rounded-sm bg-primary" /> output
-        </span>
-      </div>
-      <div className="mt-3 flex h-40 items-end gap-[2px]">
-        {daily.map((day) => {
-          const input = (day.inputTokens / max) * 100;
-          const output = (day.outputTokens / max) * 100;
-
-          return (
-            <div
-              key={day.date}
-              className="flex h-full flex-1 flex-col justify-end"
-              title={`${day.date}: ${formatExactTokens(day.inputTokens)} in, ${formatExactTokens(
-                day.outputTokens,
-              )} out, ${day.requests} requests`}
-            >
-              <div className="w-full bg-primary" style={{ height: `${output}%` }} />
-              <div className="w-full bg-primary/40" style={{ height: `${input}%` }} />
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-        <span>{first === undefined ? "" : formatDay(first.date)}</span>
-        <span>{last === undefined ? "" : formatDay(last.date)}</span>
-      </div>
-    </div>
   );
 }

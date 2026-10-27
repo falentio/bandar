@@ -40,10 +40,26 @@ export const AnalyticsSchema = v.object({
   models: v.array(ModelUsageSchema),
 });
 
+export const ProviderUsageSchema = v.object({
+  days: v.number(),
+  requests: v.number(),
+  errors: v.number(),
+  errorRate: v.number(),
+  inputTokens: v.number(),
+  outputTokens: v.number(),
+  totalTokens: v.number(),
+  avgTokensPerDay: v.number(),
+  avgTps: v.nullable(v.number()),
+  avgTtftMs: v.nullable(v.number()),
+  costUsd: v.number(),
+  lastRequestAt: v.nullable(v.string()),
+});
+
 export const RequestEventSchema = v.object({
   id: v.string(),
   model: v.string(),
   providerKind: v.string(),
+  apiKeyId: v.nullable(v.string()),
   status: v.string(),
   inputTokens: v.nullable(v.number()),
   outputTokens: v.nullable(v.number()),
@@ -73,6 +89,8 @@ export type DailyUsage = v.InferOutput<typeof DailyUsageSchema>;
 export type ModelUsage = v.InferOutput<typeof ModelUsageSchema>;
 
 export type Analytics = v.InferOutput<typeof AnalyticsSchema>;
+
+export type ProviderUsage = v.InferOutput<typeof ProviderUsageSchema>;
 
 export type RequestEvent = v.InferOutput<typeof RequestEventSchema>;
 

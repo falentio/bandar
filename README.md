@@ -35,8 +35,8 @@ Open <http://localhost:5173>, create an account, then:
 
 1. Open **Providers** and click **Add provider**. Pick the kind, name it, and
    paste the base URL and upstream key.
-2. Click the new provider and add models: upstream model `gpt-4o-mini` with alias
-   `fast` makes `fast` the name clients send.
+2. Click the new provider to open its page, then add models: upstream model
+   `gpt-4o-mini` with alias `fast` makes `fast` the name clients send.
 3. Open **API keys** and mint a key. The plaintext appears once.
 4. Call the gateway:
 
@@ -248,14 +248,17 @@ bandar/
 │   ├── auth.ts                     # better-auth handler, session, key verify
 │   └── assets.ts                   # embedded client bundle and SPA fallback
 ├── src/client/
-│   ├── router.tsx                  # /overview, /providers, /requests, /api-keys
+│   ├── router.tsx                  # /overview, /providers, /providers/:id, /requests, /api-keys
 │   ├── views.tsx                   # navigation registry
 │   ├── use-providers.ts            # provider and model mutations
+│   ├── use-provider-detail.ts      # one provider with its usage window
 │   ├── use-analytics.ts            # overview window state
 │   ├── use-requests.ts             # recent request state
 │   └── components/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
-│       ├── providers-panel.tsx     # provider list, add dialog, models dialog
+│       ├── providers-panel.tsx     # provider list and add dialog
+│       ├── provider-page.tsx       # one provider: usage, settings, models, requests
+│       ├── token-chart.tsx         # shared daily token bars
 │       ├── provider-logo.tsx       # mark per provider kind
 │       ├── requests-panel.tsx      # recent attempts
 │       ├── api-keys-panel.tsx      # mint, show once, revoke, curl example
@@ -274,15 +277,18 @@ bandar/
 | `GET /v1/models`                            | Gateway key            | Aliases for the caller.                             |
 | `GET/POST /api/providers`                   | Session or `x-api-key` | List providers, or create one without models.       |
 | `PUT/DELETE /api/providers/:id`             | Session or `x-api-key` | Replace a provider, or remove it with its models.   |
+| `GET /api/providers/:id?days=30`            | Session or `x-api-key` | One provider plus its window usage.                 |
 | `POST /api/providers/:id/models`            | Session or `x-api-key` | Add one model alias; returns the provider.          |
 | `DELETE /api/providers/:id/models/:modelId` | Session or `x-api-key` | Remove a model alias; returns the provider.         |
 | `GET /api/analytics?days=30`                | Session or `x-api-key` | Window summary, daily series, model breakdown.      |
-| `GET /api/requests?limit=50`                | Session or `x-api-key` | Recent attempts.                                    |
+| `GET /api/requests?limit=50&providerId=…`   | Session or `x-api-key` | Recent attempts, optionally one provider.           |
 | `GET /api/health`                           | none                   | Both current migration tags.                        |
 | `/api/auth/*`                               | better-auth            | Sign-up, sign-in, sessions, key create/list/delete. |
 
-A provider is created empty and grows models one at a time, so a new upstream is
-reachable before it has any alias. `PUT /api/providers/:id` replaces name, kind,
+Each provider has its own page at `/providers/<id>`: usage for 7, 30, or 90
+days, settings (name, kind, base URL, upstream key), its models, and its recent
+requests. A provider is created empty and grows models one at a time, so a new
+upstream is reachable before it has any alias. `PUT /api/providers/:id` replaces name, kind,
 and base URL, and leaves the key unchanged when `apiKey` is empty. Model prices
 are accepted by the model endpoints (`inputPricePerMtok`,
 `outputPricePerMtok`) but are not in the form yet.

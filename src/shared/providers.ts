@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { ProviderUsageSchema } from "./analytics";
 
 export const PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
 
@@ -26,6 +27,11 @@ export const ProviderListSchema = v.object({
   providers: v.array(ProviderSchema),
 });
 
+export const ProviderDetailSchema = v.object({
+  provider: ProviderSchema,
+  usage: ProviderUsageSchema,
+});
+
 export const ProviderModelInputSchema = v.object({
   upstreamModel: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200)),
   alias: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100))),
@@ -46,6 +52,7 @@ export const ProviderModelParamsSchema = v.object({ id: v.string(), modelId: v.s
 
 export const providerPaths = {
   list: "/api/providers",
+  detail: (id: string) => `/api/providers/${id}`,
   update: (id: string) => `/api/providers/${id}`,
   remove: (id: string) => `/api/providers/${id}`,
   models: (id: string) => `/api/providers/${id}/models`,
@@ -59,6 +66,8 @@ export type ProviderModel = v.InferOutput<typeof ProviderModelSchema>;
 export type Provider = v.InferOutput<typeof ProviderSchema>;
 
 export type ProviderList = v.InferOutput<typeof ProviderListSchema>;
+
+export type ProviderDetail = v.InferOutput<typeof ProviderDetailSchema>;
 
 export type ProviderInput = v.InferOutput<typeof ProviderInputSchema>;
 

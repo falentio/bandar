@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
-import { ChevronRightIcon, PlusIcon, TrashIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -13,12 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  PROVIDER_KINDS,
-  type Provider,
-  type ProviderKind,
-  type ProviderModel,
-} from "../../shared/providers";
+import { PROVIDER_KINDS, type Provider, type ProviderKind } from "../../shared/providers";
 import { useProviders, type Providers } from "../use-providers";
 import { ProviderLogo } from "./provider-logo";
 
@@ -37,8 +33,6 @@ const KIND_LABELS: Record<ProviderKind, string> = {
 export function ProvidersPanel() {
   const providers = useProviders();
   const [creating, setCreating] = useState(false);
-  const [managing, setManaging] = useState<string | null>(null);
-  const selected = providers.providers.find((provider) => provider.id === managing) ?? null;
 
   return (
     <div className="space-y-4">
@@ -80,11 +74,7 @@ export function ProvidersPanel() {
           {providers.providers.length === 0 ? null : (
             <ul className="-mx-1 divide-y">
               {providers.providers.map((provider) => (
-                <ProviderRow
-                  key={provider.id}
-                  provider={provider}
-                  onOpen={() => setManaging(provider.id)}
-                />
+                <ProviderRow key={provider.id} provider={provider} />
               ))}
             </ul>
           )}
@@ -96,24 +86,18 @@ export function ProvidersPanel() {
         providers={providers}
         onClose={() => setCreating(false)}
       />
-
-      <ManageModelsDialog
-        provider={selected}
-        providers={providers}
-        onClose={() => setManaging(null)}
-      />
     </div>
   );
 }
 
-function ProviderRow({ provider, onOpen }: { provider: Provider; onOpen: () => void }) {
+function ProviderRow({ provider }: { provider: Provider }) {
   const count = provider.models.length;
 
   return (
     <li>
-      <button
-        type="button"
-        onClick={onOpen}
+      <Link
+        to="/providers/$providerId"
+        params={{ providerId: provider.id }}
         className="group/row -mx-1 flex w-[calc(100%+0.5rem)] items-center gap-3 rounded-lg px-2 py-3 text-start transition-colors duration-150 ease-out hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
       >
         <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground transition-transform duration-150 ease-out group-hover/row:scale-105">
@@ -135,7 +119,7 @@ function ProviderRow({ provider, onOpen }: { provider: Provider; onOpen: () => v
           </span>
         </span>
         <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-hover/row:translate-x-0.5" />
-      </button>
+      </Link>
     </li>
   );
 }
@@ -292,188 +276,5 @@ function CreateProviderDialog({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function ManageModelsDialog({
-  provider,
-  providers,
-  onClose,
-}: {
-  provider: Provider | null;
-  providers: Providers;
-  onClose: () => void;
-}) {
-  const [upstreamModel, setUpstreamModel] = useState("");
-  const [alias, setAlias] = useState("");
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (provider === null) return;
-
-    const added = await providers.addModel(provider.id, {
-      upstreamModel: upstreamModel.trim(),
-      alias: alias.trim() === "" ? undefined : alias.trim(),
-    });
-
-    if (added) {
-      setUpstreamModel("");
-      setAlias("");
-    }
-  };
-
-  return (
-    <Dialog
-      open={provider !== null}
-      onOpenChange={(next) => {
-        if (!next) {
-          setUpstreamModel("");
-          setAlias("");
-          onClose();
-        }
-      }}
-    >
-      <DialogContent>
-        {provider === null ? null : (
-          <>
-            <DialogHeader>
-              <div className="flex items-center gap-2.5">
-                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted">
-                  <ProviderLogo kind={provider.kind} className="size-4" />
-                </span>
-                <div className="min-w-0">
-                  <DialogTitle className="truncate">{provider.name}</DialogTitle>
-                  <p className="truncate font-mono text-xs text-muted-foreground">
-                    {provider.baseUrl}
-                  </p>
-                </div>
-              </div>
-              <DialogDescription>
-                Alias is what clients send as <code>model</code>. Leave it empty to use the upstream
-                name.
-              </DialogDescription>
-            </DialogHeader>
-
-            <form onSubmit={submit} className="grid gap-2 rounded-lg border p-3">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="upstream-model" className="text-xs">
-                    Upstream model
-                  </Label>
-                  <Input
-                    id="upstream-model"
-                    value={upstreamModel}
-                    onChange={(event) => setUpstreamModel(event.target.value)}
-                    placeholder="gpt-4o-mini"
-                    maxLength={200}
-                    required
-                    disabled={providers.pending}
-                  />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor="model-alias" className="text-xs">
-                    Alias
-                  </Label>
-                  <Input
-                    id="model-alias"
-                    value={alias}
-                    onChange={(event) => setAlias(event.target.value)}
-                    placeholder="fast"
-                    maxLength={100}
-                    disabled={providers.pending}
-                  />
-                </div>
-              </div>
-              <Button
-                type="submit"
-                size="sm"
-                className="justify-self-start"
-                disabled={providers.pending}
-              >
-                <PlusIcon data-icon="inline-start" />
-                Add model
-              </Button>
-            </form>
-
-            <div className="grid gap-1.5">
-              <p className="text-xs font-medium text-muted-foreground">
-                {provider.models.length === 0
-                  ? "No models yet."
-                  : `${provider.models.length} ${provider.models.length === 1 ? "model" : "models"}`}
-              </p>
-              {provider.models.length === 0 ? null : (
-                <ul className="-mx-1 divide-y rounded-lg border">
-                  {provider.models.map((model) => (
-                    <ModelRow
-                      key={model.id}
-                      model={model}
-                      pending={providers.pending}
-                      onRemove={() => void providers.removeModel(provider.id, model.id)}
-                    />
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {providers.error === null ? null : (
-              <p className="text-sm text-destructive">{providers.error}</p>
-            )}
-
-            <DialogFooter className="items-center sm:justify-between">
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                disabled={providers.pending}
-                onClick={() => {
-                  if (window.confirm(`Remove ${provider.name} and all of its models?`)) {
-                    void providers.remove(provider.id).then(onClose);
-                  }
-                }}
-              >
-                <TrashIcon data-icon="inline-start" />
-                Remove provider
-              </Button>
-              <DialogClose asChild>
-                <Button type="button" variant="ghost" size="sm">
-                  Done
-                </Button>
-              </DialogClose>
-            </DialogFooter>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ModelRow({
-  model,
-  pending,
-  onRemove,
-}: {
-  model: ProviderModel;
-  pending: boolean;
-  onRemove: () => void;
-}) {
-  return (
-    <li className="group/model flex items-center gap-2 px-3 py-2 text-sm">
-      <code className="truncate font-medium">{model.alias}</code>
-      {model.alias === model.upstreamModel ? null : (
-        <span className="truncate font-mono text-xs text-muted-foreground">
-          {model.upstreamModel}
-        </span>
-      )}
-      <button
-        type="button"
-        aria-label={`Remove ${model.alias}`}
-        disabled={pending}
-        onClick={onRemove}
-        className="ms-auto rounded p-1 text-muted-foreground opacity-0 transition-[opacity,background-color,transform] duration-150 ease-out group-hover/model:opacity-100 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
-      >
-        <TrashIcon className="size-3.5" />
-      </button>
-    </li>
   );
 }

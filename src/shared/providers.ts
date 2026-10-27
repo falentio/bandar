@@ -51,6 +51,14 @@ export const ProviderModelSchema = v.object({
   outputPricePerMtok: v.nullable(v.number()),
 });
 
+export const ProviderCredentialSchema = v.object({
+  id: v.string(),
+  label: v.string(),
+  authMode: ProviderAuthModeSchema,
+  priority: v.number(),
+  createdAt: v.string(),
+});
+
 export const ProviderSchema = v.object({
   id: v.string(),
   name: v.string(),
@@ -58,8 +66,7 @@ export const ProviderSchema = v.object({
   kind: ProviderKindSchema,
   origin: ProviderOriginSchema,
   baseUrl: v.string(),
-  authMode: ProviderAuthModeSchema,
-  hasKey: v.boolean(),
+  credentials: v.array(ProviderCredentialSchema),
   models: v.array(ProviderModelSchema),
   createdAt: v.string(),
 });
@@ -95,7 +102,6 @@ export const ProviderInputSchema = v.object({
   name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(60)),
   kind: ProviderKindSchema,
   baseUrl: v.pipe(v.string(), v.trim(), v.url()),
-  apiKey: v.optional(v.pipe(v.string(), v.maxLength(500)), ""),
   slug: v.optional(SlugSchema),
 });
 
@@ -107,6 +113,25 @@ export const ProviderCreateInputSchema = v.object({
 });
 
 export const ProviderParamsSchema = v.object({ id: v.string() });
+
+export const ProviderCredentialParamsSchema = v.object({
+  id: v.string(),
+  credentialId: v.string(),
+});
+
+export const ProviderCredentialInputSchema = v.object({
+  label: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(60))),
+  apiKey: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(500)),
+});
+
+export const ProviderCredentialOrderInputSchema = v.object({
+  credentialIds: v.pipe(
+    v.array(v.string()),
+    v.minLength(1),
+    v.maxLength(100),
+    v.check((ids) => new Set(ids).size === ids.length, "list each credential once"),
+  ),
+});
 
 export const ProviderOAuthStartSchema = v.object({
   userCode: v.string(),
@@ -133,6 +158,10 @@ export const providerPaths = {
   remove: (id: string) => `/api/providers/${id}`,
   oauthStart: (id: string) => `/api/providers/${id}/oauth/start`,
   oauthPoll: (id: string) => `/api/providers/${id}/oauth/poll`,
+  credentials: (id: string) => `/api/providers/${id}/credentials`,
+  credentialOrder: (id: string) => `/api/providers/${id}/credentials/order`,
+  credential: (id: string, credentialId: string) =>
+    `/api/providers/${id}/credentials/${credentialId}`,
   models: (id: string) => `/api/providers/${id}/models`,
   refreshModels: (id: string) => `/api/providers/${id}/models/refresh`,
   model: (id: string, modelId: string) => `/api/providers/${id}/models/${modelId}`,
@@ -153,6 +182,10 @@ export type ProviderModelRefresh = v.InferOutput<typeof ProviderModelRefreshSche
 export type ProviderModel = v.InferOutput<typeof ProviderModelSchema>;
 
 export type Provider = v.InferOutput<typeof ProviderSchema>;
+
+export type ProviderCredential = v.InferOutput<typeof ProviderCredentialSchema>;
+
+export type ProviderCredentialInput = v.InferOutput<typeof ProviderCredentialInputSchema>;
 
 export type ProviderList = v.InferOutput<typeof ProviderListSchema>;
 

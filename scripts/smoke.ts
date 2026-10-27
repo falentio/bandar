@@ -166,7 +166,7 @@ try {
     assert.equal(builtIn.name, "Kilo Code");
     assert.equal(builtIn.slug, "kilo");
     assert.equal(builtIn.baseUrl, `${kilocodeOrigin}/api/openrouter`);
-    assert.equal(builtIn.hasKey, false);
+    assert.deepEqual(builtIn.credentials, []);
     assert.deepEqual(builtIn.models, []);
 
     kiloProvider.provider = builtIn;
@@ -185,9 +185,9 @@ try {
       201,
     );
 
-    assert.equal(openaiProvider.provider?.hasKey, true);
+    assert.equal(openaiProvider.provider?.credentials.length, 1);
     assert.deepEqual(openaiProvider.provider?.models, []);
-    assert.equal(Object.hasOwn(openaiProvider, "apiKey"), false);
+    assert.equal(Object.hasOwn(openaiProvider.provider?.credentials[0] ?? {}, "apiKey"), false);
   });
 
   await check("POST /api/providers/:id/models adds an alias to a provider", async () => {
@@ -257,8 +257,8 @@ try {
     assert.equal(custom.length, 3);
     assert.equal(builtIn.length, 1);
     assert.equal(list.providers[0]?.origin, "builtin");
-    assert.ok(custom.every((provider) => provider.hasKey));
-    assert.equal(builtIn[0]?.hasKey, false);
+    assert.ok(custom.every((provider) => provider.credentials.length > 0));
+    assert.equal(builtIn[0]?.credentials.length, 0);
     assert.ok(list.providers.every((provider) => !Object.hasOwn(provider, "apiKey")));
   });
 
@@ -545,8 +545,8 @@ try {
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
-    assert.equal(detail.provider.authMode, "oauth");
-    assert.equal(detail.provider.hasKey, true);
+    assert.equal(detail.provider.credentials.length, 1);
+    assert.equal(detail.provider.credentials[0]?.authMode, "oauth");
     assert.equal(Object.hasOwn(detail.provider, "apiKey"), false);
   });
 
@@ -812,6 +812,167 @@ try {
 
     assert.equal(stream.text, "Hello from OpenAI");
     assert.ok(stream.done);
+  });
+
+  await check("a credential fallback answers when the first key is rejected", async () => {
+    const provider = await postJson(
+      providerPaths.list,
+      {
+        name: "Rotating",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "wrong-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    const withModel = await postJson(
+      providerPaths.models(provider.id),
+      { upstreamModel: "fake-openai-model", alias: "rotating" },
+      ProviderSchema,
+      201,
+    );
+
+    assert.equal(withModel.models[0]?.alias, "rotating");
+
+    const added = await postJson(
+      providerPaths.credentials(provider.id),
+      { label: "work", apiKey: "openai-key" },
+      ProviderSchema,
+      201,
+    );
+
+    assert.deepEqual(
+      added.credentials.map((credential) => [
+        credential.priority,
+        credential.label,
+        credential.authMode,
+      ]),
+      [
+        [1, "", "api-key"],
+        [2, "work", "api-key"],
+      ],
+    );
+    assert.equal(
+      Object.hasOwn(added.credentials[0] ?? {}, "apiKey"),
+      false,
+      "the provider returned a credential secret",
+    );
+
+    const response = await chatRequest("rotating", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from OpenAI");
+
+    const rows = await waitForRequests(
+      "rotating",
+      (requests) => requests.some((request) => request.status === "success"),
+      "the credential fallback success",
+    );
+
+    assert.deepEqual(rows.map((request) => request.status).sort(), ["error", "success"]);
+    assert.equal(rows.find((request) => request.status === "error")?.errorKind, "auth");
+  });
+
+  await check("reordering, replacing, and removing credentials rewrites the chain", async () => {
+    const list = await getJson(providerPaths.list, ProviderListSchema, 200);
+    const provider = list.providers.find((entry) => entry.name === "Rotating");
+
+    if (provider === undefined) throw new Error("the Rotating provider is missing");
+
+    const rejected = provider.credentials[0];
+    const working = provider.credentials[1];
+
+    if (rejected === undefined || working === undefined)
+      throw new Error("the Rotating provider needs two credentials");
+
+    const partial = await put(providerPaths.credentialOrder(provider.id), {
+      credentialIds: [working.id],
+    });
+
+    assert.equal(partial.status, 422);
+
+    const reordered = await putJson(
+      providerPaths.credentialOrder(provider.id),
+      { credentialIds: [working.id, rejected.id] },
+      ProviderSchema,
+      200,
+    );
+
+    assert.deepEqual(
+      reordered.credentials.map((credential) => [credential.id, credential.priority]),
+      [
+        [working.id, 1],
+        [rejected.id, 2],
+      ],
+    );
+
+    const response = await chatRequest("rotating", false);
+
+    assert.equal(response.status, 200);
+
+    const settled = await waitForRequests(
+      "rotating",
+      (requests) => requests.filter((request) => request.status === "success").length === 2,
+      "the reordered success",
+    );
+
+    assert.equal(
+      settled.filter((request) => request.status === "error").length,
+      1,
+      "the reordered chain retried the rejected key",
+    );
+
+    const settings = await putJson(
+      providerPaths.update(provider.id),
+      {
+        name: provider.name,
+        kind: provider.kind,
+        baseUrl: provider.baseUrl,
+        apiKey: "ignored-key",
+      },
+      ProviderSchema,
+      200,
+    );
+
+    assert.deepEqual(
+      settings.credentials.map((credential) => credential.id),
+      [working.id, rejected.id],
+      "the settings route wrote a credential",
+    );
+
+    const replaced = await putJson(
+      providerPaths.credential(provider.id, rejected.id),
+      { label: "spare", apiKey: "openai-key" },
+      ProviderSchema,
+      200,
+    );
+
+    assert.equal(
+      replaced.credentials.find((credential) => credential.id === rejected.id)?.label,
+      "spare",
+    );
+
+    const removed = await deleteJson(
+      providerPaths.credential(provider.id, working.id),
+      ProviderSchema,
+    );
+
+    assert.deepEqual(
+      removed.credentials.map((credential) => [credential.id, credential.priority]),
+      [[rejected.id, 1]],
+    );
+
+    const foreign = await fetch(
+      new URL(providerPaths.credential(provider.id, claudeProvider.provider?.id ?? ""), origin),
+      { method: "DELETE", headers: sessionHeaders() },
+    );
+
+    assert.equal(foreign.status, 404);
   });
 
   await check("a tag with no models is a 404 and stays out of /v1/models", async () => {

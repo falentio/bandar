@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Provider, ProviderCreateInput, ProviderModelInput } from "../shared/providers";
+import type {
+  Provider,
+  ProviderCreateInput,
+  ProviderCredentialInput,
+  ProviderModelInput,
+} from "../shared/providers";
 import { providerApi } from "./api";
 import { describeError, isError } from "./errors";
 
@@ -15,6 +20,14 @@ export type Providers = {
   readonly apply: (provider: Provider) => void;
   readonly addModel: (id: string, input: ProviderModelInput) => Promise<boolean>;
   readonly removeModel: (id: string, modelId: string) => Promise<void>;
+  readonly addCredential: (id: string, input: ProviderCredentialInput) => Promise<boolean>;
+  readonly replaceCredential: (
+    id: string,
+    credentialId: string,
+    input: ProviderCredentialInput,
+  ) => Promise<boolean>;
+  readonly reorderCredentials: (id: string, credentialIds: readonly string[]) => Promise<boolean>;
+  readonly removeCredential: (id: string, credentialId: string) => Promise<boolean>;
 };
 
 export function useProviders(): Providers {
@@ -96,12 +109,12 @@ export function useProviders(): Providers {
     }
   }, []);
 
-  const addModel = useCallback(async (id: string, input: ProviderModelInput): Promise<boolean> => {
+  const mutate = useCallback(async (run: () => Promise<Provider>): Promise<boolean> => {
     setPending(true);
     setError(null);
 
     try {
-      replace(await providerApi.addModel(id, input));
+      replace(await run());
 
       return true;
     } catch (error) {
@@ -113,20 +126,57 @@ export function useProviders(): Providers {
     }
   }, []);
 
-  const removeModel = useCallback(async (id: string, modelId: string): Promise<void> => {
-    setPending(true);
-    setError(null);
+  const addModel = useCallback(
+    (id: string, input: ProviderModelInput) => mutate(() => providerApi.addModel(id, input)),
+    [mutate],
+  );
 
-    try {
-      replace(await providerApi.removeModel(id, modelId));
-    } catch (error) {
-      setError(isError(error) ? describeError(error) : String(error));
-    } finally {
-      setPending(false);
-    }
-  }, []);
+  const removeModel = useCallback(
+    async (id: string, modelId: string): Promise<void> => {
+      await mutate(() => providerApi.removeModel(id, modelId));
+    },
+    [mutate],
+  );
+
+  const addCredential = useCallback(
+    (id: string, input: ProviderCredentialInput) =>
+      mutate(() => providerApi.addCredential(id, input)),
+    [mutate],
+  );
+
+  const replaceCredential = useCallback(
+    (id: string, credentialId: string, input: ProviderCredentialInput) =>
+      mutate(() => providerApi.replaceCredential(id, credentialId, input)),
+    [mutate],
+  );
+
+  const reorderCredentials = useCallback(
+    (id: string, credentialIds: readonly string[]) =>
+      mutate(() => providerApi.reorderCredentials(id, credentialIds)),
+    [mutate],
+  );
+
+  const removeCredential = useCallback(
+    (id: string, credentialId: string) =>
+      mutate(() => providerApi.removeCredential(id, credentialId)),
+    [mutate],
+  );
 
   const apply = useCallback((provider: Provider) => replace(provider), []);
 
-  return { status, providers, error, pending, create, remove, apply, addModel, removeModel };
+  return {
+    status,
+    providers,
+    error,
+    pending,
+    create,
+    remove,
+    apply,
+    addModel,
+    removeModel,
+    addCredential,
+    replaceCredential,
+    reorderCredentials,
+    removeCredential,
+  };
 }

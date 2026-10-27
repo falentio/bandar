@@ -76,7 +76,7 @@ const providersRoute = createRoute({
 });
 
 const providerTabSearch = v.object({
-  tab: v.optional(v.picklist(["overview", "settings", "models", "api-key"]), "overview"),
+  tab: v.optional(v.picklist(["overview", "settings", "models", "credentials"]), "overview"),
 });
 
 const providerRoute = createRoute({

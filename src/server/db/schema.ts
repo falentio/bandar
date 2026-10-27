@@ -22,8 +22,6 @@ export const providers = sqliteTable(
     slug: text("slug").notNull().default(""),
     kind: text("kind").$type<ProviderKind>().notNull(),
     baseUrl: text("base_url").notNull(),
-    apiKey: text("api_key").notNull().default(""),
-    authMode: text("auth_mode").$type<ProviderAuthMode>().notNull().default("api-key"),
     origin: text("origin").$type<ProviderOrigin>().notNull().default("custom"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
@@ -32,6 +30,24 @@ export const providers = sqliteTable(
     uniqueIndex("providers_user_slug")
       .on(table.userId, table.slug)
       .where(sql`${table.slug} <> ''`),
+  ],
+);
+
+export const providerCredentials = sqliteTable(
+  "provider_credentials",
+  {
+    id: text("id").primaryKey(),
+    providerId: text("provider_id")
+      .notNull()
+      .references(() => providers.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default(""),
+    credential: text("credential").notNull(),
+    authMode: text("auth_mode").$type<ProviderAuthMode>().notNull().default("api-key"),
+    priority: integer("priority").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("provider_credentials_provider_priority").on(table.providerId, table.priority),
   ],
 );
 
@@ -90,5 +106,7 @@ export const tagModels = sqliteTable(
 );
 
 export type ProviderRow = typeof providers.$inferSelect;
+
+export type ProviderCredentialRow = typeof providerCredentials.$inferSelect;
 
 export type ProviderModelRow = typeof providerModels.$inferSelect;

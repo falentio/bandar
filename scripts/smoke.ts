@@ -467,6 +467,23 @@ try {
 
   await check("built-in provider settings and removal are protected", async () => {
     const id = kiloProvider.provider?.id ?? "";
+    const builtIn = kiloProvider.provider;
+
+    if (builtIn === null) throw new Error("the built-in provider is missing");
+
+    const noop = await fetch(new URL(providerPaths.update(id), origin), {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...sessionHeaders() },
+      body: JSON.stringify({
+        name: builtIn.name,
+        kind: builtIn.kind,
+        baseUrl: builtIn.baseUrl,
+        slug: builtIn.slug,
+      }),
+    });
+
+    assert.equal(noop.status, 200);
+    assert.equal(v.parse(ProviderSchema, await noop.json()).slug, "kilo");
 
     const update = await fetch(new URL(providerPaths.update(id), origin), {
       method: "PUT",

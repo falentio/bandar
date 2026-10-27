@@ -190,7 +190,7 @@ export async function updateProvider(
     baseUrl: input.baseUrl,
   };
 
-  if (input.slug !== undefined) {
+  if (input.slug !== undefined && input.slug !== existing.slug) {
     if (RESERVED_PROVIDER_SLUGS.has(input.slug)) {
       throw new ProviderRuleError(`${input.slug} is a reserved slug`, "validation");
     }

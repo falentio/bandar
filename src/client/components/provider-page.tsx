@@ -62,6 +62,7 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   kilocode: BUILT_IN_PROVIDERS.kilocode.baseUrl,
   tokenharbor: BUILT_IN_PROVIDERS.tokenharbor.baseUrl,
   yeta: BUILT_IN_PROVIDERS.yeta.baseUrl,
+  river: BUILT_IN_PROVIDERS.river.baseUrl,
 };
 
 function credentialsTabName(authModes: readonly ProviderAuthMode[]): string {

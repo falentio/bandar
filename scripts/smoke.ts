@@ -109,6 +109,7 @@ let claudeProvider: ProviderSlot = { provider: null, modelId: "" };
 const kiloProvider: ProviderSlot = { provider: null, modelId: "" };
 const tokenharborProvider: ProviderSlot = { provider: null, modelId: "" };
 const yetaProvider: ProviderSlot = { provider: null, modelId: "" };
+const riverProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -166,6 +167,7 @@ try {
 
     assert.deepEqual(builtIn.map((provider) => provider.kind).sort(), [
       "kilocode",
+      "river",
       "tokenharbor",
       "yeta",
     ]);
@@ -203,9 +205,20 @@ try {
     assert.deepEqual(yeta.authModes, ["api-key"]);
     assert.equal(yeta.hasCatalog, true);
 
+    const river = byKind.get("river");
+
+    if (river === undefined) throw new Error("the built-in River provider is missing");
+
+    assert.equal(river.name, "River");
+    assert.equal(river.slug, "river");
+    assert.equal(river.baseUrl, `${builtInsOrigin}/river/v1`);
+    assert.deepEqual(river.authModes, ["api-key"]);
+    assert.equal(river.hasCatalog, true);
+
     kiloProvider.provider = kilo;
     tokenharborProvider.provider = harbor;
     yetaProvider.provider = yeta;
+    riverProvider.provider = river;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -291,7 +304,7 @@ try {
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 3);
+    assert.equal(builtIn.length, 4);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -804,6 +817,37 @@ try {
     assert.equal(stream.usage?.prompt_tokens, 7);
     assert.equal(stream.usage?.completion_tokens, 3);
     assert.equal(stream.done, true);
+  });
+
+  await check("River imports its public pricing list and answers chat", async () => {
+    const id = riverProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 2);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+    const flow = detail.provider.models.find((model) => model.alias === "river-flow");
+
+    assert.equal(flow?.inputPricePerMtok, 0.4);
+    assert.equal(flow?.outputPricePerMtok, 1.6);
+
+    await postJson(providerPaths.credentials(id), { apiKey: "rv_test" }, ProviderSchema, 201);
+
+    const response = await chatRequest("river-flow", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from River");
+    assert.equal(body.usage?.prompt_tokens, 4);
+    assert.equal(body.usage?.completion_tokens, 3);
   });
 
   await check("providers carry derived slugs and model refs", async () => {
@@ -1562,7 +1606,7 @@ try {
         .filter((provider) => provider.origin === "builtin")
         .map((provider) => provider.kind)
         .sort(),
-      ["kilocode", "tokenharbor", "yeta"],
+      ["kilocode", "river", "tokenharbor", "yeta"],
       "a built-in provider was seeded twice",
     );
   });
@@ -1620,6 +1664,8 @@ async function boot(port = 0): Promise<Booted> {
       BANDAR_KILOCODE_MODELS_URL: `${kilocodeOrigin}/api/gateway/models`,
       BANDAR_TOKENHARBOR_API: `${builtInsOrigin}/tokenharbor`,
       BANDAR_YETA_API: `${builtInsOrigin}/yeta`,
+      BANDAR_RIVER_API: `${builtInsOrigin}/river`,
+      BANDAR_RIVER_PRICING_URL: `${builtInsOrigin}/river/pricing`,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -2196,6 +2242,36 @@ function startBuiltIns() {
           },
           "[DONE]",
         ]);
+      }
+
+      if (url.pathname === "/river/pricing") {
+        return Response.json({
+          inference: [
+            { model: "river-flow", input: 0.4, cached_input: 0.1, output: 1.6 },
+            { model: "river-deep", input: 2, cached_input: 0.5, output: 8 },
+            { model: "river-flow", input: 0.4, cached_input: 0.1, output: 1.6 },
+          ],
+        });
+      }
+
+      if (url.pathname === "/river/v1/models") {
+        if (authorization !== "Bearer rv_test") return jsonError(401, "bad river key");
+
+        return Response.json({ object: "list", data: [{ id: "river-flow", object: "model" }] });
+      }
+
+      if (url.pathname === "/river/v1/chat/completions") {
+        if (authorization !== "Bearer rv_test") return jsonError(401, "bad river key");
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from River" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 4, completion_tokens: 3 },
+        });
       }
 
       return jsonError(404, `no fake built-in route for ${url.pathname}`);

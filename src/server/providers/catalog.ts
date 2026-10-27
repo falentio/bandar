@@ -64,6 +64,15 @@ async function readModelResponse(request: CatalogRequest, headers: WireHeaders):
   return response;
 }
 
+/** A pricing read whose failure is metadata: the caller keeps its own fallback. */
+export function optionalPrices<T>(read: Promise<T>, signal: AbortSignal): Promise<T | null> {
+  return read.catch(() => {
+    if (signal.aborted) throw new UpstreamError("request aborted", "network");
+
+    return null;
+  });
+}
+
 export function entryOf(upstreamModel: string, prices: ModelPrices = NO_PRICE): ModelCatalogEntry {
   return { upstreamModel, alias: upstreamModel, ...prices };
 }

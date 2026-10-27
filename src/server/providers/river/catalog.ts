@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { entryOf, fromPerMtok, readModelIds } from "../catalog";
+import { entryOf, fromPerMtok, optionalPrices, readModelIds } from "../catalog";
 import { UpstreamError } from "../types";
 import type { CatalogRequest, ModelCatalogEntry } from "../types";
 
@@ -20,11 +20,7 @@ const PricingSchema = v.object({
 export async function fetchRiverCatalog(
   request: CatalogRequest,
 ): Promise<readonly ModelCatalogEntry[]> {
-  const priced = await readPricing(request).catch(() => {
-    if (request.signal.aborted) throw new UpstreamError("request aborted", "network");
-
-    return null;
-  });
+  const priced = await optionalPrices(readPricing(request), request.signal);
 
   // The console's public pricing JSON is the model list; the keyed ids are the fallback.
   if (priced !== null) return priced;

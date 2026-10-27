@@ -23,6 +23,8 @@ SQLite.
 - Custom providers added from the dashboard without changing code.
 - Several credentials per provider, tried in order, with a cooldown flag that
   skips a failing credential, provider, or model.
+- A cooldown history: every failure that flagged a subject, on the **Errors**
+  page or at `GET /api/cooldowns`.
 - Provider and model-alias management in the dashboard or over `/api`.
 - Gateway keys from better-auth's API-key plugin, sent as
   `Authorization: Bearer <key>` or `x-api-key`.
@@ -160,6 +162,19 @@ An attempt is skipped when its provider, its model, or its credential is cooling
 down. When every attempt in the plan is skipped, the gateway runs the full plan
 anyway: a request is never failed just because everything is flagged, and the
 probe can clear the flags again. Flags live in SQLite, so they survive a restart.
+
+### Error history
+
+Every failure that flags a subject writes one immutable row to
+`cooldown_events`: the subject and its name, the provider and model, the
+credential when one was involved, the error kind, the reference, the new failure
+count, the cooldown, and the flag time. Rows are denormalized and have no foreign
+keys, so deleting a provider or a model keeps its history. Each user keeps the
+newest 500 rows. `invalid_request`, aborts, and successful attempts write nothing.
+
+The **Errors** page lists the newest 100, and `GET /api/cooldowns?limit=100`
+returns the same list. A flag still in the future reads `cooling down`; one that
+has passed reads `expired`.
 
 ## Analytics
 
@@ -364,7 +379,8 @@ bandar/
 │   ├── providers.ts                # provider/model repo, catalog import, slug backfill
 │   ├── tags.ts                     # tag list and membership writes
 │   ├── credential.ts               # api-key / oauth credential union
-│   ├── health.ts                   # cooldown policy and per-subject flags
+│   ├── health.ts                   # cooldown policy, per-subject flags, history writes
+│   ├── cooldowns.ts                # cooldown history reads
 │   ├── oauth.ts                    # device-code connectors per OAuth kind
 │   ├── seal.ts                     # AES-GCM credential sealing
 │   ├── router/
@@ -389,12 +405,13 @@ bandar/
 │   ├── auth.ts                     # better-auth handler, session, key verify
 │   └── assets.ts                   # embedded client bundle and SPA fallback
 ├── src/client/
-│   ├── router.tsx                  # /overview, /providers, /providers/:id, /tags, /requests, /api-keys
+│   ├── router.tsx                  # /overview, /providers, /providers/:id, /tags, /requests, /errors, /api-keys
 │   ├── views.tsx                   # navigation registry
 │   ├── use-providers.ts            # provider and model mutations
 │   ├── use-provider-detail.ts      # one provider with its usage window
 │   ├── use-analytics.ts            # overview window state
 │   ├── use-requests.ts             # recent request state
+│   ├── use-cooldowns.ts            # cooldown history state
 │   ├── use-tags.ts                 # tag list and membership writes
 │   └── components/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
@@ -405,6 +422,7 @@ bandar/
 │       ├── token-chart.tsx         # shared daily token bars
 │       ├── provider-logo.tsx       # mark per provider kind
 │       ├── requests-panel.tsx      # recent attempts
+│       ├── errors-panel.tsx        # cooldown history
 │       ├── api-keys-panel.tsx      # mint, show once, revoke, curl example
 │       ├── app-shell.tsx           # sidebar shell and breadcrumb
 │       └── auth-page.tsx           # sign-in / sign-up
@@ -432,6 +450,7 @@ bandar/
 | `DELETE /api/tags/:id`                      | Session or `x-api-key` | Delete a tag; returns the remaining list.               |
 | `GET /api/analytics?days=30&…`              | Session or `x-api-key` | Window summary, daily series, model breakdown, filters. |
 | `GET /api/requests?limit=50&providerId=…`   | Session or `x-api-key` | Recent attempts, optionally one provider.               |
+| `GET /api/cooldowns?limit=100`              | Session or `x-api-key` | Cooldown history, newest first, per user.               |
 | `GET /api/health`                           | none                   | Both current migration tags.                            |
 | `/api/auth/*`                               | better-auth            | Sign-up, sign-in, sessions, key create/list/delete.     |
 

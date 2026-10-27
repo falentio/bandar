@@ -2,6 +2,7 @@
 import { betterAuth } from "better-auth/minimal";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
+import { apiKeyPlugin } from "../src/server/auth-plugins";
 
 export const auth = betterAuth({
   database: drizzleAdapter(
@@ -11,4 +12,5 @@ export const auth = betterAuth({
     },
   ),
   emailAndPassword: { enabled: true },
+  plugins: [apiKeyPlugin()],
 });

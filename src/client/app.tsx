@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { ApiKeysPanel } from "./components/api-keys-panel";
 import { AuthPanel } from "./components/auth-panel";
 import { NotesPanel } from "./components/notes-panel";
 import { useSession } from "./use-session";
@@ -35,6 +36,7 @@ export function App() {
             </Button>
           </div>
           <NotesPanel />
+          <ApiKeysPanel />
         </>
       ) : null}
     </main>

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
 import { ApiErrorBodySchema, HealthSchema, type ApiErrorBody } from "../src/shared/api";
+import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
 import { AuthResultSchema } from "../src/shared/auth";
 import { NoteListSchema, NoteSchema } from "../src/shared/notes";
 
@@ -30,6 +31,8 @@ const authPassword = "smoke-password-1";
 
 let failures = 0;
 let cookie = "";
+let apiKey = "";
+let keyId = "";
 
 const first = await boot(await reservePort());
 const origin = first.origin;
@@ -85,15 +88,7 @@ try {
     const result = v.parse(AuthResultSchema, await response.json());
     assert.equal(result.user.email, authEmail);
 
-    const setCookie = response.headers
-      .getSetCookie()
-      .find((value) => value.startsWith("better-auth.session_token="));
-
-    assert.ok(setCookie, "sign-up set no better-auth.session_token cookie");
-
-    const pair = setCookie.split(";")[0];
-    assert.ok(pair);
-    cookie = pair;
+    cookie = sessionCookie(response);
   });
 
   await check("POST /api/notes creates a note", async () => {
@@ -108,6 +103,48 @@ try {
       notes.some((note) => note.id === created.id),
       `note ${created.id} is missing from the list`,
     );
+  });
+
+  await check("POST /api/auth/api-key/create mints a bandar_ key", async () => {
+    const response = await post(
+      "/api/auth/api-key/create",
+      { name: "smoke key" },
+      { origin: requestOrigin },
+    );
+
+    assert.equal(response.status, 200);
+
+    const minted = v.parse(CreatedApiKeySchema, await response.json());
+    assert.ok(minted.key.startsWith("bandar_"), `key ${minted.key} lacks the bandar_ prefix`);
+
+    apiKey = minted.key;
+    keyId = minted.id;
+  });
+
+  await check("an API key alone creates, lists and deletes a note", async () => {
+    const response = await fetch(new URL("/api/notes", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...keyHeaders() },
+      body: JSON.stringify({ body: "note from a key" }),
+    });
+
+    assert.equal(response.status, 201);
+
+    const note = v.parse(NoteSchema, await response.json());
+    const listed = await fetch(new URL("/api/notes", origin), { headers: keyHeaders() });
+
+    assert.equal(listed.status, 200);
+    assert.ok(
+      v.parse(NoteListSchema, await listed.json()).some((item) => item.id === note.id),
+      `note ${note.id} is missing from the key's list`,
+    );
+
+    const removed = await fetch(new URL(`/api/notes/${note.id}`, origin), {
+      method: "DELETE",
+      headers: keyHeaders(),
+    });
+
+    assert.equal(removed.status, 204);
   });
 
   await check("DELETE /api/notes/:id removes the note once", async () => {
@@ -149,6 +186,37 @@ try {
     assert.equal(response.status, 401);
     assert.equal((await errorBody(response)).code, "unauthorized");
     cookie = "";
+  });
+
+  await check("a revoked API key is 401 unauthorized", async () => {
+    const signIn = await post(
+      "/api/auth/sign-in/email",
+      { email: authEmail, password: authPassword },
+      { origin: requestOrigin },
+    );
+
+    assert.equal(signIn.status, 200);
+    cookie = sessionCookie(signIn);
+
+    const revoked = await post("/api/auth/api-key/delete", { keyId }, { origin: requestOrigin });
+    assert.equal(revoked.status, 200);
+
+    const signOut = await post("/api/auth/sign-out", {}, { origin: requestOrigin });
+    assert.equal(signOut.status, 200);
+    cookie = "";
+
+    const response = await fetch(new URL("/api/notes", origin), { headers: keyHeaders() });
+    assert.equal(response.status, 401);
+    assert.equal((await errorBody(response)).code, "unauthorized");
+  });
+
+  await check("a garbage x-api-key is 401 unauthorized", async () => {
+    const response = await fetch(new URL("/api/notes", origin), {
+      headers: keyHeaders("bandar_not-a-real-key"),
+    });
+
+    assert.equal(response.status, 401);
+    assert.equal((await errorBody(response)).code, "unauthorized");
   });
 
   await check("an unknown /api route is a JSON 404", async () => {
@@ -292,6 +360,23 @@ async function errorBody(response: Response): Promise<ApiErrorBody["error"]> {
 
 function sessionHeaders(): Record<string, string> {
   return cookie === "" ? {} : { cookie };
+}
+
+function keyHeaders(key: string = apiKey) {
+  return { [API_KEY_HEADER]: key, cookie: "" };
+}
+
+function sessionCookie(response: Response): string {
+  const setCookie = response.headers
+    .getSetCookie()
+    .find((value) => value.startsWith("better-auth.session_token="));
+
+  assert.ok(setCookie, "the response set no better-auth.session_token cookie");
+
+  const pair = setCookie.split(";")[0];
+  assert.ok(pair);
+
+  return pair;
 }
 
 function contentType(response: Response): string {

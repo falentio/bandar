@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AuthResult, SessionUser, SignInInput, SignUpInput } from "../shared/auth";
-import { ApiError, authApi } from "./api";
+import { authApi } from "./api";
+import { describeError, isError } from "./errors";
 
 export type SessionState =
   | { readonly status: "loading" }
@@ -33,7 +34,7 @@ export function useSession(): SessionControls {
       } catch (cause) {
         if (!live) return;
 
-        setError(isError(cause) ? describe(cause) : String(cause));
+        setError(isError(cause) ? describeError(cause) : String(cause));
         setState({ status: "signed-out" });
       }
     };
@@ -53,7 +54,7 @@ export function useSession(): SessionControls {
       const result = await run();
       setState({ status: "signed-in", user: result.user });
     } catch (cause) {
-      setError(isError(cause) ? describe(cause) : String(cause));
+      setError(isError(cause) ? describeError(cause) : String(cause));
     } finally {
       setPending(false);
     }
@@ -77,19 +78,11 @@ export function useSession(): SessionControls {
       await authApi.signOut();
       setState({ status: "signed-out" });
     } catch (cause) {
-      setError(isError(cause) ? describe(cause) : String(cause));
+      setError(isError(cause) ? describeError(cause) : String(cause));
     } finally {
       setPending(false);
     }
   }, []);
 
   return { ...state, pending, error, signUp, signIn, signOut };
-}
-
-function isError(value: unknown): value is Error {
-  return value instanceof Error;
-}
-
-function describe(error: Error): string {
-  return error instanceof ApiError ? (error.issues[0] ?? error.message) : error.message;
 }

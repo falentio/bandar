@@ -1,6 +1,7 @@
 import { type AnyElysia, Elysia } from "elysia";
 import * as v from "valibot";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
+import { API_KEY_HEADER } from "../shared/api-keys";
 import { NoteIdSchema, NoteInputSchema } from "../shared/notes";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
@@ -33,14 +34,14 @@ export function createApi(repo: NotesRepo, migration: MigrationResult, auth: Aut
     .all("/auth/*", ({ request }) => auth.handler(request))
     .get("/health", health(migration), { response: HealthSchema })
     .get("/notes", async ({ request }) => {
-      const user = await requireSession(auth, request);
+      const user = await authenticate(auth, request);
 
       if (user instanceof Response) return user;
 
       return [...repo.list(user.id)];
     })
     .post("/notes", async ({ body, request, set }) => {
-      const user = await requireSession(auth, request);
+      const user = await authenticate(auth, request);
 
       if (user instanceof Response) return user;
 
@@ -52,7 +53,7 @@ export function createApi(repo: NotesRepo, migration: MigrationResult, auth: Aut
       return repo.create(user.id, input);
     })
     .delete("/notes/:id", async ({ params, request, set }) => {
-      const user = await requireSession(auth, request);
+      const user = await authenticate(auth, request);
 
       if (user instanceof Response) return user;
 
@@ -72,7 +73,18 @@ function health(migration: MigrationResult): () => Health {
   return () => ({ ok: true, migration: migration.current });
 }
 
-async function requireSession(auth: Auth, request: Request): Promise<SessionUser | Response> {
+async function authenticate(auth: Auth, request: Request): Promise<SessionUser | Response> {
+  const key = request.headers.get(API_KEY_HEADER);
+
+  // A bad key is final: falling back to the cookie would hide a wrong key behind a live session.
+  if (key !== null) {
+    const user = await auth.verifyApiKey(key);
+
+    return (
+      user ?? Response.json(failure("unauthorized", "that API key is not valid"), { status: 401 })
+    );
+  }
+
   const user = await auth.getSession(request.headers);
 
   return user ?? Response.json(failure("unauthorized", "sign in to use notes"), { status: 401 });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Note } from "../shared/notes";
-import { ApiError, notesApi } from "./api";
+import { notesApi } from "./api";
+import { describeError, isError } from "./errors";
 
 export type NotesState =
   | { readonly status: "loading" }
@@ -27,7 +28,10 @@ export function useNotes(): Notes {
         if (live) setState({ status: "ready", notes });
       } catch (error) {
         if (live)
-          setState({ status: "error", message: isError(error) ? describe(error) : String(error) });
+          setState({
+            status: "error",
+            message: isError(error) ? describeError(error) : String(error),
+          });
       }
     };
 
@@ -48,7 +52,7 @@ export function useNotes(): Notes {
         notes: [note, ...(current.status === "ready" ? current.notes : [])],
       }));
     } catch (error) {
-      setState({ status: "error", message: isError(error) ? describe(error) : String(error) });
+      setState({ status: "error", message: isError(error) ? describeError(error) : String(error) });
     } finally {
       setPending(false);
     }
@@ -65,19 +69,11 @@ export function useNotes(): Notes {
           : current,
       );
     } catch (error) {
-      setState({ status: "error", message: isError(error) ? describe(error) : String(error) });
+      setState({ status: "error", message: isError(error) ? describeError(error) : String(error) });
     } finally {
       setPending(false);
     }
   }, []);
 
   return { ...state, pending, add, remove };
-}
-
-function isError(value: unknown): value is Error {
-  return value instanceof Error;
-}
-
-function describe(error: Error): string {
-  return error instanceof ApiError ? (error.issues[0] ?? error.message) : error.message;
 }

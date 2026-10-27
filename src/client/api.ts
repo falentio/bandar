@@ -1,6 +1,14 @@
 import * as v from "valibot";
 import { ApiErrorBodySchema, HealthSchema, apiPaths } from "../shared/api";
 import {
+  ApiKeyListSchema,
+  CreatedApiKeySchema,
+  apiKeyPaths,
+  type ApiKeyCreateInput,
+  type ApiKeyList,
+  type CreatedApiKey,
+} from "../shared/api-keys";
+import {
   AuthErrorSchema,
   AuthResultSchema,
   SessionSchema,
@@ -32,6 +40,18 @@ export const notesApi = {
     await send(apiPaths.note(id), { method: "DELETE" });
   },
   health: () => request(apiPaths.health, HealthSchema),
+};
+
+export const apiKeyApi = {
+  create: (input: ApiKeyCreateInput): Promise<CreatedApiKey> =>
+    request(apiKeyPaths.create, CreatedApiKeySchema, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  list: (): Promise<ApiKeyList> => request(apiKeyPaths.list, ApiKeyListSchema),
+  remove: async (id: string): Promise<void> => {
+    await send(apiKeyPaths.remove, { method: "POST", body: JSON.stringify({ keyId: id }) });
+  },
 };
 
 export const authApi = {

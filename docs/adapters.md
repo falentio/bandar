@@ -152,10 +152,11 @@ Adapters throw one type:
 new UpstreamError(message, kind, status);
 ```
 
-`kind` is one of `auth`, `rate_limit`, `invalid_request`, `unavailable`,
-`protocol`, or `network`. `status` is the upstream HTTP status when there was
-one. The gateway maps `rate_limit` to 429, `invalid_request` to 400, and the rest
-to 502, then records the event with the error kind.
+`kind` is one of `auth`, `rate_limit`, `invalid_request`, `not_found`,
+`unavailable`, `protocol`, or `network`. `status` is the upstream HTTP status when
+there was one. The gateway maps `rate_limit` to 429, `invalid_request` to 400,
+`not_found` to 404, and the rest to 502, then records the event with the error
+kind.
 
 Helpers in `adapters/http.ts`:
 

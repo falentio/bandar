@@ -57,8 +57,9 @@ describe("subjectFor", () => {
     expect(subjectFor("network", target)).toEqual({ kind: "provider", id: "provider-1" });
   });
 
-  test("flags the model for a protocol failure", () => {
+  test("flags the model for a protocol or not-found failure", () => {
     expect(subjectFor("protocol", target)).toEqual({ kind: "model", id: "model-1" });
+    expect(subjectFor("not_found", target)).toEqual({ kind: "model", id: "model-1" });
   });
 
   test("flags nothing for a final or anonymous failure", () => {

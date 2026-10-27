@@ -36,6 +36,10 @@ export function subjectFor(kind: UpstreamErrorKind, target: FailureTarget): Subj
       return target.credentialId === null ? null : { kind: "credential", id: target.credentialId };
     }
 
+    case "not_found": {
+      return { kind: "model", id: target.modelId };
+    }
+
     case "unavailable":
     case "network": {
       return { kind: "provider", id: target.providerId };

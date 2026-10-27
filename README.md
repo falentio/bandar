@@ -146,8 +146,11 @@ A retryable failure flags one subject:
 | ------------------------ | --------------------- |
 | `auth`, `rate_limit`     | the credential        |
 | `unavailable`, `network` | the provider          |
-| `protocol`               | the model             |
+| `protocol`, `not_found`  | the model             |
 | `invalid_request`        | nothing (it is final) |
+
+A retired model answers 404, which is `not_found` and falls through like any
+other retryable failure, so a tag survives a model the upstream removed.
 
 A flagged subject cools down for `min(30s * 2^(failures - 1), 24h)`, so repeated
 failures grow the wait to one day. A success clears the failure count and the

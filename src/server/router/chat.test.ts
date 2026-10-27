@@ -234,6 +234,50 @@ describe("runChat credentials", () => {
     expect(providerRowOf(harness.db, broken.providerId)?.failures).toBe(0);
   });
 
+  test("falls through a model the upstream reports as missing", async () => {
+    const harness = await freshHarness((call) => {
+      // SAFETY: the fake upstream records the JSON body the openai adapter posts.
+      const body = call.body as { model?: string };
+
+      return body.model === "retired-model"
+        ? Response.json({ error: { message: "model not found" } }, { status: 404 })
+        : openAiSuccess();
+    });
+
+    const retired = await providerWithModel(harness, {
+      name: "Retired",
+      path: "/retired",
+      alias: "retired",
+      upstreamModel: "retired-model",
+    });
+
+    const current = await providerWithModel(harness, {
+      name: "Current",
+      path: "/current",
+      alias: "current",
+      upstreamModel: "current-model",
+    });
+
+    await tagWith(harness, "retired-chain", [retired.modelId, current.modelId]);
+
+    const response = await runChat(harness.deps, chatInput("tags/retired-chain"));
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls.map((call) => call.path)).toEqual([
+      "/retired/chat/completions",
+      "/current/chat/completions",
+    ]);
+
+    const modelRow = harness.db
+      .select()
+      .from(providerModels)
+      .where(eq(providerModels.id, retired.modelId))
+      .get();
+
+    expect(modelRow?.failures).toBe(1);
+    expect(providerRowOf(harness.db, retired.providerId)?.failures).toBe(0);
+  });
+
   test("probes the full plan when every subject is cooling and clears the flags", async () => {
     const harness = await freshHarness(() => openAiSuccess());
 

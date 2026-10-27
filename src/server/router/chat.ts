@@ -78,6 +78,7 @@ type AttemptPlan = {
 const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
   "auth",
   "rate_limit",
+  "not_found",
   "unavailable",
   "protocol",
   "network",
@@ -563,6 +564,8 @@ function statusFor(error: UpstreamError): number {
       return 429;
     case "invalid_request":
       return 400;
+    case "not_found":
+      return 404;
     case "auth":
     case "unavailable":
     case "protocol":

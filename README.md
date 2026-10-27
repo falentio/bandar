@@ -533,6 +533,9 @@ yet.
 - **Thirteen OpenCode Go ids cannot be called.** Five answer only on the Responses
   wire, which bandar does not speak, and the docs name no wire for eight more.
   Neither group imports; typing one in fails with a 400 that names the gap.
+- **Built-ins can share an upstream model id.** Aliases are unique across providers,
+  so importing a catalog skips an id another provider already imported. Add the
+  second copy with a distinct alias, or remove the first.
 - **A catalog re-import does not reprice.** It adds new upstream models and leaves
   prices on existing models alone.
 - **A built-in can carry a suffixed slug.** If a custom provider already owns the

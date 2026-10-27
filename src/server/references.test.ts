@@ -19,10 +19,12 @@ import {
   createProvider,
   listProviders,
   ProviderRuleError,
+  removeProviderModel,
   updateProvider,
   type ProviderDeps,
 } from "./providers";
 import { createSealer } from "./seal";
+import { createTag, listTags, setTagModels } from "./tags";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
@@ -72,6 +74,40 @@ describe("provider models", () => {
     await expect(
       addProviderModel(deps, "user-1", provider.id, { upstreamModel: "same", alias: "two" }),
     ).rejects.toThrow(ProviderRuleError);
+  });
+
+  test("deleting a model renumbers the remaining tag priorities", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Custom",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "one", alias: "one" });
+    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "two", alias: "two" });
+
+    const models =
+      (await listProviders(deps, "user-1")).providers.find((entry) => entry.id === provider.id)
+        ?.models ?? [];
+
+    const created = await createTag(deps, "user-1", "chain");
+    const tagId = created.tags.find((tag) => tag.slug === "chain")?.id ?? "";
+
+    await setTagModels(
+      deps,
+      "user-1",
+      tagId,
+      models.map((model) => model.id),
+    );
+    await removeProviderModel(deps, "user-1", provider.id, models[0]?.id ?? "");
+
+    const chain = (await listTags(deps, "user-1")).tags.find((tag) => tag.slug === "chain");
+
+    expect(chain?.models.map((model) => model.priority)).toEqual([1]);
   });
 
   test("migration 0007 collapses duplicate upstream rows", () => {

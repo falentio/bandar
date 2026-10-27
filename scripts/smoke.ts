@@ -910,6 +910,11 @@ try {
       ["dead-model"],
       `failover order after the model removal: ${failover?.models.map((model) => model.alias).join(", ")}`,
     );
+    assert.deepEqual(
+      failover?.models.map((model) => model.priority),
+      [1],
+      `failover priorities after the model removal: ${failover?.models.map((model) => model.priority).join(", ")}`,
+    );
   });
 
   await check("the longest provider ref is callable", async () => {

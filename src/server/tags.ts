@@ -94,6 +94,39 @@ export async function removeTag(
   return removed.length === 0 ? null : listTags(deps, userId);
 }
 
+export async function renumberTagPriorities(deps: TagDeps, userId: string): Promise<void> {
+  const rows = await deps.db
+    .select({ tagId: tagModels.tagId, modelId: tagModels.modelId, priority: tagModels.priority })
+    .from(tagModels)
+    .innerJoin(tags, eq(tags.id, tagModels.tagId))
+    .where(eq(tags.userId, userId))
+    .orderBy(asc(tagModels.tagId), asc(tagModels.priority));
+
+  const byTag = new Map<string, { readonly modelId: string; readonly priority: number }[]>();
+
+  for (const row of rows) {
+    const list = byTag.get(row.tagId) ?? [];
+
+    list.push({ modelId: row.modelId, priority: row.priority });
+    byTag.set(row.tagId, list);
+  }
+
+  deps.db.transaction((tx) => {
+    for (const [tagId, models] of byTag) {
+      for (const [index, model] of models.entries()) {
+        const priority = index + 1;
+
+        if (model.priority === priority) continue;
+
+        tx.update(tagModels)
+          .set({ priority })
+          .where(and(eq(tagModels.tagId, tagId), eq(tagModels.modelId, model.modelId)))
+          .run();
+      }
+    }
+  });
+}
+
 export async function setTagModels(
   deps: TagDeps,
   userId: string,

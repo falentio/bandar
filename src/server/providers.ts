@@ -20,6 +20,7 @@ import type { Db } from "./db/client";
 import { UpstreamError } from "./router/types";
 import { providerModels, providers } from "./db/schema";
 import type { Sealer } from "./seal";
+import { renumberTagPriorities } from "./tags";
 
 export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
 
@@ -383,6 +384,8 @@ export async function removeProviderModel(
     .where(and(eq(providerModels.id, modelId), eq(providerModels.providerId, providerId)))
     .run();
 
+  await renumberTagPriorities(deps, userId);
+
   return findProvider(deps, userId, providerId);
 }
 
@@ -395,6 +398,8 @@ export async function removeProvider(
     .delete(providers)
     .where(and(eq(providers.id, id), eq(providers.userId, userId)))
     .returning({ id: providers.id });
+
+  if (removed.length > 0) await renumberTagPriorities(deps, userId);
 
   return removed.length > 0;
 }

@@ -1,12 +1,17 @@
 import { and, asc, eq } from "drizzle-orm";
+import * as v from "valibot";
 import type {
   Provider,
+  ProviderAuthMode,
   ProviderInput,
   ProviderKind,
   ProviderList,
   ProviderModelInput,
 } from "../shared/providers";
+import { parseCredential, type Credential } from "./credential";
+import { KILO_MODELS_URL } from "./router/adapters/kilocode";
 import type { Db } from "./db/client";
+import { UpstreamError } from "./router/types";
 import { providerModels, providers } from "./db/schema";
 import type { Sealer } from "./seal";
 
@@ -16,6 +21,7 @@ type ProviderPatch = {
   name: string;
   kind: ProviderKind;
   baseUrl: string;
+  authMode?: ProviderAuthMode;
   apiKey?: string;
 };
 
@@ -29,7 +35,7 @@ export type ResolvedTarget = {
   readonly providerName: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
-  readonly apiKey: string;
+  readonly credential: Credential;
 };
 
 export async function listProviders(deps: ProviderDeps, userId: string): Promise<ProviderList> {
@@ -65,6 +71,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       name: row.name,
       kind: row.kind,
       baseUrl: row.baseUrl,
+      authMode: row.authMode,
       hasKey: row.apiKey !== "",
       models: grouped.get(row.id) ?? [],
       createdAt: row.createdAt.toISOString(),
@@ -87,7 +94,13 @@ export async function createProvider(
 ): Promise<Provider> {
   const id = crypto.randomUUID();
   const now = new Date();
-  const apiKey = input.apiKey === "" ? "" : await deps.sealer.seal(input.apiKey);
+
+  const apiKey =
+    input.apiKey === ""
+      ? ""
+      : await deps.sealer.seal(
+          JSON.stringify({ authMode: "api-key", apiKey: input.apiKey } satisfies Credential),
+        );
 
   deps.db.transaction((tx) => {
     tx.insert(providers)
@@ -98,6 +111,7 @@ export async function createProvider(
         kind: input.kind,
         baseUrl: input.baseUrl,
         apiKey,
+        authMode: "api-key",
         createdAt: now,
       })
       .run();
@@ -120,7 +134,12 @@ export async function updateProvider(
 
   if (existing === null) return null;
 
-  const apiKey = input.apiKey === "" ? undefined : await deps.sealer.seal(input.apiKey);
+  const apiKey =
+    input.apiKey === ""
+      ? undefined
+      : await deps.sealer.seal(
+          JSON.stringify({ authMode: "api-key", apiKey: input.apiKey } satisfies Credential),
+        );
 
   const patch: ProviderPatch = {
     name: input.name,
@@ -128,7 +147,10 @@ export async function updateProvider(
     baseUrl: input.baseUrl,
   };
 
-  if (apiKey !== undefined) patch.apiKey = apiKey;
+  if (apiKey !== undefined) {
+    patch.apiKey = apiKey;
+    patch.authMode = "api-key";
+  }
 
   deps.db.transaction((tx) => {
     tx.update(providers)
@@ -152,6 +174,127 @@ export async function addProviderModel(
     .insert(providerModels)
     .values(modelRow(userId, providerId, model, new Date(), 0))
     .run();
+
+  return findProvider(deps, userId, providerId);
+}
+
+export type ModelCatalogEntry = {
+  readonly upstreamModel: string;
+  readonly alias: string;
+  readonly inputPricePerMtok: number | null;
+  readonly outputPricePerMtok: number | null;
+};
+
+const PriceSchema = v.union([v.string(), v.number()]);
+
+const KiloCatalogSchema = v.object({
+  data: v.array(
+    v.object({
+      id: v.string(),
+      pricing: v.optional(
+        v.nullable(
+          v.object({
+            prompt: v.optional(PriceSchema),
+            completion: v.optional(PriceSchema),
+          }),
+        ),
+      ),
+    }),
+  ),
+});
+
+export async function fetchKilocodeCatalog(
+  signal: AbortSignal,
+): Promise<readonly ModelCatalogEntry[]> {
+  const url = Bun.env.BANDAR_KILOCODE_MODELS_URL ?? KILO_MODELS_URL;
+
+  const response = await fetch(url, { signal }).catch((error: Error) => {
+    throw new UpstreamError(`could not read the kilo code catalog: ${error.message}`, "network");
+  });
+
+  if (!response.ok) {
+    throw new UpstreamError(
+      `could not read the kilo code catalog (${response.status})`,
+      "unavailable",
+      response.status,
+    );
+  }
+
+  const parsed = v.safeParse(KiloCatalogSchema, await response.json());
+
+  if (!parsed.success) throw new UpstreamError("kilo code catalog is not readable", "protocol");
+
+  const aliases = new Set<string>();
+  const ids = new Set<string>();
+
+  return parsed.output.data.flatMap((model) => {
+    if (ids.has(model.id)) return [];
+
+    ids.add(model.id);
+
+    const base = aliasFor(model.id);
+    const alias = aliases.has(base) ? model.id : base;
+
+    aliases.add(alias);
+
+    return [
+      {
+        upstreamModel: model.id,
+        alias,
+        inputPricePerMtok: pricePerMtok(model.pricing?.prompt),
+        outputPricePerMtok: pricePerMtok(model.pricing?.completion),
+      },
+    ];
+  });
+}
+
+export async function syncProviderModels(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  models: readonly ModelCatalogEntry[],
+): Promise<Provider | null> {
+  if ((await findProvider(deps, userId, providerId)) === null) return null;
+
+  const existing = await deps.db
+    .select()
+    .from(providerModels)
+    .where(eq(providerModels.providerId, providerId));
+
+  const takenUpstream = new Set(existing.map((row) => row.upstreamModel));
+
+  const takenAlias = new Set(
+    deps.db
+      .select({ alias: providerModels.alias })
+      .from(providerModels)
+      .where(eq(providerModels.userId, userId))
+      .all()
+      .map((row) => row.alias),
+  );
+
+  const now = new Date();
+
+  const missing = models.flatMap((model, index) => {
+    if (takenUpstream.has(model.upstreamModel) || takenAlias.has(model.alias)) return [];
+
+    takenAlias.add(model.alias);
+
+    return [
+      {
+        id: crypto.randomUUID(),
+        userId,
+        providerId,
+        alias: model.alias,
+        upstreamModel: model.upstreamModel,
+        inputPricePerMtok: model.inputPricePerMtok,
+        outputPricePerMtok: model.outputPricePerMtok,
+        enabled: true,
+        createdAt: new Date(now.getTime() + index),
+      },
+    ];
+  });
+
+  if (missing.length > 0) deps.db.insert(providerModels).values(missing).run();
 
   return findProvider(deps, userId, providerId);
 }
@@ -218,10 +361,9 @@ export async function resolveTarget(
 
   if (row === undefined) return null;
 
-  return {
-    ...row,
-    apiKey: row.apiKey === "" ? "" : await deps.sealer.open(row.apiKey),
-  };
+  const { apiKey, ...rest } = row;
+
+  return { ...rest, credential: await readCredential(deps, apiKey) };
 }
 
 export async function listModelAliases(
@@ -233,6 +375,53 @@ export async function listModelAliases(
     .from(providerModels)
     .where(and(eq(providerModels.userId, userId), eq(providerModels.enabled, true)))
     .orderBy(asc(providerModels.alias));
+}
+
+export async function readCredential(deps: ProviderDeps, sealed: string): Promise<Credential> {
+  if (sealed === "") return { authMode: "api-key", apiKey: "" };
+
+  const plaintext = await deps.sealer.open(sealed);
+
+  const credential = parseCredential(plaintext);
+
+  // A key saved before credentials carried an auth mode is a bare key.
+  return credential ?? { authMode: "api-key", apiKey: plaintext };
+}
+
+export async function saveOAuthCredential(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  credential: Credential,
+): Promise<Provider | null> {
+  if ((await findProvider(deps, userId, providerId)) === null) return null;
+
+  deps.db
+    .update(providers)
+    .set({
+      apiKey: await deps.sealer.seal(JSON.stringify(credential)),
+      authMode: credential.authMode,
+    })
+    .where(and(eq(providers.id, providerId), eq(providers.userId, userId)))
+    .run();
+
+  return findProvider(deps, userId, providerId);
+}
+
+/** Model ids are namespaced, so the alias keeps the namespace and loses only the `:free` tag. */
+function aliasFor(upstreamModel: string): string {
+  return upstreamModel.replace(/:free$/, "");
+}
+
+function pricePerMtok(value: string | number | undefined): number | null {
+  if (value === undefined) return null;
+
+  const perToken = Number(value);
+
+  // Kilo reports `-1` for a model it routes dynamically, and 0 for a free one.
+  if (!Number.isFinite(perToken) || perToken < 0) return null;
+
+  return perToken * 1_000_000;
 }
 
 async function findProvider(

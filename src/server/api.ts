@@ -4,26 +4,37 @@ import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
+  OAUTH_PROVIDER_KINDS,
+  ProviderModelRefreshSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
   ProviderModelInputSchema,
   ProviderModelParamsSchema,
+  ProviderOAuthPollSchema,
+  ProviderOAuthStartSchema,
   ProviderParamsSchema,
+  type OAuthProviderKind,
+  type ProviderKind,
 } from "../shared/providers";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
+import { connectorFor } from "./oauth";
 import {
   addProviderModel,
   createProvider,
+  fetchKilocodeCatalog,
+  syncProviderModels,
   listProviders,
   readProvider,
   removeProvider,
   removeProviderModel,
+  saveOAuthCredential,
   updateProvider,
   type ProviderDeps,
 } from "./providers";
+import { UpstreamError } from "./router/types";
 import { InputError, parseInput, type ParseableInput } from "./validation";
 
 export type ApiDeps = {
@@ -52,12 +63,21 @@ const RequestsQuerySchema = v.object({
 });
 
 export function createApi(deps: ApiDeps) {
+  const pendingLogins = new Map<string, { code: string; expiresAt: number }>();
+
   const app = new Elysia({ prefix: "/api" })
     .onError(({ code, error, path, set }) => {
       if (error instanceof InputError) {
         set.status = 422;
 
         return failure("validation", "request did not match the schema", error.issues);
+      }
+
+      if (error instanceof UpstreamError) {
+        set.status =
+          error.kind === "invalid_request" ? 400 : error.kind === "rate_limit" ? 429 : 502;
+
+        return failure(`upstream_${error.kind}`, error.message);
       }
 
       if (code === "NOT_FOUND") {
@@ -158,6 +178,100 @@ export function createApi(deps: ApiDeps) {
         throw error;
       }
     })
+    .post("/providers/:id/oauth/start", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      const provider = await readProvider(deps.providers, caller.userId, id);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      const kind = oauthKindOf(provider.kind);
+
+      if (kind === null) {
+        set.status = 400;
+
+        return failure("unsupported", `${provider.kind} does not use a device login`);
+      }
+
+      const login = await connectorFor(kind).start(request.signal);
+
+      pendingLogins.set(loginKey(caller.userId, id), {
+        code: login.code,
+        expiresAt: Date.now() + login.expiresInSeconds * 1000,
+      });
+
+      return v.parse(ProviderOAuthStartSchema, {
+        userCode: login.userCode,
+        verificationUrl: login.verificationUrl,
+        expiresInSeconds: login.expiresInSeconds,
+      });
+    })
+    .post("/providers/:id/oauth/poll", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      const provider = await readProvider(deps.providers, caller.userId, id);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      const kind = oauthKindOf(provider.kind);
+
+      if (kind === null) {
+        set.status = 400;
+
+        return failure("unsupported", `${provider.kind} does not use a device login`);
+      }
+
+      const key = loginKey(caller.userId, id);
+      const login = pendingLogins.get(key);
+
+      if (login === undefined) {
+        set.status = 400;
+
+        return failure("invalid_request", "start the login before polling it");
+      }
+
+      if (login.expiresAt <= Date.now()) {
+        pendingLogins.delete(key);
+        set.status = 400;
+
+        return failure("invalid_request", "the login code expired; start again");
+      }
+
+      const result = await connectorFor(kind).poll(login.code, request.signal);
+
+      if (result.state === "pending") {
+        return v.parse(ProviderOAuthPollSchema, { state: "pending" });
+      }
+
+      pendingLogins.delete(key);
+
+      const saved = await saveOAuthCredential(deps.providers, caller.userId, id, result.credential);
+
+      if (saved === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      return v.parse(ProviderOAuthPollSchema, {
+        state: "connected",
+        authMode: result.credential.authMode,
+      });
+    })
     .post("/providers/:id/models", async ({ body, params, request, set }) => {
       const caller = await authenticate(deps.auth, request);
 
@@ -188,6 +302,41 @@ export function createApi(deps: ApiDeps) {
 
         throw error;
       }
+    })
+    .post("/providers/:id/models/refresh", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      const provider = await readProvider(deps.providers, caller.userId, id);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      if (provider.kind !== "kilocode") {
+        set.status = 400;
+
+        return failure("unsupported", `${provider.kind} has no model catalog to refresh`);
+      }
+
+      const catalog = await fetchKilocodeCatalog(request.signal);
+      const before = provider.models.length;
+      const updated = await syncProviderModels(deps.providers, caller.userId, id, catalog);
+
+      if (updated === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      return v.parse(ProviderModelRefreshSchema, {
+        added: updated.models.length - before,
+        skipped: catalog.length - (updated.models.length - before),
+      });
     })
     .delete("/providers/:id/models/:modelId", async ({ params, request, set }) => {
       const caller = await authenticate(deps.auth, request);
@@ -244,6 +393,14 @@ export function createApi(deps: ApiDeps) {
     });
 
   return app;
+}
+
+function loginKey(userId: string, providerId: string): string {
+  return `${userId}:${providerId}`;
+}
+
+function oauthKindOf(kind: ProviderKind): OAuthProviderKind | null {
+  return OAUTH_PROVIDER_KINDS.find((candidate) => candidate === kind) ?? null;
 }
 
 function health(

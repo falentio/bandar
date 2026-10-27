@@ -10,8 +10,8 @@ export type Providers = {
   readonly providers: readonly Provider[];
   readonly error: string | null;
   readonly pending: boolean;
-  readonly create: (input: ProviderInput) => Promise<boolean>;
-  readonly remove: (id: string) => Promise<void>;
+  readonly create: (input: ProviderInput) => Promise<Provider | null>;
+  readonly remove: (id: string) => Promise<boolean>;
   readonly apply: (provider: Provider) => void;
   readonly addModel: (id: string, input: ProviderModelInput) => Promise<boolean>;
   readonly removeModel: (id: string, modelId: string) => Promise<void>;
@@ -58,7 +58,7 @@ export function useProviders(): Providers {
     };
   }, []);
 
-  const create = useCallback(async (input: ProviderInput): Promise<boolean> => {
+  const create = useCallback(async (input: ProviderInput): Promise<Provider | null> => {
     setPending(true);
     setError(null);
 
@@ -68,25 +68,29 @@ export function useProviders(): Providers {
       setProviders((current) => current.concat(provider));
       setStatus("ready");
 
-      return true;
+      return provider;
     } catch (error) {
       setError(isError(error) ? describeError(error) : String(error));
 
-      return false;
+      return null;
     } finally {
       setPending(false);
     }
   }, []);
 
-  const remove = useCallback(async (id: string): Promise<void> => {
+  const remove = useCallback(async (id: string): Promise<boolean> => {
     setPending(true);
     setError(null);
 
     try {
       await providerApi.remove(id);
       setProviders((current) => current.filter((provider) => provider.id !== id));
+
+      return true;
     } catch (error) {
       setError(isError(error) ? describeError(error) : String(error));
+
+      return false;
     } finally {
       setPending(false);
     }

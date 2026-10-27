@@ -6,6 +6,7 @@ import {
   protocolError,
   requireBody,
   requireOk,
+  secretOf,
   sseData,
 } from "./http";
 import {
@@ -57,7 +58,7 @@ export const google: ProviderAdapter = {
   async chat(input: AdapterInput): Promise<CanonicalResult> {
     const response = await postJson({
       url: chatUrl(input, false),
-      headers: headersFor(input.target.apiKey),
+      headers: headersFor(secretOf(input.target.credential)),
       body: JSON.stringify(bodyFor(input)),
       signal: input.signal,
     });
@@ -82,7 +83,7 @@ export const google: ProviderAdapter = {
   async *stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void> {
     const response = await postJson({
       url: chatUrl(input, true),
-      headers: headersFor(input.target.apiKey),
+      headers: headersFor(secretOf(input.target.credential)),
       body: JSON.stringify(bodyFor(input)),
       signal: input.signal,
     });

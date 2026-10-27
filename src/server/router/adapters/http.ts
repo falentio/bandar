@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import type { Credential } from "../../credential";
 import { UpstreamError, type UpstreamErrorKind } from "../types";
 
 const ErrorBodySchema = v.object({
@@ -90,6 +91,11 @@ export async function* sseData(
   } finally {
     reader.releaseLock();
   }
+}
+
+/** An API key and an OAuth token both travel as one bearer-like secret. */
+export function secretOf(credential: Credential): string {
+  return credential.authMode === "api-key" ? credential.apiKey : credential.accessToken;
 }
 
 export function apiKeyHeader(name: string, apiKey: string): Record<string, string> {

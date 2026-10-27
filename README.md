@@ -13,7 +13,8 @@ first token, tokens per second, error rate, p95 latency, daily tokens, and a
 
 - OpenAI-compatible `POST /v1/chat/completions`, streaming and non-streaming.
 - OpenAI-compatible `GET /v1/models` for the caller's aliases.
-- Three upstream adapter kinds: `openai`, `anthropic`, and `google`.
+- Four upstream adapter kinds: `openai`, `anthropic`, `google`, and `kilocode`.
+- Kilo Code connects through its device-code login; the other kinds use an API key.
 - Provider and model-alias management in the dashboard or over `/api`.
 - Gateway keys from better-auth's API-key plugin, sent as
   `Authorization: Bearer <key>` or `x-api-key`.
@@ -34,9 +35,11 @@ BANDAR_AUTH_URL=http://localhost:5173 bun run dev   # client :5173, API :3000
 Open <http://localhost:5173>, create an account, then:
 
 1. Open **Providers** and click **Add provider**. Pick the kind, name it, and
-   paste the base URL and upstream key.
+   paste the base URL. For an API-key kind, paste the upstream key too. For
+   Kilo Code, approve the device code on the provider's **Connection** tab.
 2. Click the new provider to open its page, then add models: upstream model
-   `gpt-4o-mini` with alias `fast` makes `fast` the name clients send.
+   `gpt-4o-mini` with alias `fast` makes `fast` the name clients send. Kilo Code
+   can also import its whole catalog with **Import catalog** on the Models tab.
 3. Open **API keys** and mint a key. The plaintext appears once.
 4. Call the gateway:
 
@@ -67,8 +70,10 @@ POST /v1/chat/completions [1]
 └── record one DuckDB event with tokens, TTFT, duration and tokens/sec [1g]
 ```
 
-Provider keys are decrypted only inside `resolveTarget` for the duration of an
-upstream call. `GET /api/providers` returns `hasKey`, never the key.
+Provider credentials are decrypted only inside `resolveTarget` for the duration
+of an upstream call. `GET /api/providers` returns `authMode` and `hasKey`, never
+the key or token. A device-code login keeps the device code on the server: the
+browser sees only the short user code it types at kilocode.ai.
 
 ## Analytics
 
@@ -102,6 +107,9 @@ every switch has an adapter.
 3. Register it in `./src/server/router/adapters/index.ts`.
 4. Add a fake upstream branch and one streaming plus one non-streaming smoke
    check in `./scripts/smoke.ts`.
+5. If the kind logs in with OAuth, add it to `OAUTH_PROVIDER_KINDS`, implement an
+   `OAuthConnector` in `./src/server/oauth.ts`, register it there, and add the
+   fake device-auth routes to the smoke run.
 
 The full contract, wire mapping, and streaming rules are in
 [`docs/adapters.md`](./docs/adapters.md). Adapters never return wire types to the
@@ -110,17 +118,19 @@ throw `UpstreamError` with a kind the gateway maps to an HTTP status.
 
 ## Environment
 
-| Variable                 | Default                                       | Meaning                                                                           |
-| ------------------------ | --------------------------------------------- | --------------------------------------------------------------------------------- |
-| `BANDAR_HOST`            | `0.0.0.0`                                     | Bind address for the API and the compiled binary.                                 |
-| `BANDAR_PORT`            | `3000`                                        | API port. `0` picks a free port and the boot line reports it.                     |
-| `BANDAR_WEB_PORT`        | `5173`                                        | Vite dev port. Not read by the compiled binary.                                   |
-| `BANDAR_DB`              | `./bandar.db`                                 | SQLite metadata path. Created on first boot.                                      |
-| `BANDAR_DUCKDB`          | `./bandar.duckdb`                             | DuckDB analytics path. Created on first boot.                                     |
-| `BANDAR_AUTH_URL`        | `http://localhost:<BANDAR_PORT>`              | better-auth base URL. In dev, set it to the Vite origin.                          |
-| `BANDAR_AUTH_SECRET`     | random per boot                               | Signs sessions and derives the provider-key encryption key. Set it in production. |
-| `BANDAR_TRUSTED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated origins allowed to POST to `/api/auth/*`.                         |
-| `BANDAR_DUCKDB_LIB`      | unset                                         | Override the `libduckdb` shared library path, for a manual install.               |
+| Variable                     | Default                                       | Meaning                                                                         |
+| ---------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------- |
+| `BANDAR_HOST`                | `0.0.0.0`                                     | Bind address for the API and the compiled binary.                               |
+| `BANDAR_PORT`                | `3000`                                        | API port. `0` picks a free port and the boot line reports it.                   |
+| `BANDAR_WEB_PORT`            | `5173`                                        | Vite dev port. Not read by the compiled binary.                                 |
+| `BANDAR_DB`                  | `./bandar.db`                                 | SQLite metadata path. Created on first boot.                                    |
+| `BANDAR_DUCKDB`              | `./bandar.duckdb`                             | DuckDB analytics path. Created on first boot.                                   |
+| `BANDAR_AUTH_URL`            | `http://localhost:<BANDAR_PORT>`              | better-auth base URL. In dev, set it to the Vite origin.                        |
+| `BANDAR_AUTH_SECRET`         | random per boot                               | Signs sessions and derives the credential encryption key. Set it in production. |
+| `BANDAR_TRUSTED_ORIGINS`     | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated origins allowed to POST to `/api/auth/*`.                       |
+| `BANDAR_DUCKDB_LIB`          | unset                                         | Override the `libduckdb` shared library path, for a manual install.             |
+| `BANDAR_KILOCODE_API`        | `https://api.kilo.ai`                         | Kilo Code control-plane origin. Point it at a fake in tests.                    |
+| `BANDAR_KILOCODE_MODELS_URL` | `https://api.kilo.ai/api/gateway/models`      | Kilo Code model catalog. Point it at a fake in tests.                           |
 
 Invalid values fail at startup before the port opens.
 
@@ -191,16 +201,17 @@ semicolons out of string literals in a migration.
 | `bun run check`          | Format, lint, and type-check.                                                    |
 | `bun run check:fix`      | The same with fixes.                                                             |
 | `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                       |
-| `bun run smoke`          | Boot `dist/bandar` and run 21 end-to-end checks against fake upstreams.          |
+| `bun run smoke`          | Boot `dist/bandar` and run 34 end-to-end checks against fake upstreams.          |
 | `bun run verify`         | `check`, `test`, `build`, `smoke`.                                               |
 | `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                    |
 | `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                       |
 | `bun run duck:fetch`     | Copy the platform DuckDB library into `vendor/duckdb/`.                          |
 
 The smoke run mints a user, creates one provider per kind against local fake
-upstreams, calls the gateway streaming and non-streaming, asserts TTFT/tokens-per-
-second in DuckDB, revokes the key, restarts the binary, and proves the analytics
-rows survived.
+upstreams, approves a fake Kilo Code device login, imports a catalog with an
+alias collision, calls the gateway streaming and non-streaming, asserts
+TTFT/tokens-per-second in DuckDB, revokes the key, restarts the binary, and
+proves the analytics rows survived.
 
 ## Layout
 
@@ -226,8 +237,10 @@ bandar/
 │   ├── gateway.ts                  # Elysia /v1 routes and caller auth
 │   ├── api.ts                      # management routes, session/key gate
 │   ├── analytics.ts                # DuckDB reads and window math
-│   ├── providers.ts                # provider/model repo, target resolution
-│   ├── seal.ts                     # AES-GCM provider-key sealing
+│   ├── providers.ts                # provider/model repo, catalog import, target resolution
+│   ├── credential.ts               # api-key / oauth credential union
+│   ├── oauth.ts                    # device-code connectors per OAuth kind
+│   ├── seal.ts                     # AES-GCM credential sealing
 │   ├── router/
 │   │   ├── types.ts                # canonical request/result/stream contract
 │   │   ├── metrics.ts              # tokens/sec, cost, error-rate math
@@ -239,7 +252,8 @@ bandar/
 │   │       ├── http.ts             # URL join, SSE parsing, upstream errors
 │   │       ├── openai.ts
 │   │       ├── anthropic.ts
-│   │       └── google.ts
+│   │       ├── google.ts
+│   │       └── kilocode.ts
 │   ├── duck/
 │   │   ├── ffi.ts                  # dlopen + symbol table
 │   │   ├── client.ts               # prepared queries, typed binds
@@ -257,7 +271,8 @@ bandar/
 │   └── components/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
 │       ├── providers-panel.tsx     # provider list and add dialog
-│       ├── provider-page.tsx       # one provider: overview, settings, models, api key
+│       ├── provider-page.tsx       # one provider: overview, settings, models, credential
+│       ├── connect-flow.tsx        # Kilo Code device-code approval
 │       ├── token-chart.tsx         # shared daily token bars
 │       ├── provider-logo.tsx       # mark per provider kind
 │       ├── requests-panel.tsx      # recent attempts
@@ -271,41 +286,48 @@ bandar/
 
 ## API surface
 
-| Route                                       | Auth                   | Purpose                                             |
-| ------------------------------------------- | ---------------------- | --------------------------------------------------- |
-| `POST /v1/chat/completions`                 | Gateway key            | OpenAI-compatible chat, streaming or not.           |
-| `GET /v1/models`                            | Gateway key            | Aliases for the caller.                             |
-| `GET/POST /api/providers`                   | Session or `x-api-key` | List providers, or create one without models.       |
-| `PUT/DELETE /api/providers/:id`             | Session or `x-api-key` | Replace a provider, or remove it with its models.   |
-| `GET /api/providers/:id?days=30`            | Session or `x-api-key` | One provider plus its window usage.                 |
-| `POST /api/providers/:id/models`            | Session or `x-api-key` | Add one model alias; returns the provider.          |
-| `DELETE /api/providers/:id/models/:modelId` | Session or `x-api-key` | Remove a model alias; returns the provider.         |
-| `GET /api/analytics?days=30`                | Session or `x-api-key` | Window summary, daily series, model breakdown.      |
-| `GET /api/requests?limit=50&providerId=…`   | Session or `x-api-key` | Recent attempts, optionally one provider.           |
-| `GET /api/health`                           | none                   | Both current migration tags.                        |
-| `/api/auth/*`                               | better-auth            | Sign-up, sign-in, sessions, key create/list/delete. |
+| Route                                       | Auth                   | Purpose                                                 |
+| ------------------------------------------- | ---------------------- | ------------------------------------------------------- |
+| `POST /v1/chat/completions`                 | Gateway key            | OpenAI-compatible chat, streaming or not.               |
+| `GET /v1/models`                            | Gateway key            | Aliases for the caller.                                 |
+| `GET/POST /api/providers`                   | Session or `x-api-key` | List providers, or create one without models.           |
+| `PUT/DELETE /api/providers/:id`             | Session or `x-api-key` | Replace a provider, or remove it with its models.       |
+| `GET /api/providers/:id?days=30`            | Session or `x-api-key` | One provider plus its window usage.                     |
+| `POST /api/providers/:id/models`            | Session or `x-api-key` | Add one model alias; returns the provider.              |
+| `POST /api/providers/:id/models/refresh`    | Session or `x-api-key` | Import new models from the Kilo Code catalog.           |
+| `DELETE /api/providers/:id/models/:modelId` | Session or `x-api-key` | Remove a model alias; returns the provider.             |
+| `POST /api/providers/:id/oauth/start`       | Session or `x-api-key` | Start a Kilo Code device login; returns a user code.    |
+| `POST /api/providers/:id/oauth/poll`        | Session or `x-api-key` | Poll the pending login; stores the token when approved. |
+| `GET /api/analytics?days=30`                | Session or `x-api-key` | Window summary, daily series, model breakdown.          |
+| `GET /api/requests?limit=50&providerId=…`   | Session or `x-api-key` | Recent attempts, optionally one provider.               |
+| `GET /api/health`                           | none                   | Both current migration tags.                            |
+| `/api/auth/*`                               | better-auth            | Sign-up, sign-in, sessions, key create/list/delete.     |
 
 Each provider has its own page at `/providers/<id>` with four tabs:
 **Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
-(name, kind, base URL), **Models** (aliases and their removal), and **API key**
-(set or replace the sealed upstream key, remove the provider). The tab lives in
-the URL as `?tab=`, so a reload or a shared link opens the same tab. A provider is created empty and grows models one at a time, so a new
-upstream is reachable before it has any alias. `PUT /api/providers/:id` replaces name, kind,
-and base URL, and leaves the key unchanged when `apiKey` is empty. Model prices
-are accepted by the model endpoints (`inputPricePerMtok`,
-`outputPricePerMtok`) but are not in the form yet.
+(name, kind, base URL), **Models** (aliases, removal, and for Kilo Code a catalog
+import), and **API key** or **Connection** (set or replace the sealed upstream
+key, connect a Kilo Code account, remove the provider). The tab lives in the URL
+as `?tab=`, so a reload or a shared link opens the same tab. A provider is
+created empty and grows models one at a time, so a new upstream is reachable
+before it has any alias. `PUT /api/providers/:id` replaces name, kind, and base
+URL, and leaves the credential unchanged when `apiKey` is empty. Model prices are
+accepted by the model endpoints (`inputPricePerMtok`, `outputPricePerMtok`) and
+filled by the Kilo Code catalog import; they are not in the form yet.
 
 ## Security notes
 
-- Provider keys are sealed with AES-GCM under a key derived from
-  `BANDAR_AUTH_SECRET`. Changing the secret makes stored keys unreadable; the
-  gateway returns an upstream error until they are re-entered.
-- Provider keys never appear in API responses, logs, or analytics events.
+- Provider credentials, including Kilo Code OAuth tokens, are sealed with AES-GCM
+  under a key derived from `BANDAR_AUTH_SECRET`. Changing the secret makes stored
+  credentials unreadable; the gateway returns an upstream error until they are
+  re-entered.
+- Credentials never appear in API responses, logs, or analytics events. The Kilo
+  Code device code stays on the server; only the short user code is returned.
 - A bad gateway key is final: it is a 401 and the session cookie is not consulted
   on `/v1`.
 - One user cannot resolve another user's aliases, providers, events, or keys.
 - The `BANDAR_AUTH_SECRET` default is generated per boot. Set it to keep sessions
-  and stored provider keys across restarts.
+  and stored credentials across restarts.
 
 ## Limits and next steps
 
@@ -318,8 +340,10 @@ are accepted by the model endpoints (`inputPricePerMtok`,
   pre-aggregated table before the history gets large.
 - **No fallbacks or retries.** One alias maps to one model. The alias table can
   grow an ordered fallback list without changing the adapter contract.
-- **No pricing UI.** Set prices through the API; the overview computes cost only
-  for priced models.
+- **No OAuth refresh.** A Kilo Code device token is stored as issued. Reconnect
+  when it expires.
+- **No pricing form.** Set prices through the API or import the Kilo Code
+  catalog; the overview computes cost only for priced models.
 
 ## Lint policy
 

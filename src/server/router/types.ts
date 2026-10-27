@@ -1,4 +1,5 @@
 import type { ProviderKind } from "../../shared/providers";
+import type { Credential } from "../credential";
 
 export type CanonicalMessage = {
   readonly role: "system" | "user" | "assistant";
@@ -33,7 +34,7 @@ export type ProviderTarget = {
   readonly providerId: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
-  readonly apiKey: string;
+  readonly credential: Credential;
   readonly upstreamModel: string;
 };
 

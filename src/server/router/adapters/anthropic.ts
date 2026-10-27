@@ -6,6 +6,7 @@ import {
   protocolError,
   requireBody,
   requireOk,
+  secretOf,
   sseData,
 } from "./http";
 import {
@@ -62,7 +63,7 @@ export const anthropic: ProviderAdapter = {
   async chat(input: AdapterInput): Promise<CanonicalResult> {
     const response = await postJson({
       url: joinUrl(input.target.baseUrl, "/messages"),
-      headers: headersFor(input.target.apiKey),
+      headers: headersFor(secretOf(input.target.credential)),
       body: JSON.stringify(bodyFor(input, false)),
       signal: input.signal,
     });
@@ -88,7 +89,7 @@ export const anthropic: ProviderAdapter = {
   async *stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void> {
     const response = await postJson({
       url: joinUrl(input.target.baseUrl, "/messages"),
-      headers: headersFor(input.target.apiKey),
+      headers: headersFor(secretOf(input.target.credential)),
       body: JSON.stringify(bodyFor(input, true)),
       signal: input.signal,
     });

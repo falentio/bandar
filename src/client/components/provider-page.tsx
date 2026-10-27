@@ -21,6 +21,7 @@ import {
   type Provider,
   type ProviderKind,
   type ProviderModel,
+  type ProviderModelRefresh,
 } from "../../shared/providers";
 import {
   formatExactTokens,
@@ -36,6 +37,7 @@ import { describeError, isError } from "../errors";
 import { useProviderDetail } from "../use-provider-detail";
 import { useProviders } from "../use-providers";
 import { useRequests } from "../use-requests";
+import { ConnectFlow } from "./connect-flow";
 import { ProviderLogo } from "./provider-logo";
 
 const RANGES = [7, 30, 90] as const;
@@ -52,22 +54,26 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
   google: "https://generativelanguage.googleapis.com/v1beta",
+  kilocode: "https://api.kilo.ai/api/openrouter",
 };
 
 const KIND_LABELS: Record<ProviderKind, string> = {
   openai: "OpenAI compatible",
   anthropic: "Anthropic compatible",
   google: "Google GenAI compatible",
+  kilocode: "Kilo Code",
 };
 
 export function ProviderPage({
   providerId,
   tab,
   onTabChange,
+  onRemoved,
 }: {
   providerId: string;
   tab: ProviderTab;
   onTabChange: (tab: ProviderTab) => void;
+  onRemoved: () => void;
 }) {
   const providers = useProviders();
   const detail = useProviderDetail(providerId);
@@ -169,9 +175,12 @@ export function ProviderPage({
               </TabsTrigger>
               <TabsTrigger value="api-key">
                 <KeyRoundIcon data-icon="inline-start" />
-                API key
+                {provider.kind === "kilocode" ? "Connection" : "API key"}
                 {provider.hasKey ? (
-                  <span className="size-1.5 rounded-full bg-emerald-500" aria-label="key saved" />
+                  <span
+                    className="size-1.5 rounded-full bg-emerald-500"
+                    aria-label={provider.authMode === "oauth" ? "connection saved" : "key saved"}
+                  />
                 ) : null}
               </TabsTrigger>
             </TabsList>
@@ -201,6 +210,13 @@ export function ProviderPage({
                 onSaved={(updated) => {
                   providers.apply(updated);
                   detail.refresh();
+                }}
+                onRemove={async () => {
+                  const removed = await providers.remove(provider.id);
+
+                  if (removed) onRemoved();
+
+                  return removed;
                 }}
               />
             </TabsContent>
@@ -399,12 +415,15 @@ function useProviderSettings(provider: Provider): Settings {
 function ApiKeyCard({
   provider,
   onSaved,
+  onRemove,
 }: {
   provider: Provider;
   onSaved: (provider: Provider) => void;
+  onRemove: () => Promise<boolean>;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [pending, setPending] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -435,28 +454,46 @@ function ApiKeyCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Upstream API key</CardTitle>
+        <CardTitle>
+          {provider.kind === "kilocode" ? "Kilo Code connection" : "Upstream API key"}
+        </CardTitle>
         <CardDescription>
-          The credential the gateway sends to {KIND_LABELS[provider.kind].toLowerCase()} when it
-          calls this provider.
+          {provider.kind === "kilocode"
+            ? "Connect a Kilo Code account with a device code, or use an API key instead."
+            : `The credential the gateway sends to ${KIND_LABELS[provider.kind].toLowerCase()} when it calls this provider.`}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {provider.kind === "kilocode" ? (
+          <ConnectFlow provider={provider} onConnected={onSaved} />
+        ) : null}
+
         <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
           <KeyRoundIcon className="size-4 shrink-0 text-muted-foreground" />
           {provider.hasKey ? (
             <span>
-              A key is saved. It is sealed with AES-GCM and never returned by the API, so it cannot
-              be shown again.
+              {provider.authMode === "oauth" ? "A connection is saved." : "A key is saved."} The
+              credential is sealed with AES-GCM and never returned by the API, so it cannot be shown
+              again.
             </span>
           ) : (
             <span className="text-muted-foreground">
-              No key saved. Requests to this provider are sent without credentials.
+              {provider.kind === "kilocode"
+                ? "Not connected. Connect Kilo Code before calling this provider."
+                : "No key saved. Requests to this provider are sent without credentials."}
             </span>
           )}
         </div>
 
-        <form onSubmit={save} className="grid gap-3">
+        <form
+          onSubmit={save}
+          className={provider.kind === "kilocode" ? "grid gap-3 border-t pt-4" : "grid gap-3"}
+        >
+          {provider.kind === "kilocode" ? (
+            <p className="text-xs text-muted-foreground">
+              Saving a key replaces the Kilo Code connection.
+            </p>
+          ) : null}
           <div className="grid gap-2">
             <Label htmlFor="api-key-value">{provider.hasKey ? "Replace key" : "Add key"}</Label>
             <Input
@@ -476,8 +513,19 @@ function ApiKeyCard({
           {error === null ? null : <p className="text-sm text-destructive">{error}</p>}
 
           <div className="flex items-center gap-3">
-            <Button type="submit" size="sm" disabled={pending || apiKey.trim() === ""}>
-              {pending ? "Saving…" : provider.hasKey ? "Replace key" : "Save key"}
+            <Button
+              type="submit"
+              size="sm"
+              variant={provider.kind === "kilocode" ? "outline" : "default"}
+              disabled={pending || removing || apiKey.trim() === ""}
+            >
+              {pending
+                ? "Saving…"
+                : provider.kind === "kilocode" && provider.authMode === "oauth"
+                  ? "Use API key instead"
+                  : provider.hasKey
+                    ? "Replace key"
+                    : "Save key"}
             </Button>
             {saved ? <span className="text-xs text-muted-foreground">Saved.</span> : null}
           </div>
@@ -491,15 +539,21 @@ function ApiKeyCard({
             type="button"
             variant="destructive"
             size="sm"
-            disabled={pending}
+            disabled={pending || removing}
             onClick={() => {
               if (!window.confirm(`Remove ${provider.name} and all of its models?`)) return;
 
-              window.location.assign("/providers");
+              setRemoving(true);
+              setError(null);
+              void onRemove()
+                .then((removed) => {
+                  if (!removed) setError("The provider could not be removed.");
+                })
+                .finally(() => setRemoving(false));
             }}
           >
             <TrashIcon data-icon="inline-start" />
-            Remove provider
+            {removing ? "Removing…" : "Remove provider"}
           </Button>
         </div>
       </CardContent>
@@ -518,6 +572,8 @@ function ModelsCard({
 }) {
   const [upstreamModel, setUpstreamModel] = useState("");
   const [alias, setAlias] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshed, setRefreshed] = useState<ProviderModelRefresh | "error" | null>(null);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -536,11 +592,37 @@ function ModelsCard({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Models</CardTitle>
-        <CardDescription>
-          Alias is what clients send as <code>model</code>. Leave it empty to use the upstream name.
-        </CardDescription>
+      <CardHeader className="grid-cols-[1fr_auto] items-start">
+        <div className="grid gap-1">
+          <CardTitle>Models</CardTitle>
+          <CardDescription>
+            Alias is what clients send as <code>model</code>. Leave it empty to use the upstream
+            name.
+          </CardDescription>
+        </div>
+        {provider.kind === "kilocode" ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={refreshing}
+            onClick={() => {
+              setRefreshing(true);
+              setRefreshed(null);
+
+              void providerApi
+                .refreshModels(provider.id)
+                .then((result) => {
+                  setRefreshed(result);
+                  onChanged();
+                })
+                .catch(() => setRefreshed("error"))
+                .finally(() => setRefreshing(false));
+            }}
+          >
+            {refreshing ? "Refreshing…" : "Import catalog"}
+          </Button>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
         <form
@@ -582,6 +664,19 @@ function ModelsCard({
 
         {providers.error === null ? null : (
           <p className="text-sm text-destructive">{providers.error}</p>
+        )}
+        {refreshed === null ? null : (
+          <p className="text-xs text-muted-foreground">
+            {refreshed === "error"
+              ? "The catalog could not be read."
+              : refreshed.added === 0
+                ? `Nothing new to import${refreshed.skipped === 0 ? "." : ` (${refreshed.skipped} skipped).`}`
+                : `Imported ${refreshed.added} model${refreshed.added === 1 ? "" : "s"}${
+                    refreshed.skipped === 0
+                      ? "."
+                      : `; skipped ${refreshed.skipped} already present or whose alias is taken.`
+                  }`}
+          </p>
         )}
 
         {provider.models.length === 0 ? (

@@ -15,6 +15,9 @@ import { AuthResultSchema } from "../src/shared/auth";
 import {
   ProviderDetailSchema,
   ProviderListSchema,
+  ProviderModelRefreshSchema,
+  ProviderOAuthPollSchema,
+  ProviderOAuthStartSchema,
   ProviderSchema,
   providerPaths,
   type Provider,
@@ -87,11 +90,14 @@ const authPassword = "smoke-password-1";
 
 const upstream = startUpstream();
 const upstreamOrigin = `http://127.0.0.1:${upstream.port}`;
+const kilocode = startKilocode();
+const kilocodeOrigin = `http://127.0.0.1:${kilocode.port}`;
 
 let failures = 0;
 let cookie = "";
 let openaiProvider: ProviderSlot = { provider: null, modelId: "" };
 let claudeProvider: ProviderSlot = { provider: null, modelId: "" };
+const kiloProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -420,6 +426,153 @@ try {
     );
   });
 
+  await check("POST /api/providers creates a Kilo Code provider without a key", async () => {
+    kiloProvider.provider = await postJson(
+      providerPaths.list,
+      {
+        name: "Fake Kilo",
+        kind: "kilocode",
+        baseUrl: `${upstreamOrigin}/kilo`,
+      },
+      ProviderSchema,
+      201,
+    );
+
+    assert.equal(kiloProvider.provider.authMode, "api-key");
+    assert.equal(kiloProvider.provider.hasKey, false);
+  });
+
+  await check("POST /api/providers/:id/oauth/start returns a device code", async () => {
+    const start = await postJson(
+      providerPaths.oauthStart(kiloProvider.provider?.id ?? ""),
+      {},
+      ProviderOAuthStartSchema,
+      200,
+    );
+
+    assert.equal(start.userCode, "SMOK-CODE");
+    assert.match(start.verificationUrl, /device-auth/);
+    assert.equal(start.expiresInSeconds, 600);
+  });
+
+  await check("POST /api/providers/:id/oauth/poll waits, then stores the connection", async () => {
+    const id = kiloProvider.provider?.id ?? "";
+
+    const first = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(first.state, "pending");
+
+    const second = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(second.state, "connected");
+    assert.equal(second.authMode, "oauth");
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.equal(detail.provider.authMode, "oauth");
+    assert.equal(detail.provider.hasKey, true);
+    assert.equal(Object.hasOwn(detail.provider, "apiKey"), false);
+  });
+
+  await check("POST /api/providers/:id/oauth/poll needs a started login", async () => {
+    const response = await post(providerPaths.oauthPoll(kiloProvider.provider?.id ?? ""), {});
+
+    assert.equal(response.status, 400);
+  });
+
+  await check("OAuth and catalog routes reject API-key kinds", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    assert.equal((await post(providerPaths.oauthStart(id), {})).status, 400);
+    assert.equal((await post(providerPaths.refreshModels(id), {})).status, 400);
+  });
+
+  await check("POST /api/providers/:id/models/refresh imports the catalog once", async () => {
+    const id = kiloProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 4);
+    assert.equal(refresh.skipped, 1);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "anthropic/claude-sonnet-4",
+      "anthropic/claude-sonnet-4:free",
+      "kilo-auto/free",
+      "openai/gpt-5-codex",
+    ]);
+
+    const sonnet = detail.provider.models.find(
+      (model) => model.alias === "anthropic/claude-sonnet-4",
+    );
+
+    const free = detail.provider.models.find((model) => model.alias === "kilo-auto/free");
+    const auto = detail.provider.models.find((model) => model.alias === "openai/gpt-5-codex");
+
+    assert.equal(sonnet?.inputPricePerMtok, 3);
+    assert.equal(sonnet?.outputPricePerMtok, 15);
+    assert.equal(free?.inputPricePerMtok, 0);
+    assert.equal(auto?.inputPricePerMtok, null);
+
+    const again = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(again.added, 0);
+    assert.equal(again.skipped, 5);
+  });
+
+  await check("POST /v1/chat/completions streams Kilo Code with the connection", async () => {
+    const response = await fetch(new URL("/v1/chat/completions", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...bearer() },
+      body: JSON.stringify(chat("anthropic/claude-sonnet-4", true, "kilocode")),
+    });
+
+    assert.equal(response.status, 200);
+
+    const text = await response.text();
+
+    assert.match(text, /"content":"Hello"/);
+    assert.match(text, /"content":" from Kilo"/);
+    assert.match(text, /data: \[DONE\]/);
+  });
+
+  await check("POST /v1/chat/completions reads a non-streamed Kilo Code answer", async () => {
+    const response = await fetch(new URL("/v1/chat/completions", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...bearer() },
+      body: JSON.stringify(chat("openai/gpt-5-codex", false, "kilocode")),
+    });
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(
+      v.object({
+        choices: v.array(
+          v.object({ message: v.object({ content: v.string() }), finish_reason: v.string() }),
+        ),
+        usage: v.object({ prompt_tokens: v.number(), completion_tokens: v.number() }),
+      }),
+      await response.json(),
+    );
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Kilo");
+    assert.equal(body.choices[0]?.finish_reason, "stop");
+    assert.equal(body.usage.prompt_tokens, 3);
+    assert.equal(body.usage.completion_tokens, 4);
+  });
+
   await check("GET /api/providers/:id hides another account's provider", async () => {
     const response = await fetch(
       new URL(`${providerPaths.detail("00000000-0000-0000-0000-000000000000")}?days=30`, origin),
@@ -493,6 +646,7 @@ try {
 } finally {
   await second.stop();
   await upstream.stop(true);
+  await kilocode.stop(true);
   rmSync(workDir, { recursive: true, force: true });
 }
 
@@ -535,6 +689,8 @@ async function boot(port = 0): Promise<Booted> {
       BANDAR_DB: dbPath,
       BANDAR_DUCKDB: duckPath,
       BANDAR_AUTH_SECRET: AUTH_SECRET,
+      BANDAR_KILOCODE_API: kilocodeOrigin,
+      BANDAR_KILOCODE_MODELS_URL: `${kilocodeOrigin}/api/gateway/models`,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -542,7 +698,7 @@ async function boot(port = 0): Promise<Booted> {
 
   const decoder = new TextDecoder();
   let log = "";
-  const stderr = new Response(proc.stderr).text().catch(() => "");
+  const stderr = Bun.readableStreamToText(proc.stderr).catch(() => "");
 
   void (async () => {
     const reader = proc.stdout.getReader();
@@ -595,7 +751,10 @@ async function postJson<T>(
   status: number,
 ): Promise<T> {
   const response = await post(path, body);
-  assert.equal(response.status, status);
+
+  if (response.status !== status) {
+    throw new Error(`POST ${path} returned ${response.status}: ${await response.clone().text()}`);
+  }
 
   return v.parse(schema, await response.json());
 }
@@ -864,7 +1023,92 @@ function startUpstream() {
         ]);
       }
 
+      if (url.pathname === "/kilo/chat/completions") {
+        if (request.headers.get("authorization") !== "Bearer kilo-device-token") {
+          return jsonError(401, "bad kilo connection");
+        }
+
+        if (request.headers.get("x-kilocode-organizationid") !== "org-smoke") {
+          return jsonError(401, "missing kilo organization");
+        }
+
+        if (!stream) {
+          return Response.json({
+            choices: [
+              {
+                message: { role: "assistant", content: "Hello from Kilo" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 3, completion_tokens: 4 },
+          });
+        }
+
+        return sse([
+          { choices: [{ delta: { content: "Hello" } }] },
+          {
+            choices: [{ delta: { content: " from Kilo" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 3, completion_tokens: 4 },
+          },
+          "[DONE]",
+        ]);
+      }
+
       return jsonError(404, `no fake upstream for ${url.pathname}`);
+    },
+  });
+}
+
+function startKilocode() {
+  let polls = 0;
+
+  return Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url);
+
+      if (url.pathname === "/api/device-auth/codes" && request.method === "POST") {
+        return Response.json({
+          code: "device-code-smoke",
+          user_code: "SMOK-CODE",
+          verificationUrl: "https://app.kilo.ai/device-auth?code=SMOK-CODE",
+          expiresIn: 600,
+        });
+      }
+
+      if (url.pathname === "/api/device-auth/codes/device-code-smoke") {
+        polls += 1;
+
+        if (polls === 1) return Response.json({ status: "pending" }, { status: 202 });
+
+        return Response.json({ status: "approved", token: "kilo-device-token" });
+      }
+
+      if (url.pathname === "/api/profile") {
+        return Response.json({ organizations: [{ id: "org-smoke" }] });
+      }
+
+      if (url.pathname === "/api/gateway/models") {
+        return Response.json({
+          data: [
+            {
+              id: "anthropic/claude-sonnet-4",
+              pricing: { prompt: "0.000003", completion: "0.000015" },
+            },
+            {
+              id: "anthropic/claude-sonnet-4:free",
+              pricing: { prompt: "0", completion: "0" },
+            },
+            { id: "kilo-auto/free", pricing: { prompt: "0", completion: "0" } },
+            { id: "openai/gpt-5-codex", pricing: { prompt: "-1", completion: "-1" } },
+            // `fast` is already an alias on the OpenAI provider, so this one is skipped.
+            { id: "fast", pricing: { prompt: "0.000001", completion: "0.000002" } },
+          ],
+        });
+      }
+
+      return jsonError(404, `no fake kilo route for ${url.pathname}`);
     },
   });
 }

@@ -30,6 +30,9 @@ import {
   ProviderInputSchema,
   ProviderListSchema,
   ProviderModelInputSchema,
+  ProviderModelRefreshSchema,
+  ProviderOAuthPollSchema,
+  ProviderOAuthStartSchema,
   ProviderSchema,
   providerPaths,
   type Provider,
@@ -37,6 +40,9 @@ import {
   type ProviderInput,
   type ProviderList,
   type ProviderModelInput,
+  type ProviderModelRefresh,
+  type ProviderOAuthPoll,
+  type ProviderOAuthStart,
 } from "../shared/providers";
 
 export class ApiError extends Error {
@@ -75,6 +81,12 @@ export const providerApi = {
     }),
   removeModel: (id: string, modelId: string): Promise<Provider> =>
     request(providerPaths.model(id, modelId), ProviderSchema, { method: "DELETE" }),
+  refreshModels: (id: string): Promise<ProviderModelRefresh> =>
+    request(providerPaths.refreshModels(id), ProviderModelRefreshSchema, { method: "POST" }),
+  startOauth: (id: string): Promise<ProviderOAuthStart> =>
+    request(providerPaths.oauthStart(id), ProviderOAuthStartSchema, { method: "POST" }),
+  pollOauth: (id: string): Promise<ProviderOAuthPoll> =>
+    request(providerPaths.oauthPoll(id), ProviderOAuthPollSchema, { method: "POST" }),
 };
 
 export const analyticsApi = {

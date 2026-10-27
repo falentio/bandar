@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,16 +22,19 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
   google: "https://generativelanguage.googleapis.com/v1beta",
+  kilocode: "https://api.kilo.ai/api/openrouter",
 };
 
 const KIND_LABELS: Record<ProviderKind, string> = {
   openai: "OpenAI compatible",
   anthropic: "Anthropic compatible",
   google: "Google GenAI compatible",
+  kilocode: "Kilo Code",
 };
 
 export function ProvidersPanel() {
   const providers = useProviders();
+  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
 
   return (
@@ -85,6 +88,15 @@ export function ProvidersPanel() {
         open={creating}
         providers={providers}
         onClose={() => setCreating(false)}
+        onCreated={(provider) => {
+          if (provider.kind !== "kilocode") return;
+
+          void navigate({
+            to: "/providers/$providerId",
+            params: { providerId: provider.id },
+            search: { tab: "api-key" },
+          });
+        }}
       />
     </div>
   );
@@ -109,7 +121,7 @@ function ProviderRow({ provider }: { provider: Provider }) {
             <span className="truncate text-sm font-medium">{provider.name}</span>
             {provider.hasKey ? null : (
               <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[0.7rem] text-destructive">
-                no key
+                {provider.kind === "kilocode" ? "not connected" : "no key"}
               </span>
             )}
           </span>
@@ -129,10 +141,12 @@ function CreateProviderDialog({
   open,
   providers,
   onClose,
+  onCreated,
 }: {
   open: boolean;
   providers: Providers;
   onClose: () => void;
+  onCreated: (provider: Provider) => void;
 }) {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ProviderKind>("openai");
@@ -157,9 +171,10 @@ function CreateProviderDialog({
       apiKey: apiKey.trim(),
     });
 
-    if (created) {
+    if (created !== null) {
       reset();
       onClose();
+      onCreated(created);
     }
   };
 
@@ -183,7 +198,7 @@ function CreateProviderDialog({
         <form onSubmit={submit} className="grid gap-4">
           <div className="grid gap-2">
             <Label>Kind</Label>
-            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Provider kind">
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Provider kind">
               {PROVIDER_KINDS.map((value) => (
                 <button
                   key={value}
@@ -236,21 +251,28 @@ function CreateProviderDialog({
             />
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="provider-key">API key</Label>
-            <Input
-              id="provider-key"
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Optional for local upstreams"
-              autoComplete="off"
-              disabled={providers.pending}
-            />
-            <p className="text-xs text-muted-foreground">
-              Sealed with AES-GCM before it reaches SQLite. It is never returned by the API.
+          {kind === "kilocode" ? (
+            <p className="rounded-lg border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+              Kilo Code connects with a device code. After adding it, you will get a code to approve
+              at kilocode.ai.
             </p>
-          </div>
+          ) : (
+            <div className="grid gap-2">
+              <Label htmlFor="provider-key">API key</Label>
+              <Input
+                id="provider-key"
+                type="password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder="Optional for local upstreams"
+                autoComplete="off"
+                disabled={providers.pending}
+              />
+              <p className="text-xs text-muted-foreground">
+                Sealed with AES-GCM before it reaches SQLite. It is never returned by the API.
+              </p>
+            </div>
+          )}
 
           {providers.error === null ? null : (
             <p className="text-sm text-destructive">{providers.error}</p>

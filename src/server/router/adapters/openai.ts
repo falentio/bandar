@@ -6,6 +6,7 @@ import {
   protocolError,
   requireBody,
   requireOk,
+  secretOf,
   sseData,
 } from "./http";
 import type {
@@ -62,7 +63,7 @@ export const openai: ProviderAdapter = {
   async chat(input: AdapterInput): Promise<CanonicalResult> {
     const response = await postJson({
       url: joinUrl(input.target.baseUrl, "/chat/completions"),
-      headers: apiKeyHeader("authorization", authorization(input.target.apiKey)),
+      headers: apiKeyHeader("authorization", authorization(secretOf(input.target.credential))),
       body: JSON.stringify(bodyFor(input, false)),
       signal: input.signal,
     });
@@ -87,7 +88,7 @@ export const openai: ProviderAdapter = {
   async *stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void> {
     const response = await postJson({
       url: joinUrl(input.target.baseUrl, "/chat/completions"),
-      headers: apiKeyHeader("authorization", authorization(input.target.apiKey)),
+      headers: apiKeyHeader("authorization", authorization(secretOf(input.target.credential))),
       body: JSON.stringify(bodyFor(input, true)),
       signal: input.signal,
     });

@@ -129,6 +129,7 @@ function ProviderDetailRoute() {
 
         void navigate({ search: { tab: next }, replace: true });
       }}
+      onRemoved={() => void navigate({ to: "/providers" })}
     />
   );
 }

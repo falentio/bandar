@@ -13,3 +13,5 @@ src/server/generated/
 vendor/
 *.duckdb
 *.duckdb.wal
+
+.audit/

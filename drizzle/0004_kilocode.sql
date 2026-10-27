@@ -1,0 +1,1 @@
+ALTER TABLE `providers` ADD `auth_mode` text DEFAULT 'api-key' NOT NULL;

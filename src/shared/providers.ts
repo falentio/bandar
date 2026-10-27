@@ -1,9 +1,15 @@
 import * as v from "valibot";
 import { ProviderUsageSchema } from "./analytics";
 
-export const PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
+export const PROVIDER_KINDS = ["openai", "anthropic", "google", "kilocode"] as const;
+
+export const OAUTH_PROVIDER_KINDS = ["kilocode"] as const;
+
+export const PROVIDER_AUTH_MODES = ["api-key", "oauth"] as const;
 
 export const ProviderKindSchema = v.picklist(PROVIDER_KINDS);
+
+export const ProviderAuthModeSchema = v.picklist(PROVIDER_AUTH_MODES);
 
 export const ProviderModelSchema = v.object({
   id: v.string(),
@@ -18,6 +24,7 @@ export const ProviderSchema = v.object({
   name: v.string(),
   kind: ProviderKindSchema,
   baseUrl: v.string(),
+  authMode: ProviderAuthModeSchema,
   hasKey: v.boolean(),
   models: v.array(ProviderModelSchema),
   createdAt: v.string(),
@@ -48,6 +55,22 @@ export const ProviderInputSchema = v.object({
 
 export const ProviderParamsSchema = v.object({ id: v.string() });
 
+export const ProviderOAuthStartSchema = v.object({
+  userCode: v.string(),
+  verificationUrl: v.string(),
+  expiresInSeconds: v.number(),
+});
+
+export const ProviderOAuthPollSchema = v.object({
+  state: v.picklist(["pending", "connected"]),
+  authMode: v.optional(ProviderAuthModeSchema),
+});
+
+export const ProviderModelRefreshSchema = v.object({
+  added: v.number(),
+  skipped: v.number(),
+});
+
 export const ProviderModelParamsSchema = v.object({ id: v.string(), modelId: v.string() });
 
 export const providerPaths = {
@@ -55,11 +78,24 @@ export const providerPaths = {
   detail: (id: string) => `/api/providers/${id}`,
   update: (id: string) => `/api/providers/${id}`,
   remove: (id: string) => `/api/providers/${id}`,
+  oauthStart: (id: string) => `/api/providers/${id}/oauth/start`,
+  oauthPoll: (id: string) => `/api/providers/${id}/oauth/poll`,
   models: (id: string) => `/api/providers/${id}/models`,
+  refreshModels: (id: string) => `/api/providers/${id}/models/refresh`,
   model: (id: string, modelId: string) => `/api/providers/${id}/models/${modelId}`,
 };
 
 export type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
+
+export type OAuthProviderKind = (typeof OAUTH_PROVIDER_KINDS)[number];
+
+export type ProviderAuthMode = v.InferOutput<typeof ProviderAuthModeSchema>;
+
+export type ProviderOAuthStart = v.InferOutput<typeof ProviderOAuthStartSchema>;
+
+export type ProviderOAuthPoll = v.InferOutput<typeof ProviderOAuthPollSchema>;
+
+export type ProviderModelRefresh = v.InferOutput<typeof ProviderModelRefreshSchema>;
 
 export type ProviderModel = v.InferOutput<typeof ProviderModelSchema>;
 

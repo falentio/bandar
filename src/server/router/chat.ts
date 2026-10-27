@@ -58,7 +58,7 @@ export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Respons
     providerId: resolved.providerId,
     kind: resolved.kind,
     baseUrl: resolved.baseUrl,
-    apiKey: resolved.apiKey,
+    credential: resolved.credential,
     upstreamModel: resolved.upstreamModel,
   };
 

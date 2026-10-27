@@ -1,5 +1,6 @@
 import type { Credential } from "../../credential";
-import { chatAdapter, type WireHeaders } from "../openai/compatible";
+import type { WireHeaders } from "../http";
+import { chatAdapter } from "../openai/compatible";
 import { UpstreamError } from "../types";
 
 export const kilocodeAdapter = chatAdapter({

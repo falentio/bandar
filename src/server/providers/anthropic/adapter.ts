@@ -1,13 +1,13 @@
 import * as v from "valibot";
+import type { ProviderKind } from "../../../shared/providers";
 import {
-  apiKeyHeader,
   joinUrl,
   postJson,
   protocolError,
   requireBody,
   requireOk,
-  secretOf,
   sseData,
+  type HeaderFactory,
 } from "../http";
 import {
   UpstreamError,
@@ -57,97 +57,110 @@ type ChatBody = {
   stop_sequences?: string[];
 };
 
-export const anthropicAdapter: ProviderAdapter<"anthropic"> = {
-  kind: "anthropic",
-
-  async chat(input: AdapterInput): Promise<CanonicalResult> {
-    const response = await postJson({
-      url: joinUrl(input.target.baseUrl, "/messages"),
-      headers: headersFor(secretOf(input.target.credential)),
-      body: JSON.stringify(bodyFor(input, false)),
-      signal: input.signal,
-    });
-
-    await requireOk(response);
-
-    const parsed = v.safeParse(ResponseSchema, await response.json());
-
-    if (!parsed.success) throw protocolError("anthropic returned an unexpected response shape");
-
-    const text = parsed.output.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text ?? "")
-      .join("");
-
-    return {
-      text,
-      finishReason: finishReason(parsed.output.stop_reason ?? null),
-      usage: usageOf(parsed.output.usage),
-    };
-  },
-
-  async *stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void> {
-    const response = await postJson({
-      url: joinUrl(input.target.baseUrl, "/messages"),
-      headers: headersFor(secretOf(input.target.credential)),
-      body: JSON.stringify(bodyFor(input, true)),
-      signal: input.signal,
-    });
-
-    await requireOk(response);
-
-    let inputTokens: number | null = null;
-    let outputTokens: number | null = null;
-    let reason: string | null = null;
-
-    for await (const data of sseData(requireBody(response), input.signal)) {
-      let parsed: v.InferOutput<typeof StreamSchema>;
-
-      try {
-        const result = v.safeParse(StreamSchema, JSON.parse(data));
-
-        if (!result.success) continue;
-
-        parsed = result.output;
-      } catch {
-        continue;
-      }
-
-      if (parsed.type === "error") {
-        throw protocolError(parsed.error?.message ?? "anthropic stream returned an error");
-      }
-
-      const startUsage = parsed.message?.usage;
-
-      if (startUsage !== undefined && startUsage !== null) {
-        inputTokens = startUsage.input_tokens ?? inputTokens;
-        outputTokens = startUsage.output_tokens ?? outputTokens;
-      }
-
-      if (parsed.type === "content_block_delta" && parsed.delta !== undefined) {
-        if (parsed.delta.type === "text_delta" && parsed.delta.text) {
-          yield { type: "text", text: parsed.delta.text };
-        }
-      }
-
-      if (parsed.type === "message_delta") {
-        if (parsed.delta?.stop_reason !== undefined && parsed.delta.stop_reason !== null) {
-          reason = finishReason(parsed.delta.stop_reason);
-        }
-
-        if (parsed.usage !== undefined && parsed.usage !== null) {
-          inputTokens = parsed.usage.input_tokens ?? inputTokens;
-          outputTokens = parsed.usage.output_tokens ?? outputTokens;
-        }
-      }
-
-      if (parsed.type === "message_stop") break;
-    }
-
-    yield { type: "usage", usage: { inputTokens, outputTokens } };
-    yield { type: "finish", reason };
-  },
+export type AnthropicOptions<K extends ProviderKind> = {
+  readonly kind: K;
+  readonly label: string;
+  /** Auth only; the Messages wire adds `anthropic-version` itself. */
+  readonly headers: HeaderFactory;
 };
+
+export function anthropicAdapter<K extends ProviderKind>({
+  kind,
+  label,
+  headers: headersOf,
+}: AnthropicOptions<K>): ProviderAdapter<K> {
+  return {
+    kind,
+
+    async chat(input: AdapterInput): Promise<CanonicalResult> {
+      const response = await postJson({
+        url: joinUrl(input.target.baseUrl, "/messages"),
+        headers: { "anthropic-version": "2023-06-01", ...headersOf(input.target.credential) },
+        body: JSON.stringify(bodyFor(input, false)),
+        signal: input.signal,
+      });
+
+      await requireOk(response);
+
+      const parsed = v.safeParse(ResponseSchema, await response.json());
+
+      if (!parsed.success) throw protocolError(`${label} returned an unexpected response shape`);
+
+      const text = parsed.output.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text ?? "")
+        .join("");
+
+      return {
+        text,
+        finishReason: finishReason(parsed.output.stop_reason ?? null),
+        usage: usageOf(parsed.output.usage),
+      };
+    },
+
+    async *stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void> {
+      const response = await postJson({
+        url: joinUrl(input.target.baseUrl, "/messages"),
+        headers: { "anthropic-version": "2023-06-01", ...headersOf(input.target.credential) },
+        body: JSON.stringify(bodyFor(input, true)),
+        signal: input.signal,
+      });
+
+      await requireOk(response);
+
+      let inputTokens: number | null = null;
+      let outputTokens: number | null = null;
+      let reason: string | null = null;
+
+      for await (const data of sseData(requireBody(response), input.signal)) {
+        let parsed: v.InferOutput<typeof StreamSchema>;
+
+        try {
+          const result = v.safeParse(StreamSchema, JSON.parse(data));
+
+          if (!result.success) continue;
+
+          parsed = result.output;
+        } catch {
+          continue;
+        }
+
+        if (parsed.type === "error") {
+          throw protocolError(parsed.error?.message ?? `${label} stream returned an error`);
+        }
+
+        const startUsage = parsed.message?.usage;
+
+        if (startUsage !== undefined && startUsage !== null) {
+          inputTokens = startUsage.input_tokens ?? inputTokens;
+          outputTokens = startUsage.output_tokens ?? outputTokens;
+        }
+
+        if (parsed.type === "content_block_delta" && parsed.delta !== undefined) {
+          if (parsed.delta.type === "text_delta" && parsed.delta.text) {
+            yield { type: "text", text: parsed.delta.text };
+          }
+        }
+
+        if (parsed.type === "message_delta") {
+          if (parsed.delta?.stop_reason !== undefined && parsed.delta.stop_reason !== null) {
+            reason = finishReason(parsed.delta.stop_reason);
+          }
+
+          if (parsed.usage !== undefined && parsed.usage !== null) {
+            inputTokens = parsed.usage.input_tokens ?? inputTokens;
+            outputTokens = parsed.usage.output_tokens ?? outputTokens;
+          }
+        }
+
+        if (parsed.type === "message_stop") break;
+      }
+
+      yield { type: "usage", usage: { inputTokens, outputTokens } };
+      yield { type: "finish", reason };
+    },
+  };
+}
 
 function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
   const conversation = conversationOf(input.request.messages);
@@ -198,13 +211,6 @@ function conversationOf(messages: CanonicalRequest["messages"]): MessageBody[] {
   }
 
   return conversation;
-}
-
-function headersFor(apiKey: string) {
-  return {
-    "anthropic-version": "2023-06-01",
-    ...apiKeyHeader("x-api-key", apiKey),
-  };
 }
 
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {

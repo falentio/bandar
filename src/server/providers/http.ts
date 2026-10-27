@@ -124,8 +124,24 @@ export function secretOf(credential: Credential): string {
   return credential.authMode === "api-key" ? credential.apiKey : credential.accessToken;
 }
 
-export function apiKeyHeader(name: string, apiKey: string): Record<string, string> {
-  return apiKey === "" ? {} : { [name]: apiKey };
+export type WireHeaders = Readonly<Record<string, string>>;
+
+/** Auth headers for one credential. A wire adds its own protocol headers. */
+export type HeaderFactory = (credential: Credential) => WireHeaders;
+
+export function bearerHeaders(credential: Credential): WireHeaders {
+  const secret = secretOf(credential);
+
+  return secret === "" ? {} : { authorization: `Bearer ${secret}` };
+}
+
+/** `authorization` for a bearer gateway, `x-api-key`/`x-goog-api-key` for a product API. */
+export function apiKeyHeaders(name: string): HeaderFactory {
+  return (credential) => {
+    const secret = secretOf(credential);
+
+    return secret === "" ? {} : { [name]: secret };
+  };
 }
 
 async function errorMessage(response: Response): Promise<string> {

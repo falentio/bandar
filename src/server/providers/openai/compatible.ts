@@ -1,14 +1,14 @@
 import * as v from "valibot";
 import type { ProviderKind } from "../../../shared/providers";
-import type { Credential } from "../../credential";
 import {
+  bearerHeaders,
   joinUrl,
   postJson,
   protocolError,
   requireBody,
   requireOk,
-  secretOf,
   sseData,
+  type HeaderFactory,
 } from "../http";
 import type {
   AdapterInput,
@@ -58,12 +58,10 @@ type ChatBody = {
   stop?: readonly string[];
 };
 
-export type WireHeaders = Readonly<Record<string, string>>;
-
 export type CompatibleOptions<K extends ProviderKind> = {
   readonly kind: K;
   readonly label: string;
-  readonly headers: (credential: Credential) => WireHeaders;
+  readonly headers: HeaderFactory;
 };
 
 export function chatAdapter<K extends ProviderKind>({
@@ -154,12 +152,6 @@ export function bearerAdapter<K extends ProviderKind>(
   label: string = kind,
 ): ProviderAdapter<K> {
   return chatAdapter({ kind, label, headers: bearerHeaders });
-}
-
-function bearerHeaders(credential: Credential): WireHeaders {
-  const secret = secretOf(credential);
-
-  return secret === "" ? {} : { authorization: `Bearer ${secret}` };
 }
 
 function bodyFor(input: AdapterInput, stream: boolean): ChatBody {

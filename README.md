@@ -33,11 +33,12 @@ BANDAR_AUTH_URL=http://localhost:5173 bun run dev   # client :5173, API :3000
 
 Open <http://localhost:5173>, create an account, then:
 
-1. Open **Providers** and add a provider. Pick its kind, paste the base URL and
-   upstream key, and list models one per line:
-   `fast=gpt-4o-mini` routes the alias `fast` to upstream `gpt-4o-mini`.
-2. Open **API keys** and mint a key. The plaintext appears once.
-3. Call the gateway:
+1. Open **Providers** and click **Add provider**. Pick the kind, name it, and
+   paste the base URL and upstream key.
+2. Click the new provider and add models: upstream model `gpt-4o-mini` with alias
+   `fast` makes `fast` the name clients send.
+3. Open **API keys** and mint a key. The plaintext appears once.
+4. Call the gateway:
 
 ```sh
 curl http://localhost:3000/v1/chat/completions \
@@ -249,12 +250,13 @@ bandar/
 ├── src/client/
 │   ├── router.tsx                  # /overview, /providers, /requests, /api-keys
 │   ├── views.tsx                   # navigation registry
-│   ├── use-providers.ts            # provider list/create/remove state
+│   ├── use-providers.ts            # provider and model mutations
 │   ├── use-analytics.ts            # overview window state
 │   ├── use-requests.ts             # recent request state
 │   └── components/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
-│       ├── providers-panel.tsx     # provider form and list
+│       ├── providers-panel.tsx     # provider list, add dialog, models dialog
+│       ├── provider-logo.tsx       # mark per provider kind
 │       ├── requests-panel.tsx      # recent attempts
 │       ├── api-keys-panel.tsx      # mint, show once, revoke, curl example
 │       ├── app-shell.tsx           # sidebar shell and breadcrumb
@@ -266,20 +268,24 @@ bandar/
 
 ## API surface
 
-| Route                           | Auth                   | Purpose                                             |
-| ------------------------------- | ---------------------- | --------------------------------------------------- |
-| `POST /v1/chat/completions`     | Gateway key            | OpenAI-compatible chat, streaming or not.           |
-| `GET /v1/models`                | Gateway key            | Aliases for the caller.                             |
-| `GET/POST /api/providers`       | Session or `x-api-key` | List or create providers.                           |
-| `PUT/DELETE /api/providers/:id` | Session or `x-api-key` | Replace or remove a provider.                       |
-| `GET /api/analytics?days=30`    | Session or `x-api-key` | Window summary, daily series, model breakdown.      |
-| `GET /api/requests?limit=50`    | Session or `x-api-key` | Recent attempts.                                    |
-| `GET /api/health`               | none                   | Both current migration tags.                        |
-| `/api/auth/*`                   | better-auth            | Sign-up, sign-in, sessions, key create/list/delete. |
+| Route                                       | Auth                   | Purpose                                             |
+| ------------------------------------------- | ---------------------- | --------------------------------------------------- |
+| `POST /v1/chat/completions`                 | Gateway key            | OpenAI-compatible chat, streaming or not.           |
+| `GET /v1/models`                            | Gateway key            | Aliases for the caller.                             |
+| `GET/POST /api/providers`                   | Session or `x-api-key` | List providers, or create one without models.       |
+| `PUT/DELETE /api/providers/:id`             | Session or `x-api-key` | Replace a provider, or remove it with its models.   |
+| `POST /api/providers/:id/models`            | Session or `x-api-key` | Add one model alias; returns the provider.          |
+| `DELETE /api/providers/:id/models/:modelId` | Session or `x-api-key` | Remove a model alias; returns the provider.         |
+| `GET /api/analytics?days=30`                | Session or `x-api-key` | Window summary, daily series, model breakdown.      |
+| `GET /api/requests?limit=50`                | Session or `x-api-key` | Recent attempts.                                    |
+| `GET /api/health`                           | none                   | Both current migration tags.                        |
+| `/api/auth/*`                               | better-auth            | Sign-up, sign-in, sessions, key create/list/delete. |
 
-`PUT /api/providers/:id` replaces the model list and leaves the key unchanged
-when `apiKey` is empty. Model prices are accepted by the API
-(`inputPricePerMtok`, `outputPricePerMtok`) but are not in the form yet.
+A provider is created empty and grows models one at a time, so a new upstream is
+reachable before it has any alias. `PUT /api/providers/:id` replaces name, kind,
+and base URL, and leaves the key unchanged when `apiKey` is empty. Model prices
+are accepted by the model endpoints (`inputPricePerMtok`,
+`outputPricePerMtok`) but are not in the form yet.
 
 ## Security notes
 

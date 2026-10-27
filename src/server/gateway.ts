@@ -1,4 +1,4 @@
-import { type AnyElysia, Elysia } from "elysia";
+import { Elysia } from "elysia";
 import * as v from "valibot";
 import { GatewayRequestSchema, type ModelList } from "../shared/chat";
 import type { Auth, VerifiedKey } from "./auth";
@@ -11,7 +11,7 @@ export type GatewayDeps = ChatDeps & {
   readonly auth: Auth;
 };
 
-export function createGateway(deps: GatewayDeps): AnyElysia {
+export function createGateway(deps: GatewayDeps) {
   return new Elysia({ prefix: "/v1" })
     .onError(({ code, error, path }) => {
       if (code === "NOT_FOUND") return openAiError(404, `no route for ${path}`, "not_found");

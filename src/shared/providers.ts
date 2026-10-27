@@ -38,15 +38,18 @@ export const ProviderInputSchema = v.object({
   kind: ProviderKindSchema,
   baseUrl: v.pipe(v.string(), v.trim(), v.url()),
   apiKey: v.optional(v.pipe(v.string(), v.maxLength(500)), ""),
-  models: v.pipe(v.array(ProviderModelInputSchema), v.minLength(1)),
 });
 
 export const ProviderParamsSchema = v.object({ id: v.string() });
+
+export const ProviderModelParamsSchema = v.object({ id: v.string(), modelId: v.string() });
 
 export const providerPaths = {
   list: "/api/providers",
   update: (id: string) => `/api/providers/${id}`,
   remove: (id: string) => `/api/providers/${id}`,
+  models: (id: string) => `/api/providers/${id}/models`,
+  model: (id: string, modelId: string) => `/api/providers/${id}/models/${modelId}`,
 };
 
 export type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
@@ -60,3 +63,5 @@ export type ProviderList = v.InferOutput<typeof ProviderListSchema>;
 export type ProviderInput = v.InferOutput<typeof ProviderInputSchema>;
 
 export type ProviderModelInput = v.InferOutput<typeof ProviderModelInputSchema>;
+
+export type ProviderModelParams = v.InferOutput<typeof ProviderModelParamsSchema>;

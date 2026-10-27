@@ -34,6 +34,11 @@ export function createApp(deps: AppDeps): App {
 
   const gateway = createGateway({ auth: deps.auth, duck: deps.duck, providers });
 
+  // Both plugins must be compiled before the first request. Elysia rebuilds the router of a
+  // served plugin when another root plugin is created, and that rebuild drops late routes.
+  api.compile();
+  gateway.compile();
+
   return {
     handle: async (request) => {
       const { pathname } = new URL(request.url);

@@ -28,11 +28,13 @@ import {
 import {
   ProviderInputSchema,
   ProviderListSchema,
+  ProviderModelInputSchema,
   ProviderSchema,
   providerPaths,
   type Provider,
   type ProviderInput,
   type ProviderList,
+  type ProviderModelInput,
 } from "../shared/providers";
 
 export class ApiError extends Error {
@@ -57,6 +59,13 @@ export const providerApi = {
   remove: async (id: string): Promise<void> => {
     await send(providerPaths.remove(id), { method: "DELETE" });
   },
+  addModel: (id: string, input: ProviderModelInput): Promise<Provider> =>
+    request(providerPaths.models(id), ProviderSchema, {
+      method: "POST",
+      body: JSON.stringify(v.parse(ProviderModelInputSchema, input)),
+    }),
+  removeModel: (id: string, modelId: string): Promise<Provider> =>
+    request(providerPaths.model(id, modelId), ProviderSchema, { method: "DELETE" }),
 };
 
 export const analyticsApi = {

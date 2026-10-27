@@ -135,8 +135,9 @@ not measure time, and non-streaming requests have no TTFT.
 5. Run `bun run check && bun run test && bun run build && bun run smoke`.
 
 No database migration is needed: `providers.kind` is text and its TypeScript
-type comes from `ProviderKind`. The dashboard's kind picker reads
-`PROVIDER_KINDS`, so the new kind appears without another list to edit.
+type comes from `ProviderKind`. The dashboard's kind picker and the provider
+logo table read `PROVIDER_KINDS`, so a new kind appears in both once it has a
+path in `./src/client/components/provider-logo.tsx`.
 
 ## Contract tests
 

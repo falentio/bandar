@@ -1,17 +1,24 @@
-import { type AnyElysia, Elysia } from "elysia";
+import { Elysia } from "elysia";
 import * as v from "valibot";
 import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
-import { ProviderInputSchema, ProviderParamsSchema } from "../shared/providers";
+import {
+  ProviderInputSchema,
+  ProviderModelInputSchema,
+  ProviderModelParamsSchema,
+  ProviderParamsSchema,
+} from "../shared/providers";
 import { readAnalytics, readRequests } from "./analytics";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
 import {
+  addProviderModel,
   createProvider,
   listProviders,
   removeProvider,
+  removeProviderModel,
   updateProvider,
   type ProviderDeps,
 } from "./providers";
@@ -41,8 +48,8 @@ const RequestsQuerySchema = v.object({
   ),
 });
 
-export function createApi(deps: ApiDeps): AnyElysia {
-  return new Elysia({ prefix: "/api" })
+export function createApi(deps: ApiDeps) {
+  const app = new Elysia({ prefix: "/api" })
     .onError(({ code, error, path, set }) => {
       if (error instanceof InputError) {
         set.status = 422;
@@ -88,7 +95,7 @@ export function createApi(deps: ApiDeps): AnyElysia {
         if (error instanceof Error && isUniqueViolation(error)) {
           set.status = 409;
 
-          return failure("conflict", "a provider name or model alias already exists");
+          return failure("conflict", "a provider with that name already exists");
         }
 
         throw error;
@@ -117,11 +124,58 @@ export function createApi(deps: ApiDeps): AnyElysia {
         if (error instanceof Error && isUniqueViolation(error)) {
           set.status = 409;
 
-          return failure("conflict", "a model alias already exists");
+          return failure("conflict", "a provider with that name already exists");
         }
 
         throw error;
       }
+    })
+    .post("/providers/:id/models", async ({ body, params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(ProviderModelInputSchema, body as ParseableInput);
+
+      try {
+        const provider = await addProviderModel(deps.providers, caller.userId, id, input);
+
+        if (provider === null) {
+          set.status = 404;
+
+          return failure("not_found", `provider ${id} not found`);
+        }
+
+        set.status = 201;
+
+        return provider;
+      } catch (error) {
+        if (error instanceof Error && isUniqueViolation(error)) {
+          set.status = 409;
+
+          return failure("conflict", `the alias ${input.alias ?? input.upstreamModel} is taken`);
+        }
+
+        throw error;
+      }
+    })
+    .delete("/providers/:id/models/:modelId", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id, modelId } = parseInput(ProviderModelParamsSchema, params);
+      const provider = await removeProviderModel(deps.providers, caller.userId, id, modelId);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      return provider;
     })
     .delete("/providers/:id", async ({ params, request, set }) => {
       const caller = await authenticate(deps.auth, request);
@@ -157,6 +211,8 @@ export function createApi(deps: ApiDeps): AnyElysia {
 
       return v.parse(RequestListSchema, readRequests(deps.duck, { userId: caller.userId, limit }));
     });
+
+  return app;
 }
 
 function health(

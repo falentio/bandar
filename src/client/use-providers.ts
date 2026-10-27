@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Provider, ProviderInput } from "../shared/providers";
+import type { Provider, ProviderInput, ProviderModelInput } from "../shared/providers";
 import { providerApi } from "./api";
 import { describeError, isError } from "./errors";
 
@@ -12,6 +12,8 @@ export type Providers = {
   readonly pending: boolean;
   readonly create: (input: ProviderInput) => Promise<boolean>;
   readonly remove: (id: string) => Promise<void>;
+  readonly addModel: (id: string, input: ProviderModelInput) => Promise<boolean>;
+  readonly removeModel: (id: string, modelId: string) => Promise<void>;
 };
 
 export function useProviders(): Providers {
@@ -19,6 +21,12 @@ export function useProviders(): Providers {
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  const replace = (provider: Provider): void => {
+    setProviders((current) =>
+      current.map((entry) => (entry.id === provider.id ? provider : entry)),
+    );
+  };
 
   useEffect(() => {
     let live = true;
@@ -83,5 +91,35 @@ export function useProviders(): Providers {
     }
   }, []);
 
-  return { status, providers, error, pending, create, remove };
+  const addModel = useCallback(async (id: string, input: ProviderModelInput): Promise<boolean> => {
+    setPending(true);
+    setError(null);
+
+    try {
+      replace(await providerApi.addModel(id, input));
+
+      return true;
+    } catch (error) {
+      setError(isError(error) ? describeError(error) : String(error));
+
+      return false;
+    } finally {
+      setPending(false);
+    }
+  }, []);
+
+  const removeModel = useCallback(async (id: string, modelId: string): Promise<void> => {
+    setPending(true);
+    setError(null);
+
+    try {
+      replace(await providerApi.removeModel(id, modelId));
+    } catch (error) {
+      setError(isError(error) ? describeError(error) : String(error));
+    } finally {
+      setPending(false);
+    }
+  }, []);
+
+  return { status, providers, error, pending, create, remove, addModel, removeModel };
 }

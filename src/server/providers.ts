@@ -1,5 +1,11 @@
 import { and, asc, eq } from "drizzle-orm";
-import type { Provider, ProviderInput, ProviderKind, ProviderList } from "../shared/providers";
+import type {
+  Provider,
+  ProviderInput,
+  ProviderKind,
+  ProviderList,
+  ProviderModelInput,
+} from "../shared/providers";
 import type { Db } from "./db/client";
 import { providerModels, providers } from "./db/schema";
 import type { Sealer } from "./seal";
@@ -87,10 +93,6 @@ export async function createProvider(
         createdAt: now,
       })
       .run();
-
-    tx.insert(providerModels)
-      .values(input.models.map((model, index) => modelRow(userId, id, model, now, index)))
-      .run();
   });
 
   const created = await findProvider(deps, userId, id);
@@ -112,8 +114,6 @@ export async function updateProvider(
 
   const apiKey = input.apiKey === "" ? undefined : await deps.sealer.seal(input.apiKey);
 
-  const now = new Date();
-
   const patch: ProviderPatch = {
     name: input.name,
     kind: input.kind,
@@ -127,14 +127,41 @@ export async function updateProvider(
       .set(patch)
       .where(and(eq(providers.id, id), eq(providers.userId, userId)))
       .run();
-
-    tx.delete(providerModels).where(eq(providerModels.providerId, id)).run();
-    tx.insert(providerModels)
-      .values(input.models.map((model, index) => modelRow(userId, id, model, now, index)))
-      .run();
   });
 
   return findProvider(deps, userId, id);
+}
+
+export async function addProviderModel(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  model: ProviderModelInput,
+): Promise<Provider | null> {
+  if ((await findProvider(deps, userId, providerId)) === null) return null;
+
+  deps.db
+    .insert(providerModels)
+    .values(modelRow(userId, providerId, model, new Date(), 0))
+    .run();
+
+  return findProvider(deps, userId, providerId);
+}
+
+export async function removeProviderModel(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  modelId: string,
+): Promise<Provider | null> {
+  if ((await findProvider(deps, userId, providerId)) === null) return null;
+
+  deps.db
+    .delete(providerModels)
+    .where(and(eq(providerModels.id, modelId), eq(providerModels.providerId, providerId)))
+    .run();
+
+  return findProvider(deps, userId, providerId);
 }
 
 export async function removeProvider(
@@ -213,7 +240,7 @@ async function findProvider(
 function modelRow(
   userId: string,
   providerId: string,
-  model: ProviderInput["models"][number],
+  model: ProviderModelInput,
   now: Date,
   index: number,
 ) {

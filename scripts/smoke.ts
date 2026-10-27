@@ -12,7 +12,12 @@ import {
 import { ApiErrorBodySchema, HealthSchema } from "../src/shared/api";
 import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
 import { AuthResultSchema } from "../src/shared/auth";
-import { ProviderListSchema, ProviderSchema, providerPaths } from "../src/shared/providers";
+import {
+  ProviderListSchema,
+  ProviderSchema,
+  providerPaths,
+  type Provider,
+} from "../src/shared/providers";
 
 const BINARY = join(import.meta.dir, "../dist/bandar");
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
@@ -84,6 +89,8 @@ const upstreamOrigin = `http://127.0.0.1:${upstream.port}`;
 
 let failures = 0;
 let cookie = "";
+let openaiProvider: ProviderSlot = { provider: null, modelId: "" };
+let claudeProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -135,48 +142,75 @@ try {
     cookie = sessionCookie(response);
   });
 
-  await check("POST /api/providers creates an OpenAI provider and hides its key", async () => {
-    const provider = await postJson(
+  await check("POST /api/providers creates a provider without models", async () => {
+    openaiProvider.provider = await postJson(
       providerPaths.list,
       {
         name: "Fake OpenAI",
         kind: "openai",
         baseUrl: `${upstreamOrigin}/openai`,
         apiKey: "openai-key",
-        models: [{ upstreamModel: "fake-openai-model", alias: "fast" }],
       },
       ProviderSchema,
       201,
     );
 
-    assert.equal(provider.hasKey, true);
-    assert.equal(provider.models[0]?.alias, "fast");
-    assert.equal(Object.hasOwn(provider, "apiKey"), false);
+    assert.equal(openaiProvider.provider?.hasKey, true);
+    assert.deepEqual(openaiProvider.provider?.models, []);
+    assert.equal(Object.hasOwn(openaiProvider, "apiKey"), false);
+  });
+
+  await check("POST /api/providers/:id/models adds an alias to a provider", async () => {
+    const provider = await postJson(
+      providerPaths.models(openaiProvider.provider?.id ?? ""),
+      { upstreamModel: "fake-openai-model", alias: "fast" },
+      ProviderSchema,
+      201,
+    );
+
+    assert.deepEqual(
+      provider.models.map((model) => [model.alias, model.upstreamModel]),
+      [["fast", "fake-openai-model"]],
+    );
   });
 
   await check("POST /api/providers creates Anthropic and Google providers", async () => {
-    await postJson(
+    claudeProvider.provider = await postJson(
       providerPaths.list,
       {
         name: "Fake Anthropic",
         kind: "anthropic",
         baseUrl: `${upstreamOrigin}/anthropic`,
         apiKey: "anthropic-key",
-        models: [{ upstreamModel: "fake-claude", alias: "claude" }],
       },
       ProviderSchema,
       201,
     );
 
-    await postJson(
+    const seeded = await postJson(
+      providerPaths.models(claudeProvider.provider?.id ?? ""),
+      { upstreamModel: "fake-claude", alias: "claude" },
+      ProviderSchema,
+      201,
+    );
+
+    claudeProvider.modelId = seeded.models[0]?.id ?? "";
+
+    const google = await postJson(
       providerPaths.list,
       {
         name: "Fake Google",
         kind: "google",
         baseUrl: `${upstreamOrigin}/google`,
         apiKey: "google-key",
-        models: [{ upstreamModel: "fake-gemini", alias: "gemini" }],
       },
+      ProviderSchema,
+      201,
+    );
+
+    await postJson(
+      providerPaths.models(google.id),
+      { upstreamModel: "fake-gemini", alias: "gemini" },
       ProviderSchema,
       201,
     );
@@ -190,33 +224,68 @@ try {
     assert.ok(list.providers.every((provider) => !Object.hasOwn(provider, "apiKey")));
   });
 
-  await check("POST /api/providers rejects a duplicate alias with 409", async () => {
+  await check("POST /api/providers rejects a duplicate provider name with 409", async () => {
     const response = await post(providerPaths.list, {
-      name: "Duplicate",
+      name: "Fake OpenAI",
       kind: "openai",
       baseUrl: `${upstreamOrigin}/openai`,
       apiKey: "",
-      models: [{ upstreamModel: "other-model", alias: "fast" }],
     });
 
     assert.equal(response.status, 409);
     assert.equal((await errorBody(response)).code, "conflict");
   });
 
+  await check("POST /api/providers/:id/models rejects a duplicate alias with 409", async () => {
+    const response = await post(providerPaths.models(claudeProvider.provider?.id ?? ""), {
+      upstreamModel: "other-model",
+      alias: "fast",
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal((await errorBody(response)).code, "conflict");
+  });
+
+  await check(
+    "DELETE /api/providers/:id/models/:modelId removes a model and its alias",
+    async () => {
+      assert.notEqual(claudeProvider.modelId, "");
+
+      const removed = await deleteJson(
+        providerPaths.model(claudeProvider.provider?.id ?? "", claudeProvider.modelId),
+        ProviderSchema,
+      );
+
+      assert.deepEqual(removed.models, []);
+      apiKey = await mintGatewayKey();
+      const models = await fetch(new URL("/v1/models", origin), { headers: bearer() });
+
+      const body = v.parse(
+        v.object({ data: v.array(v.object({ id: v.string() })) }),
+        await models.json(),
+      );
+
+      assert.deepEqual(
+        body.data.map((model) => model.id).sort(),
+        ["fast", "gemini"],
+        `aliases after the removal: ${body.data.map((model) => model.id).join(", ")}`,
+      );
+
+      const restored = await postJson(
+        providerPaths.models(claudeProvider.provider?.id ?? ""),
+        { upstreamModel: "fake-claude", alias: "claude" },
+        ProviderSchema,
+        201,
+      );
+
+      claudeProvider.modelId = restored.models[0]?.id ?? "";
+    },
+  );
+
   await check("POST /api/auth/api-key/create mints a gateway key", async () => {
-    const response = await post(
-      "/api/auth/api-key/create",
-      { name: "smoke key" },
-      { origin: requestOrigin },
-    );
+    const minted = await mintGatewayKey();
 
-    assert.equal(response.status, 200);
-
-    const minted = v.parse(CreatedApiKeySchema, await response.json());
-    assert.ok(minted.key.startsWith("bandar_"), `key ${minted.key} lacks the bandar_ prefix`);
-
-    apiKey = minted.key;
-    keyId = minted.id;
+    assert.ok(minted.startsWith("bandar_"), `key ${minted} lacks the bandar_ prefix`);
   });
 
   await check("GET /v1/models lists the caller's aliases", async () => {
@@ -400,6 +469,8 @@ if (failures > 0) {
   process.exit(1);
 }
 
+if (process.env.BANDAR_SMOKE_DEBUG === "1") console.log(first.log());
+
 console.log("smoke ok");
 
 function chat(model: string, stream: boolean, tag: string): Json {
@@ -509,6 +580,44 @@ async function post(
     body: JSON.stringify(body),
   });
 }
+
+async function mintGatewayKey(): Promise<string> {
+  const response = await post(
+    "/api/auth/api-key/create",
+    { name: "smoke key" },
+    { origin: requestOrigin },
+  );
+
+  assert.equal(response.status, 200);
+
+  const minted = v.parse(CreatedApiKeySchema, await response.json());
+
+  apiKey = minted.key;
+  keyId = minted.id;
+
+  return minted.key;
+}
+
+async function deleteJson<T>(
+  path: string,
+  schema: v.GenericSchema<T>,
+  base: string = origin,
+): Promise<T> {
+  const response = await fetch(new URL(path, base), {
+    method: "DELETE",
+    headers: sessionHeaders(),
+  });
+
+  if (response.status !== 200) {
+    console.error("deleteJson", path, response.status, await response.text());
+
+    throw new Error(`DELETE ${path} returned ${response.status}`);
+  }
+
+  return v.parse(schema, await response.json());
+}
+
+type ProviderSlot = { provider: Provider | null; modelId: string };
 
 async function errorBody(
   response: Response,

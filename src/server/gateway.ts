@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import * as v from "valibot";
 import { GatewayRequestSchema, type ModelList } from "../shared/chat";
 import type { Auth, VerifiedKey } from "./auth";
-import { listModelAliases } from "./providers";
+import { listModelRefs } from "./router/resolve";
 import { runChat, type ChatDeps } from "./router/chat";
 import type { CanonicalRequest } from "./router/types";
 import { openAiError } from "./router/wire";
@@ -25,12 +25,12 @@ export function createGateway(deps: GatewayDeps) {
 
       if (caller === null) return unauthorized();
 
-      const aliases = await listModelAliases(deps.providers, caller.userId);
+      const models = await listModelRefs(deps.providers, caller.userId);
 
       const body: ModelList = {
         object: "list",
-        data: aliases.map((model) => ({
-          id: model.alias,
+        data: models.map((model) => ({
+          id: model.id,
           object: "model",
           created: Math.floor(model.createdAt.getTime() / 1000),
           owned_by: "bandar",
@@ -71,7 +71,7 @@ export function createGateway(deps: GatewayDeps) {
       return runChat(deps, {
         userId: caller.userId,
         apiKeyId: caller.keyId,
-        alias: input.model,
+        ref: input.model,
         request: canonical,
         stream: input.stream,
         signal: request.signal,

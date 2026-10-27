@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { readAnalytics, readRequests } from "./analytics";
@@ -7,12 +8,16 @@ import { applyDuckMigrations } from "./duck/migrate";
 import { recordRequest, type RequestEventInput } from "./router/record";
 
 const NOW = new Date("2026-10-27T12:00:00.000Z");
+const DUCK_DIR = fileURLToPath(new URL("../../duckdb", import.meta.url));
 
-function readAnalyticsMigration(): string {
-  return readFileSync(
-    fileURLToPath(new URL("../../duckdb/0001_analytics.sql", import.meta.url)),
-    "utf8",
-  );
+function readDuckMigrations() {
+  return readdirSync(DUCK_DIR)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => ({
+      tag: name.slice(0, -4),
+      sql: readFileSync(join(DUCK_DIR, name), "utf8"),
+    }));
 }
 
 let open: DuckDb[] = [];
@@ -24,7 +29,7 @@ function seeded(): DuckDb {
   );
 
   open.push(db);
-  applyDuckMigrations(db, [{ tag: "0001_analytics", sql: readAnalyticsMigration() }]);
+  applyDuckMigrations(db, readDuckMigrations());
 
   return db;
 }
@@ -36,6 +41,7 @@ function event(overrides: Partial<RequestEventInput>): RequestEventInput {
     providerId: "provider-1",
     providerKind: "openai",
     model: "fast",
+    reference: "fast",
     upstreamModel: "gpt-fast",
     status: "success",
     httpStatus: 200,
@@ -157,6 +163,7 @@ describe("readRequests", () => {
 
     expect(list.requests).toHaveLength(2);
     expect(list.requests[0]?.startedAt).toBe("2026-10-27T11:00:00.000Z");
+    expect(list.requests[0]?.reference).toBe("fast");
     expect(list.requests[0]?.streamed).toBe(false);
     expect(list.requests[0]?.tokensPerSecond).toBeNull();
     expect(list.requests[1]?.tokensPerSecond).toBe(50);

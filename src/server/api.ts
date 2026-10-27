@@ -17,6 +17,7 @@ import {
   type OAuthProviderKind,
   type ProviderKind,
 } from "../shared/providers";
+import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
@@ -37,6 +38,7 @@ import {
   type ProviderDeps,
 } from "./providers";
 import { UpstreamError } from "./router/types";
+import { createTag, listTags, removeTag, setTagModels, TagRuleError } from "./tags";
 import { InputError, parseInput, type ParseableInput } from "./validation";
 
 export type ApiDeps = {
@@ -145,7 +147,7 @@ export function createApi(deps: ApiDeps) {
         if (error instanceof Error && isUniqueViolation(error)) {
           set.status = 409;
 
-          return failure("conflict", "a provider with that name already exists");
+          return failure("conflict", "that provider name or slug is taken");
         }
 
         throw error;
@@ -172,15 +174,15 @@ export function createApi(deps: ApiDeps) {
         return provider;
       } catch (error) {
         if (error instanceof ProviderRuleError) {
-          set.status = 400;
+          set.status = providerRuleStatus(error);
 
-          return failure("built_in", error.message);
+          return failure(error.code, error.message);
         }
 
         if (error instanceof Error && isUniqueViolation(error)) {
           set.status = 409;
 
-          return failure("conflict", "a provider with that name already exists");
+          return failure("conflict", "that provider name or slug is taken");
         }
 
         throw error;
@@ -302,6 +304,12 @@ export function createApi(deps: ApiDeps) {
 
         return provider;
       } catch (error) {
+        if (error instanceof ProviderRuleError) {
+          set.status = providerRuleStatus(error);
+
+          return failure(error.code, error.message);
+        }
+
         if (error instanceof Error && isUniqueViolation(error)) {
           set.status = 409;
 
@@ -386,6 +394,82 @@ export function createApi(deps: ApiDeps) {
 
       set.status = 204;
     })
+    .get("/tags", async ({ request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      return listTags(deps.providers, caller.userId);
+    })
+    .post("/tags", async ({ body, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(TagCreateInputSchema, body as ParseableInput);
+
+      try {
+        const tags = await createTag(deps.providers, caller.userId, input.slug);
+
+        set.status = 201;
+
+        return tags;
+      } catch (error) {
+        if (error instanceof Error && isUniqueViolation(error)) {
+          set.status = 409;
+
+          return failure("conflict", `the tag ${input.slug} is taken`);
+        }
+
+        throw error;
+      }
+    })
+    .put("/tags/:id/models", async ({ body, params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(TagParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(TagModelsInputSchema, body as ParseableInput);
+
+      try {
+        const tags = await setTagModels(deps.providers, caller.userId, id, input.modelIds);
+
+        if (tags === null) {
+          set.status = 404;
+
+          return failure("not_found", `tag ${id} not found`);
+        }
+
+        return tags;
+      } catch (error) {
+        if (error instanceof TagRuleError) {
+          set.status = 422;
+
+          return failure("validation", error.message);
+        }
+
+        throw error;
+      }
+    })
+    .delete("/tags/:id", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(TagParamsSchema, params);
+      const tags = await removeTag(deps.providers, caller.userId, id);
+
+      if (tags === null) {
+        set.status = 404;
+
+        return failure("not_found", `tag ${id} not found`);
+      }
+
+      return tags;
+    })
     .get("/analytics", async ({ query, request }) => {
       const caller = await authenticate(deps.auth, request);
 
@@ -450,6 +534,12 @@ async function authenticate(auth: Auth, request: Request): Promise<Caller | Resp
   return user === null
     ? Response.json(failure("unauthorized", "sign in to use the API"), { status: 401 })
     : { userId: user.id, apiKeyId: null };
+}
+
+function providerRuleStatus(error: ProviderRuleError): number {
+  if (error.code === "built_in") return 400;
+
+  return error.code === "conflict" ? 409 : 422;
 }
 
 function isUniqueViolation(error: Error): boolean {

@@ -1,4 +1,13 @@
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import type { ProviderAuthMode, ProviderKind, ProviderOrigin } from "../../shared/providers";
 import { user } from "./auth-schema";
 
@@ -10,6 +19,7 @@ export const providers = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    slug: text("slug").notNull().default(""),
     kind: text("kind").$type<ProviderKind>().notNull(),
     baseUrl: text("base_url").notNull(),
     apiKey: text("api_key").notNull().default(""),
@@ -17,7 +27,12 @@ export const providers = sqliteTable(
     origin: text("origin").$type<ProviderOrigin>().notNull().default("custom"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
-  (table) => [uniqueIndex("providers_user_name").on(table.userId, table.name)],
+  (table) => [
+    uniqueIndex("providers_user_name").on(table.userId, table.name),
+    uniqueIndex("providers_user_slug")
+      .on(table.userId, table.slug)
+      .where(sql`${table.slug} <> ''`),
+  ],
 );
 
 export const providerModels = sqliteTable(
@@ -39,7 +54,38 @@ export const providerModels = sqliteTable(
   },
   (table) => [
     uniqueIndex("provider_models_user_alias").on(table.userId, table.alias),
-    index("provider_models_provider").on(table.providerId),
+    uniqueIndex("provider_models_provider_upstream").on(table.providerId, table.upstreamModel),
+  ],
+);
+
+export const tags = sqliteTable(
+  "tags",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [uniqueIndex("tags_user_slug").on(table.userId, table.slug)],
+);
+
+export const tagModels = sqliteTable(
+  "tag_models",
+  {
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => providerModels.id, { onDelete: "cascade" }),
+    priority: integer("priority").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tagId, table.modelId] }),
+    uniqueIndex("tag_models_tag_priority").on(table.tagId, table.priority),
+    index("tag_models_model").on(table.modelId),
   ],
 );
 

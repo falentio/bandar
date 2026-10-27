@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { MAX_MODEL_REF_LENGTH } from "./slugs";
 
 export const ChatMessageSchema = v.object({
   role: v.picklist(["system", "user", "assistant"]),
@@ -6,7 +7,7 @@ export const ChatMessageSchema = v.object({
 });
 
 export const ChatCompletionRequestSchema = v.object({
-  model: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+  model: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH)),
   messages: v.pipe(v.array(ChatMessageSchema), v.minLength(1)),
   stream: v.optional(v.boolean(), false),
   temperature: v.optional(v.number()),

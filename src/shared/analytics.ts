@@ -110,7 +110,7 @@ export type Analytics = v.InferOutput<typeof AnalyticsSchema>;
 
 export type AnalyticsFilterDimension = (typeof ANALYTICS_FILTER_DIMENSIONS)[number];
 
-export type AnalyticsFilters = v.InferOutput<typeof AnalyticsFiltersSchema>;
+export type AnalyticsFilters = Readonly<Record<AnalyticsFilterDimension, readonly string[]>>;
 
 export type ProviderUsage = v.InferOutput<typeof ProviderUsageSchema>;
 

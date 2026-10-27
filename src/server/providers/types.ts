@@ -49,8 +49,8 @@ export type AdapterInput = {
   readonly signal: AbortSignal;
 };
 
-export interface ProviderAdapter {
-  readonly kind: ProviderKind;
+export interface ProviderAdapter<K extends ProviderKind = ProviderKind> {
+  readonly kind: K;
   chat(input: AdapterInput): Promise<CanonicalResult>;
   stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void>;
 }
@@ -106,21 +106,21 @@ export type BuiltInProviderSettings = {
   readonly baseUrl: () => string;
 };
 
-type ProviderCapabilities = {
-  readonly adapter: ProviderAdapter;
+export type DefinitionCapabilities<K extends ProviderKind> = {
+  readonly adapter: ProviderAdapter<K>;
   readonly authModes: readonly ProviderAuthMode[];
   readonly oauth?: OAuthConnector;
   readonly catalog?: ProviderCatalog;
 };
 
 export type GenericProviderDefinition<K extends GenericProviderKind = GenericProviderKind> =
-  ProviderCapabilities & {
+  DefinitionCapabilities<K> & {
     readonly kind: K;
     readonly builtIn?: undefined;
   };
 
 export type BuiltInProviderDefinition<K extends BuiltInProviderKind = BuiltInProviderKind> =
-  ProviderCapabilities & {
+  DefinitionCapabilities<K> & {
     readonly kind: K;
     readonly builtIn: BuiltInProviderSettings;
   };

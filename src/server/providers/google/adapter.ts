@@ -52,7 +52,7 @@ type ChatBody = {
   };
 };
 
-export const googleAdapter: ProviderAdapter = {
+export const googleAdapter: ProviderAdapter<"google"> = {
   kind: "google",
 
   async chat(input: AdapterInput): Promise<CanonicalResult> {

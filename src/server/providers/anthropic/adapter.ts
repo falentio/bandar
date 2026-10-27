@@ -57,7 +57,7 @@ type ChatBody = {
   stop_sequences?: string[];
 };
 
-export const anthropicAdapter: ProviderAdapter = {
+export const anthropicAdapter: ProviderAdapter<"anthropic"> = {
   kind: "anthropic",
 
   async chat(input: AdapterInput): Promise<CanonicalResult> {

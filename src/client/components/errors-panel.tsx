@@ -103,9 +103,15 @@ function isCooling(flaggedUntil: string): boolean {
 }
 
 function formatCooldown(ms: number): string {
-  if (ms >= 3_600_000) return `${String(ms / 3_600_000)}h`;
+  if (ms >= 3_600_000) return `${hoursOf(ms)}h`;
 
   if (ms >= 60_000) return `${String(ms / 60_000)}m`;
 
   return `${String(ms / 1000)}s`;
+}
+
+function hoursOf(ms: number): string {
+  const value = ms / 3_600_000;
+
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }

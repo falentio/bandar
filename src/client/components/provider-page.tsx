@@ -492,7 +492,8 @@ function ModelsCard({
   const [upstreamModel, setUpstreamModel] = useState("");
   const [alias, setAlias] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshed, setRefreshed] = useState<ProviderModelRefresh | "error" | null>(null);
+  const [refreshed, setRefreshed] = useState<ProviderModelRefresh | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const tags = useTags();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -532,6 +533,7 @@ function ModelsCard({
             onClick={() => {
               setRefreshing(true);
               setRefreshed(null);
+              setRefreshError(null);
 
               void providerApi
                 .refreshModels(provider.id)
@@ -539,7 +541,11 @@ function ModelsCard({
                   setRefreshed(result);
                   onChanged();
                 })
-                .catch(() => setRefreshed("error"))
+                .catch((error: Error) => {
+                  setRefreshError(
+                    isError(error) ? describeError(error) : "The catalog could not be read.",
+                  );
+                })
                 .finally(() => setRefreshing(false));
             }}
           >
@@ -588,17 +594,17 @@ function ModelsCard({
         {providers.error === null ? null : (
           <p className="text-sm text-destructive">{providers.error}</p>
         )}
+        {refreshError === null ? null : <p className="text-xs text-destructive">{refreshError}</p>}
+
         {refreshed === null ? null : (
           <p className="text-xs text-muted-foreground">
-            {refreshed === "error"
-              ? "The catalog could not be read."
-              : refreshed.added === 0
-                ? `Nothing new to import${refreshed.skipped === 0 ? "." : ` (${refreshed.skipped} skipped).`}`
-                : `Imported ${refreshed.added} model${refreshed.added === 1 ? "" : "s"}${
-                    refreshed.skipped === 0
-                      ? "."
-                      : `; skipped ${refreshed.skipped} already present or whose alias is taken.`
-                  }`}
+            {refreshed.added === 0
+              ? `Nothing new to import${refreshed.skipped === 0 ? "." : ` (${refreshed.skipped} skipped).`}`
+              : `Imported ${refreshed.added} model${refreshed.added === 1 ? "" : "s"}${
+                  refreshed.skipped === 0
+                    ? "."
+                    : `; skipped ${refreshed.skipped} already present or whose alias is taken.`
+                }`}
           </p>
         )}
 

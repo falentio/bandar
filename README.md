@@ -216,9 +216,9 @@ the probe can clear the flags again. Flags live in SQLite and survive a restart.
 Every failure that flags a subject writes one immutable row to
 `cooldown_events`: the subject and its name, the provider and model, the
 credential when one was involved, the error kind, the reference, the new failure
-count, the cooldown, and the flag time. Rows are denormalized and have no foreign
-keys, so deleting a provider or a model keeps its history. Each user keeps the
-newest 500 rows. An `invalid_request`, an `unknown`, an abort, and a success
+count, the cooldown, and the flag time. Rows are denormalized and carry no foreign
+key to a provider, a model, or a credential, so deleting one of those keeps its
+history; a row goes with its user. Each user keeps the newest 500 rows. An `invalid_request`, an `unknown`, an abort, and a success
 write nothing.
 
 The **Errors** page lists the newest 100, and `GET /api/cooldowns?limit=100`

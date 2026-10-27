@@ -32,7 +32,6 @@ import {
   addProviderCredential,
   removeProviderCredential,
   reorderProviderCredentials,
-  replaceProviderCredential,
 } from "./credentials";
 import { listModelRefs, resolvePlan } from "./router/resolve";
 import { createSealer } from "./seal";
@@ -573,20 +572,12 @@ describe("provider credentials", () => {
     const keyed = await addCredential(deps, alpha.id, "alpha-key");
     const credentialId = keyed.credentials[0]?.id ?? "";
 
-    expect(
-      (await replaceProviderCredential(deps, "user-1", beta.id, credentialId, { apiKey: "x" }))
-        .kind,
-    ).toBe("missing_credential");
     expect((await removeProviderCredential(deps, "user-1", beta.id, credentialId)).kind).toBe(
       "missing_credential",
     );
     expect((await reorderProviderCredentials(deps, "user-1", beta.id, [credentialId])).kind).toBe(
       "invalid_order",
     );
-    expect(
-      (await replaceProviderCredential(deps, "user-2", alpha.id, credentialId, { apiKey: "x" }))
-        .kind,
-    ).toBe("missing_provider");
     expect((await addProviderCredential(deps, "user-2", alpha.id, { apiKey: "x" })).kind).toBe(
       "missing_provider",
     );

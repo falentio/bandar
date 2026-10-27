@@ -21,11 +21,6 @@ export type Providers = {
   readonly addModel: (id: string, input: ProviderModelInput) => Promise<boolean>;
   readonly removeModel: (id: string, modelId: string) => Promise<void>;
   readonly addCredential: (id: string, input: ProviderCredentialInput) => Promise<boolean>;
-  readonly replaceCredential: (
-    id: string,
-    credentialId: string,
-    input: ProviderCredentialInput,
-  ) => Promise<boolean>;
   readonly reorderCredentials: (id: string, credentialIds: readonly string[]) => Promise<boolean>;
   readonly removeCredential: (id: string, credentialId: string) => Promise<boolean>;
 };
@@ -144,12 +139,6 @@ export function useProviders(): Providers {
     [mutate],
   );
 
-  const replaceCredential = useCallback(
-    (id: string, credentialId: string, input: ProviderCredentialInput) =>
-      mutate(() => providerApi.replaceCredential(id, credentialId, input)),
-    [mutate],
-  );
-
   const reorderCredentials = useCallback(
     (id: string, credentialIds: readonly string[]) =>
       mutate(() => providerApi.reorderCredentials(id, credentialIds)),
@@ -175,7 +164,6 @@ export function useProviders(): Providers {
     addModel,
     removeModel,
     addCredential,
-    replaceCredential,
     reorderCredentials,
     removeCredential,
   };

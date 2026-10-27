@@ -351,7 +351,7 @@ bandar/
 │   ├── api.ts                      # management routes, session/key gate
 │   ├── analytics.ts                # DuckDB reads and window math
 │   ├── providers.ts                # provider/model repo, catalog import, slug backfill
-│   ├── credentials.ts              # ordered provider credentials: add, replace, move, remove
+│   ├── credentials.ts              # ordered provider credentials: add, move, remove
 │   ├── tags.ts                     # tag list and membership writes
 │   ├── credential.ts               # api-key / oauth credential union
 │   ├── oauth.ts                    # device-code connectors per OAuth kind
@@ -413,7 +413,6 @@ bandar/
 | `PUT/DELETE /api/providers/:id`                       | Session or `x-api-key` | Edit a custom provider's settings, or remove it.        |
 | `POST /api/providers/:id/credentials`                 | Session or `x-api-key` | Add a credential at the end of the provider's order.    |
 | `PUT /api/providers/:id/credentials/order`            | Session or `x-api-key` | Replace the credential order; returns the provider.     |
-| `PUT /api/providers/:id/credentials/:credentialId`    | Session or `x-api-key` | Replace one key or label, keeping its place.            |
 | `DELETE /api/providers/:id/credentials/:credentialId` | Session or `x-api-key` | Remove a credential and compact the order.              |
 | `GET /api/providers/:id?days=30`                      | Session or `x-api-key` | One provider plus its window usage.                     |
 | `POST /api/providers/:id/models`                      | Session or `x-api-key` | Add one model alias; returns the provider.              |
@@ -433,7 +432,7 @@ Each provider has its own page at `/providers/<id>` with four tabs:
 **Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
 (name, slug, kind, base URL), **Models** (aliases, refs, tag chips, removal, and
 for Kilo Code a catalog import), and **Credentials** or **Connection** (the
-ordered credential list: add, replace, move, and remove a key, connect a Kilo Code
+ordered credential list: add, move, and remove a key, connect a Kilo Code
 account, remove a custom provider). The tab lives in the URL as `?tab=`, so a reload or a shared link
 opens the same tab. Custom providers are created empty and grow models one at a
 time; Kilo Code is seeded empty for every account. Built-in settings come from

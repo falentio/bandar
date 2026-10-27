@@ -26,8 +26,6 @@ export function CredentialsCard({
 }) {
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [replacing, setReplacing] = useState<string | null>(null);
-  const [replacement, setReplacement] = useState("");
   const [removing, setRemoving] = useState(false);
 
   const current = provider.credentials.map((credential) => credential.id);
@@ -62,21 +60,6 @@ export function CredentialsCard({
     onChanged();
   };
 
-  const replace = async (event: FormEvent<HTMLFormElement>, credentialId: string) => {
-    event.preventDefault();
-
-    if (
-      !(await providers.replaceCredential(provider.id, credentialId, {
-        apiKey: replacement.trim(),
-      }))
-    )
-      return;
-
-    setReplacing(null);
-    setReplacement("");
-    onChanged();
-  };
-
   return (
     <Card>
       <CardHeader>
@@ -104,7 +87,7 @@ export function CredentialsCard({
           <KeyRoundIcon className="size-4 shrink-0 text-muted-foreground" />
           <span className="text-muted-foreground">
             Credentials are sealed with AES-GCM and never returned by the API, so a saved value
-            cannot be shown again.
+            cannot be shown again. To change a key, remove the credential and add a new one.
           </span>
         </div>
 
@@ -129,7 +112,7 @@ export function CredentialsCard({
                       variant="ghost"
                       size="icon-xs"
                       aria-label={`Move ${nameOf(credential)} up`}
-                      disabled={providers.pending || index === 0 || replacing !== null}
+                      disabled={providers.pending || index === 0}
                       onClick={() => void move(index, -1)}
                     >
                       <ArrowUpIcon />
@@ -138,25 +121,10 @@ export function CredentialsCard({
                       variant="ghost"
                       size="icon-xs"
                       aria-label={`Move ${nameOf(credential)} down`}
-                      disabled={
-                        providers.pending ||
-                        index === provider.credentials.length - 1 ||
-                        replacing !== null
-                      }
+                      disabled={providers.pending || index === provider.credentials.length - 1}
                       onClick={() => void move(index, 1)}
                     >
                       <ArrowDownIcon />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={providers.pending}
-                      onClick={() => {
-                        setReplacing(replacing === credential.id ? null : credential.id);
-                        setReplacement("");
-                      }}
-                    >
-                      Replace
                     </Button>
                     <Button
                       variant="ghost"
@@ -172,48 +140,6 @@ export function CredentialsCard({
                     </Button>
                   </span>
                 </div>
-
-                {replacing === credential.id ? (
-                  <form
-                    onSubmit={(event) => void replace(event, credential.id)}
-                    className="mt-2 flex flex-wrap items-end gap-2"
-                  >
-                    <div className="grid min-w-48 flex-1 gap-1.5">
-                      <Label htmlFor={`credential-key-${credential.id}`} className="text-xs">
-                        New key
-                      </Label>
-                      <Input
-                        id={`credential-key-${credential.id}`}
-                        type="password"
-                        value={replacement}
-                        onChange={(event) => setReplacement(event.target.value)}
-                        placeholder="sk-…"
-                        autoComplete="off"
-                        maxLength={500}
-                        autoFocus
-                        required
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      size="sm"
-                      disabled={providers.pending || replacement.trim() === ""}
-                    >
-                      Save key
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setReplacing(null);
-                        setReplacement("");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </form>
-                ) : null}
               </li>
             ))}
           </ol>

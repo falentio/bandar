@@ -34,34 +34,6 @@ export async function addProviderCredential(
   return reload(deps, userId, providerId);
 }
 
-export async function replaceProviderCredential(
-  deps: ProviderDeps,
-  userId: string,
-  providerId: string,
-  credentialId: string,
-  input: ProviderCredentialInput,
-): Promise<CredentialWriteResult> {
-  const provider = await readProvider(deps, userId, providerId);
-
-  if (provider === null) return { kind: "missing_provider" };
-
-  const existing = provider.credentials.find((entry) => entry.id === credentialId);
-
-  if (existing === undefined) return { kind: "missing_credential" };
-
-  const credential = await sealApiKey(deps, input.apiKey);
-
-  deps.db
-    .update(providerCredentials)
-    .set({ credential, authMode: "api-key", label: input.label ?? existing.label })
-    .where(
-      and(eq(providerCredentials.id, credentialId), eq(providerCredentials.providerId, providerId)),
-    )
-    .run();
-
-  return reload(deps, userId, providerId);
-}
-
 export async function reorderProviderCredentials(
   deps: ProviderDeps,
   userId: string,

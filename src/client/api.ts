@@ -93,15 +93,6 @@ export const providerApi = {
       method: "POST",
       body: JSON.stringify(v.parse(ProviderCredentialInputSchema, input)),
     }),
-  replaceCredential: (
-    id: string,
-    credentialId: string,
-    input: ProviderCredentialInput,
-  ): Promise<Provider> =>
-    request(providerPaths.credential(id, credentialId), ProviderSchema, {
-      method: "PUT",
-      body: JSON.stringify(v.parse(ProviderCredentialInputSchema, input)),
-    }),
   reorderCredentials: (id: string, credentialIds: readonly string[]): Promise<Provider> =>
     request(providerPaths.credentialOrder(id), ProviderSchema, {
       method: "PUT",

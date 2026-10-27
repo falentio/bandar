@@ -925,7 +925,7 @@ try {
     assert.equal(rows.find((request) => request.status === "error")?.errorKind, "auth");
   });
 
-  await check("reordering, replacing, and removing credentials rewrites the chain", async () => {
+  await check("reordering and removing credentials rewrites the chain", async () => {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);
     const provider = list.providers.find((entry) => entry.name === "Rotating");
 
@@ -990,18 +990,6 @@ try {
       settings.credentials.map((credential) => credential.id),
       [working.id, rejected.id],
       "the settings route wrote a credential",
-    );
-
-    const replaced = await putJson(
-      providerPaths.credential(provider.id, rejected.id),
-      { label: "spare", apiKey: "openai-key" },
-      ProviderSchema,
-      200,
-    );
-
-    assert.equal(
-      replaced.credentials.find((credential) => credential.id === rejected.id)?.label,
-      "spare",
     );
 
     const removed = await deleteJson(

@@ -27,7 +27,6 @@ import {
   addProviderCredential,
   removeProviderCredential,
   reorderProviderCredentials,
-  replaceProviderCredential,
   addOAuthCredential,
   type CredentialWriteResult,
 } from "./credentials";
@@ -324,25 +323,6 @@ export function createApi(deps: ApiDeps) {
       if (result.kind === "ok") return result.provider;
 
       return result.kind === "invalid_order" ? invalidCredentialOrder() : providerFailure(id);
-    })
-    .put("/providers/:id/credentials/:credentialId", async ({ body, params, request }) => {
-      const caller = await authenticate(deps.auth, request);
-
-      if (caller instanceof Response) return caller;
-
-      const { id, credentialId } = parseInput(ProviderCredentialParamsSchema, params);
-      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
-      const input = parseInput(ProviderCredentialInputSchema, body as ParseableInput);
-
-      const result = await replaceProviderCredential(
-        deps.providers,
-        caller.userId,
-        id,
-        credentialId,
-        input,
-      );
-
-      return result.kind === "ok" ? result.provider : credentialFailure(result, id, credentialId);
     })
     .delete("/providers/:id/credentials/:credentialId", async ({ params, request }) => {
       const caller = await authenticate(deps.auth, request);

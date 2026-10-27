@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { z } from "zod";
+import * as v from "valibot";
 import { ApiErrorBodySchema, HealthSchema, type ApiErrorBody } from "../src/shared/api";
+import { AuthResultSchema } from "../src/shared/auth";
 import { NoteListSchema, NoteSchema } from "../src/shared/notes";
 
 const BINARY = join(import.meta.dir, "../dist/bandar");
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
+const AUTH_SECRET = "smoke-secret-0123456789abcdef0123456789abcdef";
 
 type Json = string | number | boolean | null | readonly Json[] | { readonly [key: string]: Json };
 
@@ -23,11 +25,15 @@ const expectedMigration = lastJournalTag();
 const workDir = mkdtempSync(join(tmpdir(), "bandar-smoke-"));
 const dbPath = join(workDir, "smoke.db");
 const created = { id: 0, body: "smoke note" };
+const authEmail = `${Date.now()}@smoke.test`;
+const authPassword = "smoke-password-1";
 
 let failures = 0;
+let cookie = "";
 
-const first = await boot();
+const first = await boot(await reservePort());
 const origin = first.origin;
+const requestOrigin = `http://localhost:${new URL(origin).port}`;
 
 try {
   await check("GET / serves the client shell", async () => {
@@ -61,6 +67,35 @@ try {
     assert.equal(health.migration, expectedMigration);
   });
 
+  await check("GET /api/notes without a session is 401", async () => {
+    const response = await fetch(new URL("/api/notes", origin));
+    assert.equal(response.status, 401);
+    assert.equal((await errorBody(response)).code, "unauthorized");
+  });
+
+  await check("POST /api/auth/sign-up/email starts a session", async () => {
+    const response = await post(
+      "/api/auth/sign-up/email",
+      { name: "Smoke", email: authEmail, password: authPassword },
+      { origin: requestOrigin },
+    );
+
+    assert.equal(response.status, 200);
+
+    const result = v.parse(AuthResultSchema, await response.json());
+    assert.equal(result.user.email, authEmail);
+
+    const setCookie = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith("better-auth.session_token="));
+
+    assert.ok(setCookie, "sign-up set no better-auth.session_token cookie");
+
+    const pair = setCookie.split(";")[0];
+    assert.ok(pair);
+    cookie = pair;
+  });
+
   await check("POST /api/notes creates a note", async () => {
     const note = await postJson("/api/notes", { body: created.body }, NoteSchema, 201);
     assert.equal(note.body, created.body);
@@ -76,10 +111,18 @@ try {
   });
 
   await check("DELETE /api/notes/:id removes the note once", async () => {
-    const response = await fetch(new URL(`/api/notes/${created.id}`, origin), { method: "DELETE" });
+    const response = await fetch(new URL(`/api/notes/${created.id}`, origin), {
+      method: "DELETE",
+      headers: sessionHeaders(),
+    });
+
     assert.equal(response.status, 204);
 
-    const again = await fetch(new URL(`/api/notes/${created.id}`, origin), { method: "DELETE" });
+    const again = await fetch(new URL(`/api/notes/${created.id}`, origin), {
+      method: "DELETE",
+      headers: sessionHeaders(),
+    });
+
     assert.equal(again.status, 404);
     assert.equal((await errorBody(again)).code, "not_found");
   });
@@ -90,6 +133,22 @@ try {
     const error = await errorBody(response);
     assert.equal(error.code, "validation");
     assert.ok(error.issues.length > 0, "the validation error carries no issues");
+    assert.ok(
+      error.issues.some((issue) => issue.startsWith("body:")),
+      `the issues do not name the field: ${error.issues.join(", ")}`,
+    );
+  });
+
+  await check("POST /api/auth/sign-out ends the session", async () => {
+    const response = await post("/api/auth/sign-out", {}, { origin: requestOrigin });
+    assert.equal(response.status, 200);
+  });
+
+  await check("the old session cookie no longer lists notes", async () => {
+    const response = await fetch(new URL("/api/notes", origin), { headers: sessionHeaders() });
+    assert.equal(response.status, 401);
+    assert.equal((await errorBody(response)).code, "unauthorized");
+    cookie = "";
   });
 
   await check("an unknown /api route is a JSON 404", async () => {
@@ -141,11 +200,16 @@ async function check(name: string, run: () => Promise<void>): Promise<void> {
   }
 }
 
-async function boot(): Promise<Booted> {
+async function boot(port = 0): Promise<Booted> {
   if (!existsSync(BINARY)) throw new Error(`${BINARY} is missing; run \`bun run build\` first`);
 
   const proc = Bun.spawn([BINARY], {
-    env: { ...Bun.env, BANDAR_PORT: "0", BANDAR_DB: dbPath },
+    env: {
+      ...Bun.env,
+      BANDAR_PORT: String(port),
+      BANDAR_DB: dbPath,
+      BANDAR_AUTH_SECRET: AUTH_SECRET,
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -188,42 +252,61 @@ async function stop(proc: Bun.Subprocess): Promise<void> {
 
 async function getJson<T>(
   path: string,
-  schema: z.ZodType<T>,
+  schema: v.GenericSchema<T>,
   status: number,
   base: string = origin,
 ): Promise<T> {
-  const response = await fetch(new URL(path, base));
+  const response = await fetch(new URL(path, base), { headers: sessionHeaders() });
   assert.equal(response.status, status);
 
-  return schema.parse(await response.json());
+  return v.parse(schema, await response.json());
 }
 
 async function postJson<T>(
   path: string,
   body: Json,
-  schema: z.ZodType<T>,
+  schema: v.GenericSchema<T>,
   status: number,
 ): Promise<T> {
   const response = await post(path, body);
   assert.equal(response.status, status);
 
-  return schema.parse(await response.json());
+  return v.parse(schema, await response.json());
 }
 
-async function post(path: string, body: Json): Promise<Response> {
+async function post(
+  path: string,
+  body: Json,
+  headers: Readonly<Record<string, string>> = {},
+): Promise<Response> {
   return fetch(new URL(path, origin), {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...sessionHeaders(), ...headers },
     body: JSON.stringify(body),
   });
 }
 
 async function errorBody(response: Response): Promise<ApiErrorBody["error"]> {
-  return ApiErrorBodySchema.parse(await response.json()).error;
+  return v.parse(ApiErrorBodySchema, await response.json()).error;
+}
+
+function sessionHeaders(): Record<string, string> {
+  return cookie === "" ? {} : { cookie };
 }
 
 function contentType(response: Response): string {
   return response.headers.get("content-type") ?? "";
+}
+
+function reservePort(): Promise<number> {
+  const probe = Bun.serve({ port: 0, fetch: () => new Response() });
+  const port = probe.port;
+
+  return probe.stop().then(() => {
+    if (port === undefined) throw new Error("Bun.serve reported no port");
+
+    return port;
+  });
 }
 
 function lastJournalTag(): string {

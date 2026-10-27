@@ -1,5 +1,15 @@
-import { type z } from "zod";
+import * as v from "valibot";
 import { ApiErrorBodySchema, HealthSchema, apiPaths } from "../shared/api";
+import {
+  AuthErrorSchema,
+  AuthResultSchema,
+  SessionSchema,
+  authPaths,
+  type AuthResult,
+  type Session,
+  type SignInInput,
+  type SignUpInput,
+} from "../shared/auth";
 import { NoteListSchema, NoteSchema, type Note, type NoteInput } from "../shared/notes";
 
 export class ApiError extends Error {
@@ -24,10 +34,25 @@ export const notesApi = {
   health: () => request(apiPaths.health, HealthSchema),
 };
 
-async function request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
+export const authApi = {
+  session: (): Promise<Session> => request(authPaths.session, SessionSchema),
+  signUp: (input: SignUpInput): Promise<AuthResult> =>
+    request(authPaths.signUp, AuthResultSchema, { method: "POST", body: JSON.stringify(input) }),
+  signIn: (input: SignInInput): Promise<AuthResult> =>
+    request(authPaths.signIn, AuthResultSchema, { method: "POST", body: JSON.stringify(input) }),
+  signOut: async (): Promise<void> => {
+    await send(authPaths.signOut, { method: "POST" });
+  },
+};
+
+async function request<T>(
+  path: string,
+  schema: v.GenericSchema<T>,
+  init: RequestInit = {},
+): Promise<T> {
   const response = await send(path, init);
 
-  return schema.parse(await response.json());
+  return v.parse(schema, await response.json());
 }
 
 async function send(path: string, init: RequestInit): Promise<Response> {
@@ -39,11 +64,22 @@ async function send(path: string, init: RequestInit): Promise<Response> {
 
   if (response.ok) return response;
 
-  const payload: unknown = await response.json().catch(() => null);
-  const parsed = ApiErrorBodySchema.safeParse(payload);
+  const payload = await response.json().catch(() => null);
+  const envelope = v.safeParse(ApiErrorBodySchema, payload);
 
-  if (!parsed.success)
-    throw new ApiError(response.status, `request failed with ${response.status}`);
+  if (envelope.success)
+    throw new ApiError(
+      response.status,
+      envelope.output.error.message,
+      envelope.output.error.issues,
+    );
 
-  throw new ApiError(response.status, parsed.data.error.message, parsed.data.error.issues);
+  const authError = v.safeParse(AuthErrorSchema, payload);
+
+  if (authError.success) throw new ApiError(response.status, authError.output.message);
+
+  throw new ApiError(
+    response.status,
+    response.statusText || `request failed with ${response.status}`,
+  );
 }

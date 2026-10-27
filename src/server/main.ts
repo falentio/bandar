@@ -1,5 +1,6 @@
 import { createApp } from "./app";
 import { createClientBundle } from "./assets";
+import { createAuth } from "./auth";
 import { parseConfig } from "./config";
 import { openDatabase } from "./db/client";
 import { applyMigrations } from "./db/migrate";
@@ -12,8 +13,9 @@ export async function main(env: Record<string, string | undefined>): Promise<voi
   const { sqlite, db } = openDatabase(config.databasePath);
   const migration = applyMigrations(sqlite, migrations);
   const client = createClientBundle(clientFiles);
+  const auth = createAuth(db, config);
 
-  const app = createApp({ db, client, migration });
+  const app = createApp({ db, client, migration, auth });
   const server = Bun.serve({ hostname: config.host, port: config.port, fetch: app.handle });
 
   console.log(

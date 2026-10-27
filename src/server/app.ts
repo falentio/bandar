@@ -1,6 +1,7 @@
 import { isApiPath } from "../shared/api";
 import { createApi } from "./api";
 import { type ClientBundle, serveStatic } from "./assets";
+import type { Auth } from "./auth";
 import type { Db } from "./db/client";
 import type { MigrationResult } from "./db/migrate";
 import { createNotesRepo } from "./notes";
@@ -11,10 +12,11 @@ export type AppDeps = {
   readonly db: Db;
   readonly client: ClientBundle;
   readonly migration: MigrationResult;
+  readonly auth: Auth;
 };
 
 export function createApp(deps: AppDeps): App {
-  const api = createApi(createNotesRepo(deps.db), deps.migration);
+  const api = createApi(createNotesRepo(deps.db), deps.migration, deps.auth);
 
   return {
     handle: async (request) => {

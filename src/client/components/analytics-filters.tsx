@@ -37,6 +37,7 @@ type FilterMenuProps = {
 export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProps) {
   const providers = useProviders();
   const tags = useTags();
+  const error = providers.error ?? tags.error;
 
   const update = (dimension: AnalyticsFilterDimension, values: readonly string[]): void => {
     onChange({ ...filters, [dimension]: [...values] });
@@ -46,7 +47,7 @@ export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProp
     <div className="flex flex-wrap items-center gap-2">
       <FilterMenu
         label="Provider"
-        options={providerKindOptions(providers.providers)}
+        options={providerKindOptions()}
         selected={filters.providerKind}
         onChange={(values) => update("providerKind", values)}
       />
@@ -73,6 +74,7 @@ export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProp
           Clear
         </Button>
       ) : null}
+      {error === null ? null : <p className="text-xs text-muted-foreground">{error}</p>}
     </div>
   );
 }
@@ -138,17 +140,8 @@ function FilterMenu({ label, options, selected, onChange }: FilterMenuProps) {
   );
 }
 
-function providerKindOptions(providers: readonly Provider[]): readonly FilterOption[] {
-  const present = new Set<string>();
-  const options: FilterOption[] = [];
-
-  for (const provider of providers) present.add(provider.kind);
-
-  for (const kind of PROVIDER_KINDS) {
-    if (present.has(kind)) options.push({ value: kind, label: PROVIDER_KIND_LABELS[kind] });
-  }
-
-  return options;
+function providerKindOptions(): readonly FilterOption[] {
+  return PROVIDER_KINDS.map((kind) => ({ value: kind, label: PROVIDER_KIND_LABELS[kind] }));
 }
 
 function providerAccountOptions(providers: readonly Provider[]): readonly FilterOption[] {
@@ -166,14 +159,10 @@ function providerAccountOptions(providers: readonly Provider[]): readonly Filter
 }
 
 function modelAliasOptions(providers: readonly Provider[]): readonly FilterOption[] {
-  const seen = new Set<string>();
   const options: FilterOption[] = [];
 
   for (const provider of providers) {
     for (const model of provider.models) {
-      if (seen.has(model.alias)) continue;
-
-      seen.add(model.alias);
       options.push({ value: model.alias, label: model.alias, hint: provider.name });
     }
   }
@@ -182,17 +171,7 @@ function modelAliasOptions(providers: readonly Provider[]): readonly FilterOptio
 }
 
 function tagOptions(tags: readonly Tag[]): readonly FilterOption[] {
-  const options: FilterOption[] = [];
-
-  for (const tag of tags) {
-    options.push({
-      value: tag.slug,
-      label: tag.ref,
-      hint: tag.models.length === 1 ? "1 model" : `${String(tag.models.length)} models`,
-    });
-  }
-
-  return options;
+  return tags.map((tag) => ({ value: tag.slug, label: tag.ref }));
 }
 
 function triggerLabel(

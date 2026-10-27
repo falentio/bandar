@@ -60,7 +60,10 @@ export function OverviewPanel() {
           onClear={() => analytics.setFilters(EMPTY_ANALYTICS_FILTERS)}
         />
       ) : (
-        <>
+        <div
+          aria-busy={analytics.status === "loading"}
+          className={analytics.status === "loading" ? "space-y-4 opacity-60" : "space-y-4"}
+        >
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Stat label="Requests" value={formatTokens(data.summary.requests)} />
             <Stat
@@ -135,7 +138,7 @@ export function OverviewPanel() {
               </div>
             </CardContent>
           </Card>
-        </>
+        </div>
       )}
     </div>
   );

@@ -359,7 +359,7 @@ function SettingsCard({
               />
             </div>
             <div className="grid gap-2">
-              <Label>Slug</Label>
+              <Label htmlFor={builtIn ? undefined : "settings-slug"}>Slug</Label>
               {builtIn ? (
                 <div className="flex h-8 items-center rounded-lg border bg-muted/40 px-2.5 font-mono text-sm">
                   {provider.slug}

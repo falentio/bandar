@@ -41,7 +41,8 @@ export function TagsPanel() {
         <h1 className="text-lg font-semibold">Tags</h1>
         <p className="text-sm text-muted-foreground">
           A tag is a named fallback chain. Clients send <code>tags/&lt;slug&gt;</code> and the
-          gateway tries each model in order.
+          gateway tries each model in order. There is no attempt cap, so a tag with N models can
+          make up to N upstream calls for one client request.
         </p>
       </div>
 

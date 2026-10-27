@@ -2,21 +2,7 @@ import { extname } from "node:path";
 
 export type EmbeddedClientFile = { readonly url: string; readonly path: string };
 
-export type Asset = {
-  readonly contentType: string;
-  readonly cacheControl: string;
-  readonly body: Blob;
-};
-
-export type ClientBundle =
-  | { readonly kind: "empty" }
-  | { readonly kind: "ready"; readonly index: Asset; readonly byPath: ReadonlyMap<string, Asset> };
-
-const INDEX_PATH = "/index.html";
-const IMMUTABLE = "public, max-age=31536000, immutable";
-const NO_CACHE = "no-cache";
-
-const CONTENT_TYPES: Readonly<Record<string, string>> = {
+const CONTENT_TYPES = {
   ".avif": "image/avif",
   ".css": "text/css; charset=utf-8",
   ".gif": "image/gif",
@@ -34,10 +20,33 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".webp": "image/webp",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+} as const;
+
+const FALLBACK_CONTENT_TYPE = "application/octet-stream";
+
+type ContentType =
+  | (typeof CONTENT_TYPES)[keyof typeof CONTENT_TYPES]
+  | typeof FALLBACK_CONTENT_TYPE;
+
+type Extension = keyof typeof CONTENT_TYPES;
+
+export type Asset = {
+  readonly contentType: ContentType;
+  readonly cacheControl: string;
+  readonly body: Blob;
 };
+
+export type ClientBundle =
+  | { readonly kind: "empty" }
+  | { readonly kind: "ready"; readonly index: Asset; readonly byPath: ReadonlyMap<string, Asset> };
+
+const INDEX_PATH = "/index.html";
+const IMMUTABLE = "public, max-age=31536000, immutable";
+const NO_CACHE = "no-cache";
 
 export function createClientBundle(files: readonly EmbeddedClientFile[]): ClientBundle {
   const byPath = new Map<string, Asset>();
+
   for (const file of files) {
     byPath.set(file.url, {
       contentType: contentTypeFor(file.url),
@@ -47,6 +56,7 @@ export function createClientBundle(files: readonly EmbeddedClientFile[]): Client
   }
 
   const index = byPath.get(INDEX_PATH);
+
   if (!index) return { kind: "empty" };
 
   return { kind: "ready", index, byPath };
@@ -54,7 +64,9 @@ export function createClientBundle(files: readonly EmbeddedClientFile[]): Client
 
 export function serveStatic(request: Request, bundle: ClientBundle): Response {
   const method = request.method;
+
   if (method !== "GET" && method !== "HEAD") return text(405, "method not allowed");
+
   if (bundle.kind === "empty") {
     return text(503, "no client is embedded in this binary. Run `bun run build`.");
   }
@@ -62,6 +74,7 @@ export function serveStatic(request: Request, bundle: ClientBundle): Response {
   const { pathname } = new URL(request.url);
 
   const asset = bundle.byPath.get(pathname);
+
   if (asset) return withBody(asset, method);
 
   if (pathname.startsWith("/assets/")) return text(404, "not found");
@@ -77,11 +90,18 @@ function withBody(asset: Asset, method: string): Response {
     "content-length": String(asset.body.size),
     "cache-control": asset.cacheControl,
   };
+
   return new Response(method === "HEAD" ? null : asset.body, { headers });
 }
 
-function contentTypeFor(url: string): string {
-  return CONTENT_TYPES[extname(url).toLowerCase()] ?? "application/octet-stream";
+function contentTypeFor(url: string): ContentType {
+  const extension = extname(url).toLowerCase();
+
+  return isKnownExtension(extension) ? CONTENT_TYPES[extension] : FALLBACK_CONTENT_TYPE;
+}
+
+function isKnownExtension(value: string): value is Extension {
+  return Object.hasOwn(CONTENT_TYPES, value);
 }
 
 function text(status: number, body: string): Response {

@@ -12,6 +12,7 @@ export function NotesPanel() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = body.trim();
+
     if (!trimmed) return;
 
     setBody("");

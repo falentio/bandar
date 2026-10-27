@@ -17,4 +17,5 @@ export const NoteListSchema = z.array(NoteSchema);
 export const NoteIdSchema = z.coerce.number().int().positive();
 
 export type NoteInput = z.infer<typeof NoteInputSchema>;
+
 export type Note = z.infer<typeof NoteSchema>;

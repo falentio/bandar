@@ -20,14 +20,18 @@ export function useNotes(): Notes {
   useEffect(() => {
     let live = true;
 
-    notesApi.list().then(
-      (notes) => {
+    const load = async () => {
+      try {
+        const notes = await notesApi.list();
+
         if (live) setState({ status: "ready", notes });
-      },
-      (error: unknown) => {
-        if (live) setState({ status: "error", message: messageOf(error) });
-      },
-    );
+      } catch (error) {
+        if (live)
+          setState({ status: "error", message: isError(error) ? describe(error) : String(error) });
+      }
+    };
+
+    void load();
 
     return () => {
       live = false;
@@ -36,6 +40,7 @@ export function useNotes(): Notes {
 
   const add = useCallback(async (body: string) => {
     setPending(true);
+
     try {
       const note = await notesApi.create({ body });
       setState((current) => ({
@@ -43,7 +48,7 @@ export function useNotes(): Notes {
         notes: [note, ...(current.status === "ready" ? current.notes : [])],
       }));
     } catch (error) {
-      setState({ status: "error", message: messageOf(error) });
+      setState({ status: "error", message: isError(error) ? describe(error) : String(error) });
     } finally {
       setPending(false);
     }
@@ -51,6 +56,7 @@ export function useNotes(): Notes {
 
   const remove = useCallback(async (id: number) => {
     setPending(true);
+
     try {
       await notesApi.remove(id);
       setState((current) =>
@@ -59,7 +65,7 @@ export function useNotes(): Notes {
           : current,
       );
     } catch (error) {
-      setState({ status: "error", message: messageOf(error) });
+      setState({ status: "error", message: isError(error) ? describe(error) : String(error) });
     } finally {
       setPending(false);
     }
@@ -68,7 +74,10 @@ export function useNotes(): Notes {
   return { ...state, pending, add, remove };
 }
 
-function messageOf(error: unknown): string {
-  if (error instanceof ApiError) return error.issues[0] ?? error.message;
-  return error instanceof Error ? error.message : String(error);
+function isError(value: unknown): value is Error {
+  return value instanceof Error;
+}
+
+function describe(error: Error): string {
+  return error instanceof ApiError ? (error.issues[0] ?? error.message) : error.message;
 }

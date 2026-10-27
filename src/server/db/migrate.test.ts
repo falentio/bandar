@@ -17,6 +17,7 @@ let open: Database[] = [];
 function freshDb(): Database {
   const db = new Database(":memory:");
   open.push(db);
+
   return db;
 }
 
@@ -43,6 +44,7 @@ describe("applyMigrations", () => {
 
   test("rolls back a migration that throws, leaving nothing applied", () => {
     const db = freshDb();
+
     const broken: Migration = {
       tag: "0000_broken",
       sql: `${CREATE}; INSERT INTO missing VALUES (1);`,
@@ -53,6 +55,7 @@ describe("applyMigrations", () => {
     const ledger = db
       .query<{ count: number }, []>("SELECT count(*) AS count FROM _bandar_migrations")
       .get();
+
     expect(ledger?.count).toBe(0);
 
     const tables = db
@@ -60,6 +63,7 @@ describe("applyMigrations", () => {
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'notes'",
       )
       .all();
+
     expect(tables).toEqual([]);
   });
 

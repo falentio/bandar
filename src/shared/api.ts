@@ -25,4 +25,5 @@ export const HealthSchema = z.object({
 });
 
 export type ApiErrorBody = z.infer<typeof ApiErrorBodySchema>;
+
 export type Health = z.infer<typeof HealthSchema>;

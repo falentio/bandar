@@ -13,6 +13,7 @@ export function createApi(repo: NotesRepo, migration: MigrationResult): AnyElysi
     .onError(({ code, error, path, set }) => {
       if (code === "VALIDATION") {
         set.status = 422;
+
         return failure(
           "validation",
           "request did not match the schema",
@@ -22,11 +23,13 @@ export function createApi(repo: NotesRepo, migration: MigrationResult): AnyElysi
 
       if (code === "NOT_FOUND") {
         set.status = 404;
+
         return failure("not_found", `no route for ${path}`);
       }
 
       console.error("api: unhandled error", error);
       set.status = 500;
+
       return failure("internal", "unexpected server error");
     })
     .get("/health", health(migration), { response: HealthSchema })
@@ -35,6 +38,7 @@ export function createApi(repo: NotesRepo, migration: MigrationResult): AnyElysi
       "/notes",
       ({ body, set }) => {
         set.status = 201;
+
         return repo.create(body);
       },
       { body: NoteInputSchema, response: NoteSchema },
@@ -44,8 +48,10 @@ export function createApi(repo: NotesRepo, migration: MigrationResult): AnyElysi
       ({ params, set }) => {
         if (!repo.remove(params.id)) {
           set.status = 404;
+
           return failure("not_found", `note ${params.id} not found`);
         }
+
         set.status = 204;
       },
       { params: NoteParamsSchema },

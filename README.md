@@ -46,6 +46,33 @@ bun run build        # dist/bandar, ~92 MB
 `test` runs `bun --bun vp test run`, not plain `vp test run`: vitest's Node workers
 cannot resolve `bun:sqlite`, and the idempotency test deliberately uses it.
 
+## Lint policy
+
+`vp check` runs oxfmt, oxlint and tsgolint, plus the vendored
+[anti-slop](https://github.com/dmmulroy/anti-slop) rules in
+`./tools/oxlint/anti-slop/`. Upstream publishes no npm package on purpose: the
+rules are meant to be copied in and edited. This copy is MIT-licensed, from
+commit `13909c9`, and registered in the `lint` block of `./vite.config.ts`.
+
+Every generic rule is enabled as an error: the array-method and reducer-shape
+rules, `no-chained-type-assertions`, `no-known-value-widening`,
+`no-object-parameters`, the `unknown` family (`no-unknown-parameters`,
+`no-unknown-returns`, `no-unknown-type-aliases`, `no-unsafe-dictionary-type`,
+`no-widen-then-assert`), `no-runtime-typeof`, `no-module-mocking`,
+`no-shape-in-symbol-names`, `require-readable-spacing`,
+`require-safety-comment-for-type-assertion`, and `oxc/no-accumulating-spread`.
+
+The Effect rule group stays out; this project does not use Effect. A type
+assertion needs a `// SAFETY:` line stating the invariant the assertion relies
+on, and a value of unknown type gets narrowed by an `instanceof` or a type
+predicate before any helper sees it, not passed along as `unknown`.
+
+The vendored files are local policy: change a rule here when it disagrees with
+the project. `@oxlint/plugins` is pinned to the exact `oxlint` version
+`vite-plus` resolves (1.89.0); bump both together or the plugin stops loading.
+`tools/oxlint/anti-slop/**` is ignored by lint and format so the vendored code
+stays as upstream wrote it.
+
 ## Environment
 
 | Variable      | Default       | Meaning                                                               |
@@ -95,7 +122,8 @@ bandar/
 │   ├── components/notes-panel.tsx
 │   └── index.css                 # tailwind + shadcn tokens
 ├── src/components/ui/            # shadcn primitives, untouched
-└── src/lib/utils.ts              # re-exports cn
+├── src/lib/utils.ts              # re-exports cn
+└── tools/oxlint/anti-slop/       # vendored anti-slop rules (MIT)
 ```
 
 Two tsconfig projects split the type surface: `tsconfig.app.json` has DOM and no

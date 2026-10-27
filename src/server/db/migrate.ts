@@ -43,10 +43,12 @@ export function applyMigrations(
   assertSameRelease(applied, migrations);
 
   const executed: string[] = [];
+
   for (const migration of migrations) {
     if (applied.has(migration.tag)) continue;
 
     sqlite.exec("BEGIN IMMEDIATE");
+
     try {
       sqlite.exec(migration.sql);
       sqlite
@@ -57,10 +59,12 @@ export function applyMigrations(
       sqlite.exec("ROLLBACK");
       throw error;
     }
+
     executed.push(migration.tag);
   }
 
   const now = new Set([...applied.keys(), ...executed]);
+
   const current =
     [...migrations].reverse().find((migration) => now.has(migration.tag))?.tag ?? null;
 
@@ -74,6 +78,7 @@ function assertSameRelease(
   const embedded = new Set(migrations.map((migration) => migration.tag));
 
   const missing = [...applied.keys()].filter((tag) => !embedded.has(tag));
+
   if (missing.length > 0) {
     throw new MigrationDowngradeError(
       `database has migrations this binary does not embed: ${missing.join(", ")}. Start a newer build.`,
@@ -82,8 +87,10 @@ function assertSameRelease(
 
   const drifted = migrations.filter((migration) => {
     const stored = applied.get(migration.tag);
+
     return stored !== undefined && stored !== checksumOf(migration.sql);
   });
+
   if (drifted.length > 0) {
     throw new MigrationDriftError(
       `applied migrations changed body: ${drifted.map((migration) => migration.tag).join(", ")}. ` +

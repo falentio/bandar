@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiErrorBodySchema, HealthSchema } from "../src/shared/api";
-import { NoteSchema } from "../src/shared/notes";
+import { z } from "zod";
+import { ApiErrorBodySchema, HealthSchema, type ApiErrorBody } from "../src/shared/api";
+import { NoteListSchema, NoteSchema } from "../src/shared/notes";
 
 const BINARY = join(import.meta.dir, "../dist/bandar");
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
+
+type Json = string | number | boolean | null | readonly Json[] | { readonly [key: string]: Json };
+
+type Journal = { readonly entries: readonly { readonly idx: number; readonly tag: string }[] };
 
 type Booted = {
   readonly origin: string;
@@ -52,21 +57,20 @@ try {
   });
 
   await check("GET /api/health reports the embedded migration", async () => {
-    const health = HealthSchema.parse(await getJson("/api/health", 200));
+    const health = await getJson("/api/health", HealthSchema, 200);
     assert.equal(health.migration, expectedMigration);
   });
 
   await check("POST /api/notes creates a note", async () => {
-    const note = NoteSchema.parse(await postJson("/api/notes", { body: created.body }, 201));
+    const note = await postJson("/api/notes", { body: created.body }, NoteSchema, 201);
     assert.equal(note.body, created.body);
     created.id = note.id;
   });
 
   await check("GET /api/notes lists the created note", async () => {
-    const body = await getJson("/api/notes", 200);
-    assert.ok(Array.isArray(body));
+    const notes = await getJson("/api/notes", NoteListSchema, 200);
     assert.ok(
-      body.some((note) => note.id === created.id),
+      notes.some((note) => note.id === created.id),
       `note ${created.id} is missing from the list`,
     );
   });
@@ -106,11 +110,12 @@ try {
 }
 
 const second = await boot();
+
 try {
   await check("a second boot applies no migrations", async () => {
     assert.match(second.log(), /migrations: 0 applied/);
 
-    const health = HealthSchema.parse(await getJson("/api/health", 200, second.origin));
+    const health = await getJson("/api/health", HealthSchema, 200, second.origin);
     assert.equal(health.migration, expectedMigration);
   });
 } finally {
@@ -151,16 +156,20 @@ async function boot(): Promise<Booted> {
 
   void (async () => {
     const reader = proc.stdout.getReader();
+
     for (;;) {
       const { value, done } = await reader.read();
+
       if (done) return;
       log += decoder.decode(value, { stream: true });
     }
   })();
 
   const deadline = Date.now() + 15_000;
+
   while (Date.now() < deadline) {
     const found = log.match(/listening on (http:\/\/\S+)/)?.[1];
+
     if (found) return { origin: found, log: () => log, stop: () => stop(proc) };
 
     if (proc.exitCode !== null)
@@ -177,19 +186,31 @@ async function stop(proc: Bun.Subprocess): Promise<void> {
   await proc.exited;
 }
 
-async function getJson(path: string, status: number, base: string = origin): Promise<unknown> {
+async function getJson<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  status: number,
+  base: string = origin,
+): Promise<T> {
   const response = await fetch(new URL(path, base));
   assert.equal(response.status, status);
-  return response.json();
+
+  return schema.parse(await response.json());
 }
 
-async function postJson(path: string, body: unknown, status: number): Promise<unknown> {
+async function postJson<T>(
+  path: string,
+  body: Json,
+  schema: z.ZodType<T>,
+  status: number,
+): Promise<T> {
   const response = await post(path, body);
   assert.equal(response.status, status);
-  return response.json();
+
+  return schema.parse(await response.json());
 }
 
-async function post(path: string, body: unknown): Promise<Response> {
+async function post(path: string, body: Json): Promise<Response> {
   return fetch(new URL(path, origin), {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -197,9 +218,7 @@ async function post(path: string, body: unknown): Promise<Response> {
   });
 }
 
-async function errorBody(
-  response: Response,
-): Promise<{ code: string; message: string; issues: string[] }> {
+async function errorBody(response: Response): Promise<ApiErrorBody["error"]> {
   return ApiErrorBodySchema.parse(await response.json()).error;
 }
 
@@ -208,10 +227,11 @@ function contentType(response: Response): string {
 }
 
 function lastJournalTag(): string {
-  const journal = JSON.parse(readFileSync(JOURNAL, "utf8")) as {
-    entries: readonly { idx: number; tag: string }[];
-  };
+  // SAFETY: drizzle-kit wrote this journal; only entries[].idx and entries[].tag are read.
+  const journal = JSON.parse(readFileSync(JOURNAL, "utf8")) as Journal;
+
   const last = [...journal.entries].sort((a, b) => a.idx - b.idx).at(-1);
+
   if (!last) throw new Error(`${JOURNAL} has no migration entries`);
 
   return last.tag;

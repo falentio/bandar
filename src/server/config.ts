@@ -29,10 +29,12 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   );
 
   const parsed = ConfigSchema.safeParse(given);
+
   if (!parsed.success) {
     const issues = parsed.error.issues.map(
       (issue) => `${issue.path.join(".") || "environment"}: ${issue.message}`,
     );
+
     throw new ConfigError(issues);
   }
 

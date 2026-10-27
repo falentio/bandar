@@ -19,7 +19,9 @@ export function createApp(deps: AppDeps): App {
   return {
     handle: async (request) => {
       const { pathname } = new URL(request.url);
+
       if (!isApiPath(pathname)) return serveStatic(request, deps.client);
+
       return api.handle(request);
     },
   };

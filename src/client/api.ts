@@ -26,18 +26,22 @@ export const notesApi = {
 
 async function request<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}): Promise<T> {
   const response = await send(path, init);
+
   return schema.parse(await response.json());
 }
 
 async function send(path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers);
+
   if (init.body !== undefined) headers.set("content-type", "application/json");
 
   const response = await fetch(path, { ...init, headers });
+
   if (response.ok) return response;
 
   const payload: unknown = await response.json().catch(() => null);
   const parsed = ApiErrorBodySchema.safeParse(payload);
+
   if (!parsed.success)
     throw new ApiError(response.status, `request failed with ${response.status}`);
 

@@ -1008,6 +1008,26 @@ try {
       v.parse(CompletionSchema, await google.json()).choices[0]?.message.content,
       "Hello from OpenCode Google",
     );
+
+    const anthropicStream = await chatRequest("claude-haiku-5-5", true);
+
+    assert.equal(anthropicStream.status, 200);
+
+    const anthropicEvents = await readStream(anthropicStream);
+
+    assert.equal(anthropicEvents.text, "Hello from OpenCode Anthropic");
+    assert.equal(anthropicEvents.usage?.prompt_tokens, 5);
+    assert.equal(anthropicEvents.usage?.completion_tokens, 3);
+
+    const googleStream = await chatRequest("gemini-4-argon", true);
+
+    assert.equal(googleStream.status, 200);
+
+    const googleEvents = await readStream(googleStream);
+
+    assert.equal(googleEvents.text, "Hello from OpenCode Google");
+    assert.equal(googleEvents.usage?.prompt_tokens, 4);
+    assert.equal(googleEvents.usage?.completion_tokens, 2);
   });
 
   await check("a hand-added responses model is a 400 before any request", async () => {
@@ -2722,6 +2742,30 @@ function startBuiltIns() {
 
         if (request.headers.has("x-api-key")) return jsonError(401, "opencode go takes one bearer");
 
+        const body = v.safeParse(
+          v.object({ stream: v.optional(v.boolean()) }),
+          await request.json(),
+        );
+
+        if (body.success && body.output.stream === true) {
+          return sse([
+            {
+              type: "message_start",
+              message: { usage: { input_tokens: 5, output_tokens: 0 } },
+            },
+            {
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: "Hello from OpenCode Anthropic" },
+            },
+            {
+              type: "message_delta",
+              delta: { stop_reason: "end_turn" },
+              usage: { output_tokens: 3 },
+            },
+            { type: "message_stop" },
+          ]);
+        }
+
         return Response.json({
           content: [{ type: "text", text: "Hello from OpenCode Anthropic" }],
           stop_reason: "end_turn",
@@ -2736,8 +2780,22 @@ function startBuiltIns() {
           return jsonError(401, "opencode go takes one bearer");
         }
 
-        if (!url.pathname.endsWith(":generateContent")) {
+        const stream = url.pathname.endsWith(":streamGenerateContent");
+
+        if (!stream && !url.pathname.endsWith(":generateContent")) {
           return jsonError(404, `no fake opencode google route for ${url.pathname}`);
+        }
+
+        if (stream) {
+          return sse([
+            {
+              candidates: [{ content: { parts: [{ text: "Hello from OpenCode Google" }] } }],
+            },
+            {
+              candidates: [{ finishReason: "STOP" }],
+              usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2 },
+            },
+          ]);
         }
 
         return Response.json({

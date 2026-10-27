@@ -604,6 +604,61 @@ describe("provider credentials", () => {
     ]);
   });
 
+  test("a reorder rejects a duplicate id and lands a real permutation", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Dup",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addCredential(deps, provider.id, "one");
+    const keyed = await addCredential(deps, provider.id, "two");
+
+    const ids = keyed.credentials.map((credential) => credential.id);
+    const first = ids[0] ?? "";
+    const second = ids[1] ?? "";
+
+    expect(
+      (await reorderProviderCredentials(deps, "user-1", provider.id, [first, first])).kind,
+    ).toBe("invalid_order");
+    expect(
+      (await reorderProviderCredentials(deps, "user-1", provider.id, [second, first])).kind,
+    ).toBe("ok");
+  });
+
+  test("removing a middle credential compacts the ranks", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Middle",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addCredential(deps, provider.id, "one");
+    await addCredential(deps, provider.id, "two");
+    const all = await addCredential(deps, provider.id, "three");
+
+    const ids = all.credentials.map((credential) => credential.id);
+
+    const removed = await removeProviderCredential(deps, "user-1", provider.id, ids[1] ?? "");
+
+    if (removed.kind !== "ok") throw new Error("the middle credential was not removed");
+
+    expect(
+      removed.provider.credentials.map((credential) => [credential.id, credential.priority]),
+    ).toEqual([
+      [ids[0], 1],
+      [ids[2], 2],
+    ]);
+  });
+
   test("migration 0008 moves a stored key into the first credential", () => {
     const handle = openDatabase(":memory:");
     open.push(handle);
@@ -620,6 +675,10 @@ describe("provider credentials", () => {
       `INSERT INTO providers (id, user_id, name, slug, kind, base_url, api_key, auth_mode, origin, created_at)
        VALUES ('provider-keyed', 'user-1', 'Keyed', 'keyed', 'openai', 'https://example.com', 'SEALED', 'api-key', 'custom', 1),
               ('provider-empty', 'user-1', 'Empty', 'empty', 'openai', 'https://example.com', '', 'api-key', 'custom', 2)`,
+    );
+    handle.sqlite.exec(
+      `INSERT INTO provider_models (id, user_id, provider_id, alias, upstream_model, enabled, created_at)
+       VALUES ('model-keyed', 'user-1', 'provider-keyed', 'fast', 'gpt', 1, 3)`,
     );
 
     expect(applyMigrations(handle.sqlite, all).applied).toEqual(["0008_provider_credentials"]);
@@ -641,6 +700,14 @@ describe("provider credentials", () => {
 
     expect(columns).not.toContain("api_key");
     expect(columns).not.toContain("auth_mode");
+
+    expect(
+      handle.sqlite
+        .query<{ id: string; provider_id: string }, []>(
+          "SELECT id, provider_id FROM provider_models",
+        )
+        .all(),
+    ).toEqual([{ id: "model-keyed", provider_id: "provider-keyed" }]);
   });
 });
 

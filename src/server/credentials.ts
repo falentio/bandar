@@ -1,8 +1,11 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { Provider, ProviderAuthMode, ProviderCredentialInput } from "../shared/providers";
+import type { Db } from "./db/client";
 import type { Credential } from "./credential";
 import { providerCredentials } from "./db/schema";
 import { readProvider, sealApiKey, type ProviderDeps } from "./providers";
+
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 type AppendedCredential = {
   readonly label: string;
@@ -69,30 +72,16 @@ export async function reorderProviderCredentials(
 
   if (provider === null) return { kind: "missing_provider" };
 
-  const owned = new Set(provider.credentials.map((entry) => entry.id));
+  const requested = new Set(credentialIds);
 
-  if (
-    credentialIds.length !== provider.credentials.length ||
-    !credentialIds.every((id) => owned.has(id))
-  ) {
+  if (requested.size !== provider.credentials.length) return { kind: "invalid_order" };
+
+  if (!provider.credentials.every((entry) => requested.has(entry.id))) {
     return { kind: "invalid_order" };
   }
 
   deps.db.transaction((tx) => {
-    // The unique index is live during the update, so every rank leaves the 1..N range first.
-    for (const entry of provider.credentials) {
-      tx.update(providerCredentials)
-        .set({ priority: -entry.priority })
-        .where(eq(providerCredentials.id, entry.id))
-        .run();
-    }
-
-    for (const [index, credentialId] of credentialIds.entries()) {
-      tx.update(providerCredentials)
-        .set({ priority: index + 1 })
-        .where(eq(providerCredentials.id, credentialId))
-        .run();
-    }
+    writeRanks(tx, providerId, provider.credentials, credentialIds);
   });
 
   return reload(deps, userId, providerId);
@@ -122,12 +111,12 @@ export async function removeProviderCredential(
       )
       .run();
 
-    for (const [index, entry] of remaining.entries()) {
-      tx.update(providerCredentials)
-        .set({ priority: index + 1 })
-        .where(eq(providerCredentials.id, entry.id))
-        .run();
-    }
+    writeRanks(
+      tx,
+      providerId,
+      remaining,
+      remaining.map((entry) => entry.id),
+    );
   });
 
   return reload(deps, userId, providerId);
@@ -148,6 +137,33 @@ export async function addOAuthCredential(
   appendCredential(deps, providerId, { label: "", sealed, authMode: credential.authMode });
 
   return readProvider(deps, userId, providerId);
+}
+
+function writeRanks(
+  tx: Tx,
+  providerId: string,
+  current: readonly { readonly id: string; readonly priority: number }[],
+  order: readonly string[],
+): void {
+  // The unique index is live during the update, so every rank leaves the 1..N range first.
+  for (const entry of current) {
+    tx.update(providerCredentials)
+      .set({ priority: -entry.priority })
+      .where(eq(providerCredentials.id, entry.id))
+      .run();
+  }
+
+  for (const [index, credentialId] of order.entries()) {
+    tx.update(providerCredentials)
+      .set({ priority: index + 1 })
+      .where(
+        and(
+          eq(providerCredentials.id, credentialId),
+          eq(providerCredentials.providerId, providerId),
+        ),
+      )
+      .run();
+  }
 }
 
 function appendCredential(

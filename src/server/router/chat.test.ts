@@ -9,7 +9,7 @@ import { user } from "../db/auth-schema";
 import { openDatabase, type DatabaseHandle } from "../db/client";
 import { applyMigrations, type Migration } from "../db/migrate";
 import { cooldownEvents, providerCredentials, providerModels, providers } from "../db/schema";
-import { DuckDb } from "../duck/client";
+import { DuckDb, type QueryRow } from "../duck/client";
 import { applyDuckMigrations } from "../duck/migrate";
 import { addProviderModel, createProvider, type ProviderDeps } from "../providers";
 import { createSealer } from "../seal";
@@ -28,6 +28,8 @@ const CompletionSchema = v.object({
     }),
   ),
 });
+
+const ErrorSchema = v.object({ error: v.object({ message: v.string(), code: v.string() }) });
 
 type Call = {
   readonly path: string;
@@ -110,6 +112,52 @@ describe("runChat cooldowns", () => {
     expect(history[0]?.reference).toBe("fast");
   });
 
+  test("tries the next credential after a rate limit and flags the first", async () => {
+    const harness = await freshHarness((call) =>
+      call.key === "Bearer good-key"
+        ? openAiSuccess()
+        : Response.json({ error: { message: "slow down" } }, { status: 429 }),
+    );
+
+    const provider = await createProvider(harness.providers, "user-1", {
+      name: "Primary",
+      kind: "openai",
+      baseUrl: harness.upstream.origin,
+      apiKey: "",
+    });
+
+    await addProviderModel(harness.providers, "user-1", provider.id, {
+      upstreamModel: "m",
+      alias: "fast",
+    });
+    await addCredential(harness.providers, provider.id, "limited", "limited-key");
+    await addCredential(harness.providers, provider.id, "good", "good-key");
+
+    const response = await runChat(harness.deps, chatInput("fast"));
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls.map((call) => call.key)).toEqual([
+      "Bearer limited-key",
+      "Bearer good-key",
+    ]);
+
+    const limited = credentialNamed(harness.db, "limited");
+
+    expect(limited?.failures).toBe(1);
+    expect(limited?.flaggedUntil).not.toBeNull();
+    expect(providerRowOf(harness.db, provider.id)?.failures).toBe(0);
+    expect(
+      harness.db.select().from(providerModels).where(eq(providerModels.alias, "fast")).get()
+        ?.failures,
+    ).toBe(0);
+
+    const history = harness.db.select().from(cooldownEvents).all();
+
+    expect(history).toHaveLength(1);
+    expect(history[0]?.subject).toBe("credential");
+    expect(history[0]?.errorKind).toBe("rate_limit");
+  });
+
   test("skips a cooling credential on the next request", async () => {
     const harness = await freshHarness(openAiUpstream("good-key"));
 
@@ -130,9 +178,11 @@ describe("runChat cooldowns", () => {
     expect((await runChat(harness.deps, chatInput("fast"))).status).toBe(200);
 
     const before = harness.upstream.calls.length;
+    const eventsBefore = requestEvents(harness.deps.duck).length;
     const second = await runChat(harness.deps, chatInput("fast"));
 
     expect(second.status).toBe(200);
+    expect(requestEvents(harness.deps.duck).length - eventsBefore).toBe(1);
 
     const fresh = harness.upstream.calls.slice(before);
 
@@ -183,6 +233,68 @@ describe("runChat cooldowns", () => {
     expect(harness.upstream.calls.slice(before).map((call) => call.path)).toEqual([
       "/alive/chat/completions",
     ]);
+  });
+
+  test("convicts the provider on a socket-level failure and falls through it", async () => {
+    const harness = await freshHarness(() => openAiSuccess());
+
+    const dead = await providerWithModel(harness, {
+      name: "Dead",
+      path: "",
+      alias: "dead",
+      upstreamModel: "dead-model",
+      origin: deadOrigin(),
+    });
+
+    const alive = await providerWithModel(harness, {
+      name: "Alive",
+      path: "/alive",
+      alias: "alive",
+      upstreamModel: "alive-model",
+    });
+
+    await tagWith(harness, "socket-failover", [dead.modelId, alive.modelId]);
+
+    const response = await runChat(harness.deps, chatInput("tags/socket-failover"));
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls.map((call) => call.path)).toEqual(["/alive/chat/completions"]);
+    expect(providerRowOf(harness.db, dead.providerId)?.failures).toBe(1);
+    expect(providerRowOf(harness.db, dead.providerId)?.flaggedUntil).not.toBeNull();
+    expect(providerRowOf(harness.db, alive.providerId)?.failures).toBe(0);
+  });
+
+  test("answers 502 and convicts nobody for an unclassified status", async () => {
+    const harness = await freshHarness(() =>
+      Response.json({ error: { message: "payment required" } }, { status: 402 }),
+    );
+
+    const seeded = await providerWithModel(harness, {
+      name: "Unpaid",
+      path: "/unpaid",
+      alias: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "only", "only-key");
+
+    const response = await runChat(harness.deps, chatInput("fast"));
+
+    expect(response.status).toBe(502);
+    expect(v.parse(ErrorSchema, await response.json()).error.code).toBe("unknown");
+    expect(providerRowOf(harness.db, seeded.providerId)?.failures).toBe(0);
+    expect(
+      harness.db.select().from(providerModels).where(eq(providerModels.id, seeded.modelId)).get()
+        ?.failures,
+    ).toBe(0);
+    expect(credentialNamed(harness.db, "only")?.failures).toBe(0);
+    expect(harness.db.select().from(cooldownEvents).all()).toHaveLength(0);
+
+    const events = requestEvents(harness.deps.duck);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.status).toBe("error");
+    expect(events[0]?.error_kind).toBe("unknown");
   });
 
   test("flags a model after a protocol failure and lets the next tag model answer", async () => {
@@ -465,6 +577,21 @@ function sse(events: readonly unknown[]): Response {
 
 type Seeded = { readonly providerId: string; readonly modelId: string };
 
+function requestEvents(duck: DuckDb): readonly QueryRow[] {
+  return duck.query(
+    "SELECT status, error_kind, http_status, reference FROM request_events ORDER BY started_at",
+  );
+}
+
+function deadOrigin(): string {
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) });
+  const origin = `http://127.0.0.1:${String(server.port)}`;
+
+  void server.stop(true);
+
+  return origin;
+}
+
 async function providerWithModel(
   harness: Harness,
   options: {
@@ -472,12 +599,13 @@ async function providerWithModel(
     readonly path: string;
     readonly alias: string;
     readonly upstreamModel: string;
+    readonly origin?: string;
   },
 ): Promise<Seeded> {
   const provider = await createProvider(harness.providers, "user-1", {
     name: options.name,
     kind: "openai",
-    baseUrl: harness.upstream.origin + options.path,
+    baseUrl: (options.origin ?? harness.upstream.origin) + options.path,
     apiKey: "",
   });
 

@@ -176,8 +176,26 @@ The dashboard derives these metrics:
 Non-streaming requests have no observable first token, so they record
 `ttft_ms = null` and `tokens_per_second = null`. The dashboard shows `—`.
 
-The overview defaults to 30 days and can switch to 7 or 90. The API is
-`GET /api/analytics?days=30`; recent attempts are `GET /api/requests?limit=50`.
+The overview defaults to 30 days and can switch to 7 or 90. Recent attempts are
+`GET /api/requests?limit=50`.
+
+Filters narrow every number on the page: the summary, the daily series, and the
+model breakdown. Filter by provider, account, model alias, or tag. Each filter
+accepts several values, and the filters intersect.
+
+`GET /api/analytics?days=30&providerKind=openai&model=fast` repeats one query
+parameter per dimension.
+
+| Parameter      | Matches                                      |
+| -------------- | -------------------------------------------- |
+| `providerKind` | The provider kind, such as `openai`.         |
+| `providerId`   | One configured provider account.             |
+| `model`        | The resolved alias, such as `fast`.          |
+| `tag`          | A tag slug. The client called `tags/<slug>`. |
+
+Repeat a parameter to match any of its values. The tag filter matches the
+reference the client sent, so it counts the calls that used the tag and not the
+calls that used an alias of a tagged model.
 
 ## Adding a provider
 
@@ -406,7 +424,7 @@ bandar/
 | `GET/POST /api/tags`                                  | Session or `x-api-key` | List tags with their models, or create a tag.           |
 | `PUT /api/tags/:id/models`                            | Session or `x-api-key` | Replace a tag's model list and order; returns the list. |
 | `DELETE /api/tags/:id`                                | Session or `x-api-key` | Delete a tag; returns the remaining list.               |
-| `GET /api/analytics?days=30`                          | Session or `x-api-key` | Window summary, daily series, model breakdown.          |
+| `GET /api/analytics?days=30&…`                        | Session or `x-api-key` | Window summary, daily series, model breakdown, filters. |
 | `GET /api/requests?limit=50&providerId=…`             | Session or `x-api-key` | Recent attempts, optionally one provider.               |
 | `GET /api/health`                                     | none                   | Both current migration tags.                            |
 | `/api/auth/*`                                         | better-auth            | Sign-up, sign-in, sessions, key create/list/delete.     |

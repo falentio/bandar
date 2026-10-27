@@ -169,6 +169,13 @@ export const providerPaths = {
 
 export type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
 
+export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
+  openai: "OpenAI compatible",
+  anthropic: "Anthropic compatible",
+  google: "Google GenAI compatible",
+  kilocode: "Kilo Code",
+};
+
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;
 
 export type ProviderAuthMode = v.InferOutput<typeof ProviderAuthModeSchema>;

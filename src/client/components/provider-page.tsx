@@ -20,6 +20,7 @@ import { type Tag } from "../../shared/tags";
 import {
   BUILT_IN_PROVIDERS,
   GENERIC_PROVIDER_KINDS,
+  PROVIDER_KIND_LABELS,
   type Provider,
   type ProviderKind,
   type ProviderModel,
@@ -58,13 +59,6 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   anthropic: "https://api.anthropic.com/v1",
   google: "https://generativelanguage.googleapis.com/v1beta",
   kilocode: BUILT_IN_PROVIDERS.kilocode.baseUrl,
-};
-
-const KIND_LABELS: Record<ProviderKind, string> = {
-  openai: "OpenAI compatible",
-  anthropic: "Anthropic compatible",
-  google: "Google GenAI compatible",
-  kilocode: "Kilo Code",
 };
 
 export function ProviderPage({
@@ -132,7 +126,7 @@ export function ProviderPage({
                   </span>
                 </div>
                 <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
-                  <span>{KIND_LABELS[provider.kind]}</span>
+                  <span>{PROVIDER_KIND_LABELS[provider.kind]}</span>
                   <span aria-hidden="true">·</span>
                   <span className="truncate font-mono text-xs">{provider.baseUrl}</span>
                 </p>
@@ -317,7 +311,7 @@ function SettingsCard({
             {builtIn ? (
               <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
                 <ProviderLogo kind={provider.kind} className="size-4" />
-                <span>{KIND_LABELS[provider.kind]}</span>
+                <span>{PROVIDER_KIND_LABELS[provider.kind]}</span>
                 <span className="ms-auto text-xs text-muted-foreground">Defined in code</span>
               </div>
             ) : (
@@ -336,7 +330,7 @@ function SettingsCard({
                       className="size-5 transition-transform duration-150 ease-out group-hover/kind:scale-110"
                     />
                     <span className="font-medium">
-                      {KIND_LABELS[value].replace(" compatible", "")}
+                      {PROVIDER_KIND_LABELS[value].replace(" compatible", "")}
                     </span>
                   </button>
                 ))}

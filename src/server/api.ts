@@ -19,6 +19,7 @@ import {
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
+import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
@@ -555,7 +556,13 @@ export function createApi(deps: ApiDeps) {
       if (caller instanceof Response) return caller;
 
       const { days } = parseInput(AnalyticsQuerySchema, query);
-      const analytics = readAnalytics(deps.duck, { userId: caller.userId, days });
+
+      const filters = parseInput(
+        AnalyticsFiltersInputSchema,
+        filterParams(new URL(request.url).searchParams),
+      );
+
+      const analytics = readAnalytics(deps.duck, { userId: caller.userId, days, filters });
 
       return v.parse(AnalyticsSchema, analytics);
     })

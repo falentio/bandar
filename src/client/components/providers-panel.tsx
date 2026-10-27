@@ -16,9 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   GENERIC_PROVIDER_KINDS,
+  PROVIDER_KIND_LABELS,
   type GenericProviderKind,
   type Provider,
-  type ProviderKind,
 } from "../../shared/providers";
 import { useProviders, type Providers } from "../use-providers";
 import { ProviderLogo } from "./provider-logo";
@@ -27,13 +27,6 @@ const PLACEHOLDERS: Record<GenericProviderKind, string> = {
   openai: "https://api.openai.com/v1",
   anthropic: "https://api.anthropic.com/v1",
   google: "https://generativelanguage.googleapis.com/v1beta",
-};
-
-const KIND_LABELS: Record<ProviderKind, string> = {
-  openai: "OpenAI compatible",
-  anthropic: "Anthropic compatible",
-  google: "Google GenAI compatible",
-  kilocode: "Kilo Code",
 };
 
 export function ProvidersPanel() {
@@ -168,7 +161,7 @@ function ProviderRow({ provider }: { provider: Provider }) {
             ) : null}
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>{KIND_LABELS[provider.kind]}</span>
+            <span>{PROVIDER_KIND_LABELS[provider.kind]}</span>
             <span aria-hidden="true">·</span>
             <span className="font-mono">{provider.slug}</span>
             <span aria-hidden="true">·</span>
@@ -258,7 +251,7 @@ function CreateProviderDialog({
                     className="size-5 transition-transform duration-150 ease-out group-hover/kind:scale-110 group-aria-checked/kind:scale-105"
                   />
                   <span className="font-medium">
-                    {KIND_LABELS[value].replace(" compatible", "")}
+                    {PROVIDER_KIND_LABELS[value].replace(" compatible", "")}
                   </span>
                 </button>
               ))}

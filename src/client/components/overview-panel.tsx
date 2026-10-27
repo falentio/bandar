@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EMPTY_ANALYTICS_FILTERS, hasAnalyticsFilters } from "../../shared/analytics";
 import {
   formatExactTokens,
   formatMs,
@@ -10,6 +11,7 @@ import {
   formatUsd,
 } from "../format";
 import { useAnalytics } from "../use-analytics";
+import { AnalyticsFilterBar } from "./analytics-filters";
 import { TokenChart } from "./token-chart";
 
 const RANGES = [7, 30, 90] as const;
@@ -44,6 +46,8 @@ export function OverviewPanel() {
         </div>
       </div>
 
+      <AnalyticsFilterBar filters={analytics.filters} onChange={analytics.setFilters} />
+
       {analytics.error === null ? null : (
         <p className="text-sm text-destructive">{analytics.error}</p>
       )}
@@ -51,21 +55,15 @@ export function OverviewPanel() {
       {data === null ? (
         <p className="text-sm text-muted-foreground">Loading analytics…</p>
       ) : data.summary.requests === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>No requests in this window</CardTitle>
-            <CardDescription>
-              Connect a provider, mint an API key, then call <code>/v1/chat/completions</code>.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild variant="outline" size="sm">
-              <Link to="/providers">Add a custom provider</Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyAnalytics
+          filtered={hasAnalyticsFilters(analytics.filters)}
+          onClear={() => analytics.setFilters(EMPTY_ANALYTICS_FILTERS)}
+        />
       ) : (
-        <>
+        <div
+          aria-busy={analytics.status === "loading"}
+          className={analytics.status === "loading" ? "space-y-4 opacity-60" : "space-y-4"}
+        >
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Stat label="Requests" value={formatTokens(data.summary.requests)} />
             <Stat
@@ -140,9 +138,41 @@ export function OverviewPanel() {
               </div>
             </CardContent>
           </Card>
-        </>
+        </div>
       )}
     </div>
+  );
+}
+
+function EmptyAnalytics({ filtered, onClear }: { filtered: boolean; onClear: () => void }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          {filtered ? "No requests match these filters" : "No requests in this window"}
+        </CardTitle>
+        <CardDescription>
+          {filtered ? (
+            "Clear a filter or widen the window to see more traffic."
+          ) : (
+            <>
+              Connect a provider, mint an API key, then call <code>/v1/chat/completions</code>.
+            </>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {filtered ? (
+          <Button variant="outline" size="sm" onClick={onClear}>
+            Clear filters
+          </Button>
+        ) : (
+          <Button asChild variant="outline" size="sm">
+            <Link to="/providers">Add a custom provider</Link>
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

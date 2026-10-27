@@ -387,6 +387,7 @@ describe("provider models", () => {
     expect(applyMigrations(handle.sqlite, all).applied).toEqual([
       "0007_provider_upstream",
       "0008_provider_credentials",
+      "0009_powerful_hairball",
     ]);
     expect(handle.db.select({ id: providerModels.id }).from(providerModels).all()).toEqual([
       { id: "model-1" },
@@ -446,7 +447,10 @@ describe("provider models", () => {
         1767225600000,
       );
 
-    expect(applyMigrations(handle.sqlite, all).applied).toEqual(["0008_provider_credentials"]);
+    expect(applyMigrations(handle.sqlite, all).applied).toEqual([
+      "0008_provider_credentials",
+      "0009_powerful_hairball",
+    ]);
 
     const credentials = handle.db.select().from(providerCredentials).all();
 

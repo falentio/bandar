@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
 import * as v from "valibot";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { ChatCompletionRequestSchema } from "../shared/chat";
@@ -16,13 +17,16 @@ import { applyMigrations, type Migration } from "./db/migrate";
 import { providerModels, providers, tagModels, tags } from "./db/schema";
 import {
   addProviderModel,
+  assignProviderSlugs,
   createProvider,
   listProviders,
   ProviderRuleError,
+  removeProvider,
   removeProviderModel,
   updateProvider,
   type ProviderDeps,
 } from "./providers";
+import { listModelRefs, resolvePlan } from "./router/resolve";
 import { createSealer } from "./seal";
 import { createTag, listTags, setTagModels } from "./tags";
 
@@ -54,6 +58,113 @@ describe("model refs", () => {
     });
 
     expect(rejected.success).toBe(false);
+  });
+});
+
+describe("references", () => {
+  test("resolution is case-sensitive", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Case",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addProviderModel(deps, "user-1", provider.id, {
+      upstreamModel: "Model",
+      alias: "Alias",
+    });
+
+    expect((await resolvePlan(deps, "user-1", "case/Model")).candidates).toHaveLength(1);
+    expect((await resolvePlan(deps, "user-1", "CASE/Model")).candidates).toHaveLength(0);
+    expect((await resolvePlan(deps, "user-1", "Alias")).candidates).toHaveLength(1);
+    expect((await resolvePlan(deps, "user-1", "alias")).candidates).toHaveLength(0);
+  });
+
+  test("a legacy tags/ alias wins over the tag chain", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const aliasProvider = await createProvider(deps, "user-1", {
+      name: "Alias",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    handle.db
+      .insert(providerModels)
+      .values({
+        id: "legacy-alias",
+        userId: "user-1",
+        providerId: aliasProvider.id,
+        alias: "tags/legacy",
+        upstreamModel: "alias-model",
+        enabled: true,
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      })
+      .run();
+
+    const tagProvider = await createProvider(deps, "user-1", {
+      name: "Tag Source",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const tagProviderWithModel = await addProviderModel(deps, "user-1", tagProvider.id, {
+      upstreamModel: "tag-model",
+      alias: "tag-model",
+    });
+
+    const tagModel = tagProviderWithModel?.models.find((model) => model.alias === "tag-model");
+    const created = await createTag(deps, "user-1", "legacy");
+    const tagId = created.tags.find((tag) => tag.slug === "legacy")?.id ?? "";
+
+    await setTagModels(deps, "user-1", tagId, [tagModel?.id ?? ""]);
+
+    const plan = await resolvePlan(deps, "user-1", "tags/legacy");
+
+    expect(plan.tag).toBeNull();
+    expect(plan.candidates.map((candidate) => candidate.upstreamModel)).toEqual(["alias-model"]);
+  });
+
+  test("a shadowed provider ref appears once in the model list", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const alpha = await createProvider(deps, "user-1", {
+      name: "Alpha",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const beta = await createProvider(deps, "user-1", {
+      name: "Beta",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addProviderModel(deps, "user-1", alpha.id, { upstreamModel: "m", alias: "m" });
+    await addProviderModel(deps, "user-1", beta.id, {
+      upstreamModel: "x",
+      alias: "alpha/m",
+    });
+
+    const refs = await listModelRefs(deps, "user-1");
+
+    expect(refs.filter((ref) => ref.id === "alpha/m")).toHaveLength(1);
+
+    const alphaModel = (await listProviders(deps, "user-1")).providers
+      .find((provider) => provider.id === alpha.id)
+      ?.models.find((model) => model.upstreamModel === "m");
+
+    expect(alphaModel?.shadowed).toBe(true);
   });
 });
 
@@ -108,6 +219,91 @@ describe("provider models", () => {
     const chain = (await listTags(deps, "user-1")).tags.find((tag) => tag.slug === "chain");
 
     expect(chain?.models.map((model) => model.priority)).toEqual([1]);
+  });
+
+  test("deleting a provider removes its models and renumbers tags", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const first = await createProvider(deps, "user-1", {
+      name: "First",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const second = await createProvider(deps, "user-1", {
+      name: "Second",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const firstModel = await addProviderModel(deps, "user-1", first.id, {
+      upstreamModel: "first",
+      alias: "first",
+    });
+
+    const secondModel = await addProviderModel(deps, "user-1", second.id, {
+      upstreamModel: "second",
+      alias: "second",
+    });
+
+    const created = await createTag(deps, "user-1", "chain");
+    const tagId = created.tags.find((tag) => tag.slug === "chain")?.id ?? "";
+
+    await setTagModels(deps, "user-1", tagId, [
+      firstModel?.models.find((model) => model.alias === "first")?.id ?? "",
+      secondModel?.models.find((model) => model.alias === "second")?.id ?? "",
+    ]);
+
+    expect(await removeProvider(deps, "user-1", first.id)).toBe(true);
+
+    const chain = (await listTags(deps, "user-1")).tags.find((tag) => tag.slug === "chain");
+
+    expect(chain?.models.map((model) => [model.alias, model.priority])).toEqual([["second", 1]]);
+    expect(
+      handle.db
+        .select({ id: providerModels.id })
+        .from(providerModels)
+        .where(eq(providerModels.providerId, first.id))
+        .all(),
+    ).toEqual([]);
+  });
+
+  test("the slug backfill is idempotent", async () => {
+    const handle = freshDb();
+    const rows = ["Kilo", "Tags", "Same", "Same 2"];
+
+    handle.db
+      .insert(providers)
+      .values(
+        rows.map((name, index) => ({
+          id: `provider-${String(index)}`,
+          userId: "user-1",
+          name,
+          slug: "",
+          kind: "openai" as const,
+          baseUrl: "https://example.com",
+          apiKey: "",
+          authMode: "api-key" as const,
+          origin: "custom" as const,
+          createdAt: new Date(Date.UTC(2026, 0, index + 1)),
+        })),
+      )
+      .run();
+
+    expect(await assignProviderSlugs(handle.db)).toBe(4);
+    expect(await assignProviderSlugs(handle.db)).toBe(0);
+
+    const slugs = handle.db
+      .select({ slug: providers.slug })
+      .from(providers)
+      .all()
+      .map((row) => row.slug)
+      .sort();
+
+    expect(slugs).toEqual(["kilo-2", "same", "same-2", "tags-2"]);
   });
 
   test("migration 0007 collapses duplicate upstream rows", () => {

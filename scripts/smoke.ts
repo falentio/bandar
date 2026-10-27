@@ -680,6 +680,11 @@ try {
     );
 
     assert.equal(rows.find((request) => request.status === "success")?.model, "fast");
+
+    const wrongCase = await chatRequest("FAKE-OPENAI/fake-openai-model", false);
+
+    assert.equal(wrongCase.status, 404);
+    assert.equal((await openAiError(wrongCase)).code, "model_not_found");
   });
 
   await check("a tag falls back to the next model and records one event per attempt", async () => {
@@ -780,6 +785,35 @@ try {
     );
   });
 
+  await check("a streaming tag retries the failed model", async () => {
+    const list = await getJson(tagPaths.list, TagListSchema, 200);
+    const tag = list.tags.find((entry) => entry.slug === "failover");
+
+    if (tag === undefined) throw new Error("the failover tag is missing");
+
+    const dead = tag.models.find((model) => model.alias === "dead-model");
+    const fast = tag.models.find((model) => model.alias === "fast");
+
+    if (dead === undefined || fast === undefined)
+      throw new Error("the failover models are missing");
+
+    await putJson(
+      tagPaths.models(tag.id),
+      { modelIds: [dead.modelId, fast.modelId] },
+      TagListSchema,
+      200,
+    );
+
+    const response = await chatRequest("tags/failover", true);
+
+    assert.equal(response.status, 200);
+
+    const stream = await readStream(response);
+
+    assert.equal(stream.text, "Hello from OpenAI");
+    assert.ok(stream.done);
+  });
+
   await check("a tag with no models is a 404 and stays out of /v1/models", async () => {
     await postJson(tagPaths.create, { slug: "empty" }, TagListSchema, 201);
 
@@ -836,6 +870,15 @@ try {
     const stream = await readStream(response);
 
     assert.equal(stream.text, "Hello from Kilo");
+
+    const listed = await fetch(new URL("/v1/models", origin), { headers: bearer() });
+    const models = v.parse(ModelListSchema, await listed.json());
+
+    assert.equal(
+      models.data.filter((model) => model.id === "anthropic/claude-sonnet-4").length,
+      1,
+      "the shadowed provider ref was listed twice",
+    );
   });
 
   await check("reserved refs and slugs are rejected", async () => {
@@ -883,6 +926,43 @@ try {
     assert.equal((await errorBody(wrongWire)).code, "validation");
   });
 
+  await check("a custom slug edit replaces the old provider ref", async () => {
+    const list = await getJson(providerPaths.list, ProviderListSchema, 200);
+    const named = list.providers.find((provider) => provider.name === "Tags");
+
+    if (named === undefined) throw new Error("the Tags provider is missing");
+
+    const withModel = await postJson(
+      providerPaths.models(named.id),
+      { upstreamModel: "named-model", alias: "named-fast" },
+      ProviderSchema,
+      201,
+    );
+
+    assert.ok(withModel.models.some((model) => model.ref === "tags-2/named-model"));
+
+    const edited = await putJson(
+      providerPaths.update(named.id),
+      { name: named.name, kind: named.kind, baseUrl: named.baseUrl, slug: "custom-tags" },
+      ProviderSchema,
+      200,
+    );
+
+    assert.equal(edited.slug, "custom-tags");
+
+    const listed = await fetch(new URL("/v1/models", origin), { headers: bearer() });
+    const models = v.parse(ModelListSchema, await listed.json());
+    const ids = models.data.map((model) => model.id);
+
+    assert.equal(ids.includes("tags-2/named-model"), false);
+    assert.equal(ids.includes("custom-tags/named-model"), true);
+
+    const oldRef = await chatRequest("tags-2/named-model", false);
+
+    assert.equal(oldRef.status, 404);
+    assert.equal((await openAiError(oldRef)).code, "model_not_found");
+  });
+
   await check("deleting a tag returns the list, and a deleted model leaves its tags", async () => {
     const before = await getJson(tagPaths.list, TagListSchema, 200);
     const empty = before.tags.find((tag) => tag.slug === "empty");
@@ -914,6 +994,59 @@ try {
       failover?.models.map((model) => model.priority),
       [1],
       `failover priorities after the model removal: ${failover?.models.map((model) => model.priority).join(", ")}`,
+    );
+  });
+
+  await check("deleting a provider removes its models and tag memberships", async () => {
+    const provider = await postJson(
+      providerPaths.list,
+      {
+        name: "Cascade",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "openai-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    const withModel = await postJson(
+      providerPaths.models(provider.id),
+      { upstreamModel: "cascade-model", alias: "cascade-alias" },
+      ProviderSchema,
+      201,
+    );
+
+    const model = withModel.models.find((entry) => entry.alias === "cascade-alias");
+
+    if (model === undefined) throw new Error("the cascade model is missing");
+
+    const created = await postJson(tagPaths.create, { slug: "cascade" }, TagListSchema, 201);
+    const tag = created.tags.find((entry) => entry.slug === "cascade");
+
+    if (tag === undefined) throw new Error("the cascade tag is missing");
+
+    await putJson(tagPaths.models(tag.id), { modelIds: [model.id] }, TagListSchema, 200);
+
+    const removed = await fetch(new URL(providerPaths.remove(provider.id), origin), {
+      method: "DELETE",
+      headers: sessionHeaders(),
+    });
+
+    assert.equal(removed.status, 204);
+
+    const tags = await getJson(tagPaths.list, TagListSchema, 200);
+
+    assert.deepEqual(tags.tags.find((entry) => entry.slug === "cascade")?.models, []);
+
+    const listed = await fetch(new URL("/v1/models", origin), { headers: bearer() });
+    const models = v.parse(ModelListSchema, await listed.json());
+
+    assert.equal(
+      models.data.some(
+        (entry) => entry.id === "cascade-alias" || entry.id === "cascade/cascade-model",
+      ),
+      false,
     );
   });
 
@@ -1015,6 +1148,7 @@ try {
   await check("a second boot applies neither migration and keeps DuckDB events", async () => {
     assert.match(second.log(), /sqlite: 0 applied/);
     assert.match(second.log(), /duckdb: 0 applied/);
+    assert.doesNotMatch(second.log(), /assigned \d+ provider slug/);
     cookie = "";
 
     const signIn = await post(

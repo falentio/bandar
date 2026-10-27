@@ -3,6 +3,7 @@ import * as v from "valibot";
 import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
+import { CooldownListSchema } from "../shared/cooldowns";
 import {
   ProviderCreateInputSchema,
   ProviderCredentialInputSchema,
@@ -18,6 +19,7 @@ import {
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
+import { readCooldowns } from "./cooldowns";
 import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
@@ -65,6 +67,13 @@ const RequestsQuerySchema = v.object({
     "50",
   ),
   providerId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(100))),
+});
+
+const CooldownsQuerySchema = v.object({
+  limit: v.optional(
+    v.pipe(v.string(), v.transform(Number), v.integer(), v.minValue(1), v.maxValue(200)),
+    "100",
+  ),
 });
 
 export function createApi(deps: ApiDeps) {
@@ -535,6 +544,18 @@ export function createApi(deps: ApiDeps) {
       return v.parse(
         RequestListSchema,
         readRequests(deps.duck, { userId: caller.userId, limit, providerId }),
+      );
+    })
+    .get("/cooldowns", async ({ query, request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { limit } = parseInput(CooldownsQuerySchema, query);
+
+      return v.parse(
+        CooldownListSchema,
+        await readCooldowns(deps.providers.db, caller.userId, limit),
       );
     });
 

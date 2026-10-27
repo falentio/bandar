@@ -13,6 +13,7 @@ import {
 import { ApiErrorBodySchema, HealthSchema } from "../src/shared/api";
 import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
 import { AuthResultSchema } from "../src/shared/auth";
+import { CooldownListSchema, cooldownPaths } from "../src/shared/cooldowns";
 import {
   ProviderDetailSchema,
   ProviderListSchema,
@@ -853,6 +854,20 @@ try {
     );
 
     assert.equal(settled.filter((request) => request.status === "error").length, 1);
+  });
+
+  await check("GET /api/cooldowns lists the failure that flagged a credential", async () => {
+    const list = await getJson(cooldownPaths.list, CooldownListSchema, 200);
+
+    const event = list.events.find(
+      (entry) => entry.reference === "tags/failover" && entry.errorKind === "auth",
+    );
+
+    assert.ok(event, "no cooldown event for tags/failover");
+    assert.equal(event.subject, "credential");
+    assert.equal(event.providerName, "Dead");
+    assert.equal(event.modelAlias, "dead-model");
+    assert.equal(event.credentialName, "");
   });
 
   await check("GET /v1/models and GET /api/tags list the tag in priority order", async () => {

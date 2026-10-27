@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { originUrl } from "../env";
 import { UpstreamError } from "../types";
 import type { DeviceLogin, DevicePollResult, OAuthConnector } from "../types";
 
@@ -17,11 +18,16 @@ const ProfileSchema = v.object({
   organizations: v.optional(v.array(v.object({ id: v.string() }))),
 });
 
-const KILO_API = Bun.env.BANDAR_KILOCODE_API ?? "https://api.kilo.ai";
+const KILO_ORIGIN = "https://api.kilo.ai";
+
+// Read per call so a test can point the login at a fake after this module loads.
+function kiloApi(): string {
+  return originUrl("BANDAR_KILOCODE_API", KILO_ORIGIN);
+}
 
 export const kilocodeConnector: OAuthConnector = {
   async start(signal: AbortSignal): Promise<DeviceLogin> {
-    const response = await fetch(`${KILO_API}/api/device-auth/codes`, {
+    const response = await fetch(`${kiloApi()}/api/device-auth/codes`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal,
@@ -51,7 +57,7 @@ export const kilocodeConnector: OAuthConnector = {
   },
 
   async poll(code: string, signal: AbortSignal): Promise<DevicePollResult> {
-    const response = await fetch(`${KILO_API}/api/device-auth/codes/${encodeURIComponent(code)}`, {
+    const response = await fetch(`${kiloApi()}/api/device-auth/codes/${encodeURIComponent(code)}`, {
       signal,
     }).catch((error: Error) => {
       throw new UpstreamError(`kilo code login poll failed: ${error.message}`, "network");
@@ -97,7 +103,7 @@ export const kilocodeConnector: OAuthConnector = {
 };
 
 async function organizationOf(token: string, signal: AbortSignal): Promise<string | null> {
-  const response = await fetch(`${KILO_API}/api/profile`, {
+  const response = await fetch(`${kiloApi()}/api/profile`, {
     headers: { authorization: `Bearer ${token}` },
     signal,
   }).catch(() => null);

@@ -1,4 +1,5 @@
 import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
+import { apiBaseUrl } from "../env";
 import type { BuiltInProviderDefinition } from "../types";
 import { kilocodeAdapter } from "./adapter";
 import { fetchKilocodeCatalog } from "./catalog";
@@ -14,15 +15,9 @@ export const kilocode: BuiltInProviderDefinition<"kilocode"> = {
   builtIn: {
     name: settings.name,
     slug: settings.slug,
-    baseUrl: kilocodeBaseUrl,
+    baseUrl: () => apiBaseUrl("BANDAR_KILOCODE_API", settings.baseUrl, "/api/openrouter"),
   },
   adapter: kilocodeAdapter,
   oauth: kilocodeConnector,
   catalog: fetchKilocodeCatalog,
 };
-
-function kilocodeBaseUrl(): string {
-  const origin = Bun.env.BANDAR_KILOCODE_API?.replace(/\/+$/, "");
-
-  return origin === undefined ? settings.baseUrl : `${origin}/api/openrouter`;
-}

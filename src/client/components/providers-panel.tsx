@@ -41,7 +41,8 @@ export function ProvidersPanel() {
       <div>
         <h1 className="text-lg font-semibold">Providers</h1>
         <p className="text-sm text-muted-foreground">
-          Kilo Code is included. Add custom OpenAI, Anthropic, or Google-compatible upstreams.
+          Built-in providers are included. Add custom OpenAI, Anthropic, or Google-compatible
+          upstreams.
         </p>
       </div>
 

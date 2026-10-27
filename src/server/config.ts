@@ -18,6 +18,7 @@ export class ConfigError extends Error {
   constructor(issues: readonly string[]) {
     super(`invalid environment:\n${issues.map((issue) => `  ${issue}`).join("\n")}`);
     this.name = "ConfigError";
+    this.issues = issues;
   }
 }
 

@@ -5,7 +5,7 @@ completions API; bandar resolves the model reference to a provider, translates
 the request to that provider's wire, streams the answer back, and records one
 analytics event per attempt in an embedded DuckDB database.
 
-The dashboard covers providers, model tags, requests, API keys, and usage:
+The dashboard covers providers, model tags, requests, cooldowns, API keys, and usage:
 tokens, time to first token, tokens per second, error rate, p95 latency, daily
 tokens, and a 30-day average. Provider credentials are sealed before they reach
 SQLite.
@@ -19,6 +19,8 @@ SQLite.
   `<provider-slug>/<upstream-model>`.
 - Tags as ordered fallback chains, managed in the dashboard.
 - Several ordered credentials per provider, tried in priority order.
+- A cooldown per provider, model, and credential, with the flag history on the
+  **Errors** page and at `GET /api/cooldowns`.
 - Three generic wires for custom providers: `openai`, `anthropic`, and `google`.
 - Seven built-in providers on every account: Kilo Code, Token Harbor, Yeta,
   River, Nous Portal, Hyper, and OpenCode Go. Most speak the OpenAI wire; Kilo Code
@@ -77,11 +79,13 @@ POST /v1/chat/completions [1]
 ├── parse the OpenAI body with valibot [1b] ✗ 422
 ├── resolve the reference into ordered attempts [1c] ✗ 404 model_not_found
 │   └── one attempt per model and credential: tag order, then credential order [1c1]
+├── skip an attempt whose provider, model, or credential is cooling down [1c2]
 ├── pick the adapter for the provider kind [1d]
 ├── renew the attempt's OAuth credential when it is due [1d1]
 ├── call the upstream with the attempt's credential [1e] ✗ 502/429 and record the failure
 │   └── normalize wire events into canonical text, usage and finish events [1e1]
 ├── try the next attempt when the failure is retryable [1e2]
+│   └── flag the failing subject and write one cooldown event [1e2a]
 ├── stream OpenAI chunks back to the client [1f]
 └── record one DuckDB event with tokens, TTFT, duration and tokens/sec [1g]
 ```
@@ -125,8 +129,8 @@ cannot start with that prefix.
 A tag is a named fallback chain. It holds an ordered list of models, and clients
 call it as `tags/<slug>`. The gateway tries the models in priority order.
 
-- The chain is retried only on `auth`, `rate_limit`, `unavailable`, `protocol`,
-  and `network`. An `invalid_request` or an aborted request is final.
+- The chain is retried only on `auth`, `rate_limit`, `not_found`, `unavailable`,
+  `protocol`, and `network`. An `invalid_request` or an aborted request is final.
 - There is no attempt cap. The chain is walked in full, so a long tag can mean
   several upstream calls for one client request.
 - Each attempt writes one DuckDB event. A fallback therefore adds a row for the
@@ -156,8 +160,9 @@ appends each in order, and, for a provider with a device login, an **OAuth** tab
 - A fallback walks the current model's remaining credentials before it moves to
   the next model in a tag. A tag with two models that each hold two credentials
   can make four upstream calls for one client request.
-- The retry set is the tag chain's: `auth`, `rate_limit`, `unavailable`,
-  `protocol`, and `network`. An `invalid_request` or an aborted request is final.
+- The retry set is the tag chain's: `auth`, `rate_limit`, `not_found`,
+  `unavailable`, `protocol`, and `network`. An `invalid_request` or an
+  aborted request is final.
 - Each attempt writes one DuckDB event, so a key fallback adds a row beside the
   row for the key that answered.
 - A provider with no credentials still takes one attempt with no credential
@@ -175,6 +180,42 @@ appends each in order, and, for a provider with a device login, an **OAuth** tab
   moves on; a credential saved before renewal existed has no refresh token and
   expires for good. Reconnecting replaces an expiring connection; a second, live
   connection joins the chain.
+
+### Cooldowns
+
+A retryable failure flags one subject:
+
+| Error kind               | Flagged              |
+| ------------------------ | -------------------- |
+| `auth`, `rate_limit`     | the credential       |
+| `unavailable`, `network` | the provider         |
+| `protocol`, `not_found`  | the model            |
+| `invalid_request`        | nothing, it is final |
+
+A retired model answers 404, which is `not_found`, so a tag falls through it
+like any other retryable failure. A flagged subject cools down for
+`min(30s * 2^(failures - 1), 24h)`, so repeated failures grow the wait to one
+day. A success clears the failure count and the flag on the provider, the
+model, and the credential of that attempt.
+
+An attempt is skipped when its provider, its model, or its credential is cooling
+down. When every attempt in the plan is skipped, the gateway runs the full plan
+as a probe, so a request is never failed just because everything is flagged, and
+the probe can clear the flags again. Flags live in SQLite and survive a restart.
+
+### Error history
+
+Every failure that flags a subject writes one immutable row to
+`cooldown_events`: the subject and its name, the provider and model, the
+credential when one was involved, the error kind, the reference, the new failure
+count, the cooldown, and the flag time. Rows are denormalized and have no foreign
+keys, so deleting a provider or a model keeps its history. Each user keeps the
+newest 500 rows. An `invalid_request`, an abort, and a success write nothing.
+
+The **Errors** page lists the newest 100, and `GET /api/cooldowns?limit=100`
+returns the same list. On that page a flag in the future reads "cooling down"
+and one that has passed reads "expired". A provider, model, or credential whose
+flag has passed but still carries failures shows `recovered`.
 
 ## Analytics
 
@@ -379,6 +420,7 @@ bandar/
 │   ├── slugs.ts                    # slug rules, ref building, reserved names
 │   ├── tags.ts                     # tag schemas and paths
 │   ├── analytics.ts                # analytics and request schemas
+│   ├── cooldowns.ts                # cooldown history schema and paths
 │   ├── api.ts                      # /api and /v1 prefix guards, health
 │   ├── api-keys.ts                 # gateway key paths and schemas
 │   ├── auth.ts                     # auth paths and session schemas
@@ -404,6 +446,8 @@ bandar/
 │   ├── credentials.ts              # ordered provider credentials: add, move, remove
 │   ├── tags.ts                     # tag list and membership writes
 │   ├── credential.ts               # api-key / oauth credential union
+│   ├── health.ts                   # cooldown policy, per-subject flags, history writes
+│   ├── cooldowns.ts                # cooldown history reads
 │   ├── seal.ts                     # AES-GCM credential sealing
 │   ├── router/
 │   │   ├── types.ts                # canonical request/result/stream contract
@@ -420,12 +464,13 @@ bandar/
 │   ├── auth.ts                     # better-auth handler, session, key verify
 │   └── assets.ts                   # embedded client bundle and SPA fallback
 ├── src/client/
-│   ├── router.tsx                  # /overview, /providers, /providers/:id, /tags, /requests, /api-keys
+│   ├── router.tsx                  # /overview, /providers, /providers/:id, /tags, /requests, /errors, /api-keys
 │   ├── views.tsx                   # navigation registry
 │   ├── use-providers.ts            # provider and model mutations
 │   ├── use-provider-detail.ts      # one provider with its usage window
 │   ├── use-analytics.ts            # overview window state
 │   ├── use-requests.ts             # recent request state
+│   ├── use-cooldowns.ts            # cooldown history state
 │   ├── use-tags.ts                 # tag list and membership writes
 │   └── components/
 │       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
@@ -438,6 +483,8 @@ bandar/
 │       ├── token-chart.tsx         # shared daily token bars
 │       ├── provider-logo.tsx       # mark per provider kind
 │       ├── requests-panel.tsx      # recent attempts
+│       ├── errors-panel.tsx        # cooldown history
+│       ├── health-badge.tsx        # cooling down and recovered label
 │       ├── api-keys-panel.tsx      # mint, show once, revoke, curl example
 │       ├── app-shell.tsx           # sidebar shell and breadcrumb
 │       └── auth-page.tsx           # sign-in / sign-up
@@ -469,6 +516,7 @@ bandar/
 | `DELETE /api/tags/:id`                                | Session or `x-api-key` | Delete a tag; returns the remaining list.               |
 | `GET /api/analytics?days=30&…`                        | Session or `x-api-key` | Window summary, daily series, model breakdown, filters. |
 | `GET /api/requests?limit=50&providerId=…`             | Session or `x-api-key` | Recent attempts, optionally one provider.               |
+| `GET /api/cooldowns?limit=100`                        | Session or `x-api-key` | Cooldown history, newest first, per user.               |
 | `GET /api/health`                                     | none                   | Both current migration tags.                            |
 | `/api/auth/*`                                         | better-auth            | Sign-up, sign-in, sessions, key create/list/delete.     |
 
@@ -488,6 +536,9 @@ Changing a custom slug stops refs built from the old slug from resolving.
 The **Tags** page creates a tag from a slug and edits its chain: reorder a model
 with the arrow buttons, remove it, or pick another from the add list. Every edit
 writes the whole list.
+
+The **Errors** page lists the cooldown history: time, subject, provider, model,
+error kind, cooldown, flag time, and the reference that was called.
 
 Model prices are accepted by the model endpoints (`inputPricePerMtok`,
 `outputPricePerMtok`) and filled by a catalog import; they are not in the form

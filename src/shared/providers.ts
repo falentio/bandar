@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { ProviderUsageSchema } from "./analytics";
-import { SlugSchema, TAG_REF_PREFIX, TAG_SLUG } from "./slugs";
+import { MAX_UPSTREAM_MODEL_LENGTH, SlugSchema, TAG_REF_PREFIX, TAG_SLUG } from "./slugs";
 
 // Generic wires are the kinds a user can add as a custom provider.
 export const GENERIC_PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
@@ -82,7 +82,12 @@ export const ProviderDetailSchema = v.object({
 
 export const ProviderModelInputSchema = v.pipe(
   v.object({
-    upstreamModel: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200)),
+    upstreamModel: v.pipe(
+      v.string(),
+      v.trim(),
+      v.minLength(1),
+      v.maxLength(MAX_UPSTREAM_MODEL_LENGTH),
+    ),
     alias: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100))),
     inputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
     outputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),

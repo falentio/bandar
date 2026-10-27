@@ -6,7 +6,10 @@ export const TAG_SLUG = TAG_REF_PREFIX.slice(0, -1);
 
 export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-const MAX_SLUG_LENGTH = 40;
+export const MAX_SLUG_LENGTH = 40;
+export const MAX_UPSTREAM_MODEL_LENGTH = 200;
+export const MAX_MODEL_REF_LENGTH = MAX_SLUG_LENGTH + 1 + MAX_UPSTREAM_MODEL_LENGTH;
+
 const MAX_GENERATED_LENGTH = 36;
 
 export const SlugSchema = v.pipe(

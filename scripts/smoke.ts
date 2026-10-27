@@ -904,6 +904,55 @@ try {
     );
   });
 
+  await check("the longest provider ref is callable", async () => {
+    const created = await postJson(
+      providerPaths.list,
+      {
+        name: "Long Ref",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "openai-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    const slug = "l".repeat(40);
+
+    const updated = await putJson(
+      providerPaths.update(created.id),
+      { name: created.name, kind: created.kind, baseUrl: created.baseUrl, slug },
+      ProviderSchema,
+      200,
+    );
+
+    assert.equal(updated.slug, slug);
+
+    const withModel = await postJson(
+      providerPaths.models(created.id),
+      { upstreamModel: "m".repeat(200), alias: "long-ref" },
+      ProviderSchema,
+      201,
+    );
+
+    const ref = withModel.models.find((model) => model.alias === "long-ref")?.ref ?? "";
+
+    assert.equal(ref.length, 241);
+
+    const response = await chatRequest(ref, false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from OpenAI");
+
+    const models = await fetch(new URL("/v1/models", origin), { headers: bearer() });
+    const list = v.parse(ModelListSchema, await models.json());
+
+    assert.ok(list.data.some((model) => model.id === ref));
+  });
+
   await check("GET /api/providers/:id hides another account's provider", async () => {
     const response = await fetch(
       new URL(`${providerPaths.detail("00000000-0000-0000-0000-000000000000")}?days=30`, origin),

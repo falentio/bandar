@@ -1,7 +1,15 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as v from "valibot";
 import { afterEach, describe, expect, test } from "vite-plus/test";
+import { ChatCompletionRequestSchema } from "../shared/chat";
+import {
+  MAX_MODEL_REF_LENGTH,
+  MAX_SLUG_LENGTH,
+  MAX_UPSTREAM_MODEL_LENGTH,
+  providerRefOf,
+} from "../shared/slugs";
 import { user } from "./db/auth-schema";
 import { openDatabase, type DatabaseHandle } from "./db/client";
 import { applyMigrations, type Migration } from "./db/migrate";
@@ -15,6 +23,28 @@ let open: DatabaseHandle[] = [];
 afterEach(() => {
   for (const handle of open) handle.sqlite.close();
   open = [];
+});
+
+describe("model refs", () => {
+  test("the longest provider ref fits the gateway model field", () => {
+    const ref = providerRefOf("s".repeat(MAX_SLUG_LENGTH), "m".repeat(MAX_UPSTREAM_MODEL_LENGTH));
+
+    expect(ref).toHaveLength(MAX_MODEL_REF_LENGTH);
+
+    const accepted = v.safeParse(ChatCompletionRequestSchema, {
+      model: ref,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(accepted.success).toBe(true);
+
+    const rejected = v.safeParse(ChatCompletionRequestSchema, {
+      model: `${ref}x`,
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    expect(rejected.success).toBe(false);
+  });
 });
 
 describe("provider updates", () => {

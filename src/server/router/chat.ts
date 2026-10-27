@@ -154,6 +154,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
   const { input, plan } = context;
   const abort = new AbortController();
   const onAbort = () => abort.abort();
+  const detach = () => input.signal.removeEventListener("abort", onAbort);
   input.signal.addEventListener("abort", onAbort, { once: true });
 
   let cancelled = false;
@@ -168,10 +169,13 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
       };
 
       const close = () => {
+        detach();
+
         if (!cancelled) controller.close();
       };
 
       const fail = (message: string, code: string) => {
+        detach();
         send(`data: ${JSON.stringify({ error: { message, type: "upstream_error", code } })}\n\n`);
         send("data: [DONE]\n\n");
         close();
@@ -318,6 +322,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
     cancel() {
       cancelled = true;
       abort.abort();
+      detach();
     },
   });
 

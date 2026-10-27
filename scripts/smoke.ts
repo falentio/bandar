@@ -847,6 +847,15 @@ try {
     });
 
     assert.equal(reservedSlug.status, 422);
+
+    const wrongWire = await put(providerPaths.update(named.id), {
+      name: named.name,
+      kind: "kilocode",
+      baseUrl: named.baseUrl,
+    });
+
+    assert.equal(wrongWire.status, 422);
+    assert.equal((await errorBody(wrongWire)).code, "validation");
   });
 
   await check("deleting a tag returns the list, and a deleted model leaves its tags", async () => {

@@ -174,7 +174,7 @@ export async function updateProvider(
   }
 
   if (existing.origin === "custom" && !GENERIC_PROVIDER_KINDS.some((kind) => kind === input.kind)) {
-    throw new ProviderRuleError("custom providers use one of the generic wires");
+    throw new ProviderRuleError("custom providers use one of the generic wires", "validation");
   }
 
   const apiKey =

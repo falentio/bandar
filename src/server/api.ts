@@ -174,7 +174,7 @@ export function createApi(deps: ApiDeps) {
         return provider;
       } catch (error) {
         if (error instanceof ProviderRuleError) {
-          set.status = error.code === "built_in" ? 400 : 422;
+          set.status = providerRuleStatus(error);
 
           return failure(error.code, error.message);
         }
@@ -304,6 +304,12 @@ export function createApi(deps: ApiDeps) {
 
         return provider;
       } catch (error) {
+        if (error instanceof ProviderRuleError) {
+          set.status = providerRuleStatus(error);
+
+          return failure(error.code, error.message);
+        }
+
         if (error instanceof Error && isUniqueViolation(error)) {
           set.status = 409;
 
@@ -528,6 +534,12 @@ async function authenticate(auth: Auth, request: Request): Promise<Caller | Resp
   return user === null
     ? Response.json(failure("unauthorized", "sign in to use the API"), { status: 401 })
     : { userId: user.id, apiKeyId: null };
+}
+
+function providerRuleStatus(error: ProviderRuleError): number {
+  if (error.code === "built_in") return 400;
+
+  return error.code === "conflict" ? 409 : 422;
 }
 
 function isUniqueViolation(error: Error): boolean {

@@ -54,7 +54,7 @@ export const providerModels = sqliteTable(
   },
   (table) => [
     uniqueIndex("provider_models_user_alias").on(table.userId, table.alias),
-    index("provider_models_provider").on(table.providerId),
+    uniqueIndex("provider_models_provider_upstream").on(table.providerId, table.upstreamModel),
   ],
 );
 

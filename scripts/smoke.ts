@@ -282,6 +282,14 @@ try {
 
     assert.equal(response.status, 409);
     assert.equal((await errorBody(response)).code, "conflict");
+
+    const duplicateUpstream = await post(providerPaths.models(openaiProvider.provider?.id ?? ""), {
+      upstreamModel: "fake-openai-model",
+      alias: "fast-2",
+    });
+
+    assert.equal(duplicateUpstream.status, 409);
+    assert.equal((await errorBody(duplicateUpstream)).code, "conflict");
   });
 
   await check(

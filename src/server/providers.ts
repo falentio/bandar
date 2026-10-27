@@ -24,9 +24,9 @@ import type { Sealer } from "./seal";
 export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
 
 export class ProviderRuleError extends Error {
-  readonly code: "built_in" | "validation";
+  readonly code: "built_in" | "validation" | "conflict";
 
-  constructor(message: string, code: "built_in" | "validation" = "built_in") {
+  constructor(message: string, code: "built_in" | "validation" | "conflict" = "built_in") {
     super(message);
     this.name = "ProviderRuleError";
     this.code = code;
@@ -220,6 +220,24 @@ export async function addProviderModel(
   model: ProviderModelInput,
 ): Promise<Provider | null> {
   if ((await findProvider(deps, userId, providerId)) === null) return null;
+
+  const duplicate = await deps.db
+    .select({ id: providerModels.id })
+    .from(providerModels)
+    .where(
+      and(
+        eq(providerModels.providerId, providerId),
+        eq(providerModels.upstreamModel, model.upstreamModel),
+      ),
+    )
+    .limit(1);
+
+  if (duplicate[0] !== undefined) {
+    throw new ProviderRuleError(
+      `${model.upstreamModel} is already a model on this provider`,
+      "conflict",
+    );
+  }
 
   deps.db
     .insert(providerModels)

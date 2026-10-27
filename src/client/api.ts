@@ -46,7 +46,13 @@ import {
   type ProviderOAuthPoll,
   type ProviderOAuthStart,
 } from "../shared/providers";
-import { TagCreateInputSchema, TagListSchema, tagPaths, type TagList } from "../shared/tags";
+import {
+  TagCreateInputSchema,
+  TagListSchema,
+  TagModelsInputSchema,
+  tagPaths,
+  type TagList,
+} from "../shared/tags";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -104,7 +110,7 @@ export const tagApi = {
   setModels: (id: string, modelIds: readonly string[]): Promise<TagList> =>
     request(tagPaths.models(id), TagListSchema, {
       method: "PUT",
-      body: JSON.stringify({ modelIds }),
+      body: JSON.stringify(v.parse(TagModelsInputSchema, { modelIds })),
     }),
 };
 

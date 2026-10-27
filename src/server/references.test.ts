@@ -14,7 +14,7 @@ import {
 import { user } from "./db/auth-schema";
 import { openDatabase, type DatabaseHandle } from "./db/client";
 import { applyMigrations, type Migration } from "./db/migrate";
-import { providerModels, providers, tagModels, tags } from "./db/schema";
+import { providerCredentials, providerModels, providers, tagModels, tags } from "./db/schema";
 import {
   addProviderModel,
   assignProviderSlugs,
@@ -38,6 +38,12 @@ afterEach(() => {
   for (const handle of open) handle.sqlite.close();
   open = [];
 });
+
+const INSERT_PROVIDER_SQL =
+  "INSERT INTO providers (id, user_id, name, slug, kind, base_url, api_key, auth_mode, origin, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+const INSERT_MODEL_SQL =
+  "INSERT INTO provider_models (id, user_id, provider_id, alias, upstream_model, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
 describe("model refs", () => {
   test("the longest provider ref fits the gateway model field", () => {
@@ -285,8 +291,6 @@ describe("provider models", () => {
           slug: "",
           kind: "openai" as const,
           baseUrl: "https://example.com",
-          apiKey: "",
-          authMode: "api-key" as const,
           origin: "custom" as const,
           createdAt: new Date(Date.UTC(2026, 0, index + 1)),
         })),
@@ -318,44 +322,42 @@ describe("provider models", () => {
     );
 
     handle.db.insert(user).values({ id: "user-1", name: "User", email: "user-1@test" }).run();
-    handle.db
-      .insert(providers)
-      .values({
-        id: "provider-1",
-        userId: "user-1",
-        name: "Provider",
-        slug: "provider",
-        kind: "openai",
-        baseUrl: "https://example.com",
-        apiKey: "",
-        authMode: "api-key",
-        origin: "custom",
-        createdAt: new Date("2026-01-01T00:00:00.000Z"),
-      })
-      .run();
-    handle.db
-      .insert(providerModels)
-      .values([
-        {
-          id: "model-1",
-          userId: "user-1",
-          providerId: "provider-1",
-          alias: "one",
-          upstreamModel: "same",
-          enabled: true,
-          createdAt: new Date("2026-01-02T00:00:00.000Z"),
-        },
-        {
-          id: "model-2",
-          userId: "user-1",
-          providerId: "provider-1",
-          alias: "two",
-          upstreamModel: "same",
-          enabled: true,
-          createdAt: new Date("2026-01-03T00:00:00.000Z"),
-        },
-      ])
-      .run();
+    handle.sqlite
+      .query(INSERT_PROVIDER_SQL)
+      .run(
+        "provider-1",
+        "user-1",
+        "Provider",
+        "provider",
+        "openai",
+        "https://example.com",
+        "",
+        "api-key",
+        "custom",
+        Date.parse("2026-01-01T00:00:00.000Z"),
+      );
+    handle.sqlite
+      .query(INSERT_MODEL_SQL)
+      .run(
+        "model-1",
+        "user-1",
+        "provider-1",
+        "one",
+        "same",
+        1,
+        Date.parse("2026-01-02T00:00:00.000Z"),
+      );
+    handle.sqlite
+      .query(INSERT_MODEL_SQL)
+      .run(
+        "model-2",
+        "user-1",
+        "provider-1",
+        "two",
+        "same",
+        1,
+        Date.parse("2026-01-03T00:00:00.000Z"),
+      );
     handle.db
       .insert(tags)
       .values([
@@ -382,7 +384,10 @@ describe("provider models", () => {
       ])
       .run();
 
-    expect(applyMigrations(handle.sqlite, all).applied).toEqual(["0007_provider_upstream"]);
+    expect(applyMigrations(handle.sqlite, all).applied).toEqual([
+      "0007_provider_upstream",
+      "0008_provider_credentials",
+    ]);
     expect(handle.db.select({ id: providerModels.id }).from(providerModels).all()).toEqual([
       { id: "model-1" },
     ]);
@@ -410,6 +415,54 @@ describe("provider models", () => {
         .run(),
     ).toThrow(/UNIQUE constraint failed/);
   });
+
+  test("migration 0008 backfills one credential per legacy provider key", () => {
+    const handle = openDatabase(":memory:");
+    open.push(handle);
+
+    const all = migrations();
+
+    applyMigrations(
+      handle.sqlite,
+      all.filter((migration) => migration.tag < "0008"),
+    );
+
+    handle.db.insert(user).values({ id: "user-1", name: "User", email: "user-1@test" }).run();
+    handle.sqlite
+      .query(
+        `INSERT INTO providers (id, user_id, name, slug, kind, base_url, api_key, auth_mode, origin, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "provider-1",
+        "user-1",
+        "Provider",
+        "provider",
+        "kilocode",
+        "https://example.com",
+        "v1.sealed.key",
+        "oauth",
+        "builtin",
+        1767225600000,
+      );
+
+    expect(applyMigrations(handle.sqlite, all).applied).toEqual(["0008_provider_credentials"]);
+
+    const credentials = handle.db.select().from(providerCredentials).all();
+
+    expect(credentials).toHaveLength(1);
+
+    const credential = credentials[0];
+
+    expect(credential?.userId).toBe("user-1");
+    expect(credential?.providerId).toBe("provider-1");
+    expect(credential?.name).toBe("");
+    expect(credential?.sealedKey).toBe("v1.sealed.key");
+    expect(credential?.authMode).toBe("oauth");
+    expect(credential?.failures).toBe(0);
+    expect(credential?.flaggedUntil).toBeNull();
+    expect(credential?.createdAt).toEqual(new Date(1767225600000));
+  });
 });
 
 describe("provider updates", () => {
@@ -427,7 +480,6 @@ describe("provider updates", () => {
       name: builtIn.name,
       kind: builtIn.kind,
       baseUrl: builtIn.baseUrl,
-      apiKey: "",
       slug: builtIn.slug,
     });
 

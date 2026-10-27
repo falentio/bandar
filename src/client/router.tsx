@@ -16,12 +16,13 @@ import { OverviewPanel } from "./components/overview-panel";
 import { isProviderTab, ProviderPage } from "./components/provider-page";
 import { ProvidersPanel } from "./components/providers-panel";
 import { RequestsPanel } from "./components/requests-panel";
+import { TagsPanel } from "./components/tags-panel";
 import { SessionProvider, useSession } from "./use-session";
 import { isViewPath } from "./views";
 
 const loginSearch = v.object({
   redirect: v.optional(
-    v.picklist(["/overview", "/providers", "/requests", "/api-keys"]),
+    v.picklist(["/overview", "/providers", "/tags", "/requests", "/api-keys"]),
     "/overview",
   ),
 });
@@ -95,6 +96,12 @@ const requestsRoute = createRoute({
   component: RequestsPanel,
 });
 
+const tagsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/tags",
+  component: TagsPanel,
+});
+
 const apiKeysRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/api-keys",
@@ -104,7 +111,14 @@ const apiKeysRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
-  appRoute.addChildren([overviewRoute, providersRoute, providerRoute, requestsRoute, apiKeysRoute]),
+  appRoute.addChildren([
+    overviewRoute,
+    providersRoute,
+    providerRoute,
+    tagsRoute,
+    requestsRoute,
+    apiKeysRoute,
+  ]),
 ]);
 
 export const router = createRouter({ routeTree });

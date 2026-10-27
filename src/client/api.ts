@@ -46,6 +46,7 @@ import {
   type ProviderOAuthPoll,
   type ProviderOAuthStart,
 } from "../shared/providers";
+import { TagCreateInputSchema, TagListSchema, tagPaths, type TagList } from "../shared/tags";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -89,6 +90,22 @@ export const providerApi = {
     request(providerPaths.oauthStart(id), ProviderOAuthStartSchema, { method: "POST" }),
   pollOauth: (id: string): Promise<ProviderOAuthPoll> =>
     request(providerPaths.oauthPoll(id), ProviderOAuthPollSchema, { method: "POST" }),
+};
+
+export const tagApi = {
+  list: (): Promise<TagList> => request(tagPaths.list, TagListSchema),
+  create: (input: { readonly slug: string }): Promise<TagList> =>
+    request(tagPaths.create, TagListSchema, {
+      method: "POST",
+      body: JSON.stringify(v.parse(TagCreateInputSchema, input)),
+    }),
+  remove: (id: string): Promise<TagList> =>
+    request(tagPaths.remove(id), TagListSchema, { method: "DELETE" }),
+  setModels: (id: string, modelIds: readonly string[]): Promise<TagList> =>
+    request(tagPaths.models(id), TagListSchema, {
+      method: "PUT",
+      body: JSON.stringify({ modelIds }),
+    }),
 };
 
 export const analyticsApi = {

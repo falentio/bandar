@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ProviderUsage } from "../../shared/analytics";
+import { type Tag } from "../../shared/tags";
 import {
   BUILT_IN_PROVIDERS,
   GENERIC_PROVIDER_KINDS,
@@ -38,6 +39,7 @@ import { describeError, isError } from "../errors";
 import { useProviderDetail } from "../use-provider-detail";
 import { useProviders } from "../use-providers";
 import { useRequests } from "../use-requests";
+import { useTags } from "../use-tags";
 import { ConnectFlow } from "./connect-flow";
 import { ProviderLogo } from "./provider-logo";
 
@@ -123,7 +125,12 @@ export function ProviderPage({
                 <ProviderLogo kind={provider.kind} className="size-5" />
               </span>
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-semibold">{provider.name}</h1>
+                <div className="flex min-w-0 items-center gap-2">
+                  <h1 className="truncate text-lg font-semibold">{provider.name}</h1>
+                  <span className="shrink-0 rounded-full border px-1.5 py-0.5 font-mono text-[0.7rem] text-muted-foreground">
+                    {provider.slug}
+                  </span>
+                </div>
                 <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
                   <span>{KIND_LABELS[provider.kind]}</span>
                   <span aria-hidden="true">·</span>
@@ -279,6 +286,7 @@ function SettingsCard({
   const dirty =
     !builtIn &&
     (settings.name.trim() !== provider.name ||
+      settings.slug.trim() !== provider.slug ||
       settings.kind !== provider.kind ||
       settings.baseUrl.trim() !== provider.baseUrl);
 
@@ -351,17 +359,40 @@ function SettingsCard({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="settings-base-url">Base URL</Label>
-              <Input
-                id="settings-base-url"
-                type="url"
-                value={settings.baseUrl}
-                onChange={(event) => settings.setBaseUrl(event.target.value)}
-                placeholder={PLACEHOLDERS[settings.kind]}
-                required
-                disabled={builtIn}
-              />
+              <Label>Slug</Label>
+              {builtIn ? (
+                <div className="flex h-8 items-center rounded-lg border bg-muted/40 px-2.5 font-mono text-sm">
+                  {provider.slug}
+                </div>
+              ) : (
+                <Input
+                  id="settings-slug"
+                  value={settings.slug}
+                  onChange={(event) => settings.setSlug(event.target.value)}
+                  maxLength={40}
+                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  required
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {builtIn
+                  ? "A built-in slug is fixed in code."
+                  : `Clients reach a model as ${provider.slug || "<slug>"}/<upstream-model>. Changing the slug stops old refs from resolving.`}
+              </p>
             </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="settings-base-url">Base URL</Label>
+            <Input
+              id="settings-base-url"
+              type="url"
+              value={settings.baseUrl}
+              onChange={(event) => settings.setBaseUrl(event.target.value)}
+              placeholder={PLACEHOLDERS[settings.kind]}
+              required
+              disabled={builtIn}
+            />
           </div>
 
           {settings.error === null ? null : (
@@ -392,11 +423,13 @@ function SettingsCard({
 
 type Settings = {
   readonly name: string;
+  readonly slug: string;
   readonly kind: ProviderKind;
   readonly baseUrl: string;
   readonly pending: boolean;
   readonly error: string | null;
   readonly setName: (value: string) => void;
+  readonly setSlug: (value: string) => void;
   readonly setKind: (value: ProviderKind) => void;
   readonly setBaseUrl: (value: string) => void;
   readonly save: () => Promise<Provider | null>;
@@ -404,6 +437,7 @@ type Settings = {
 
 function useProviderSettings(provider: Provider): Settings {
   const [name, setName] = useState(provider.name);
+  const [slug, setSlug] = useState(provider.slug);
   const [kind, setKind] = useState<ProviderKind>(provider.kind);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
   const [pending, setPending] = useState(false);
@@ -416,6 +450,7 @@ function useProviderSettings(provider: Provider): Settings {
     try {
       return await providerApi.update(provider.id, {
         name: name.trim(),
+        slug: slug.trim(),
         kind,
         baseUrl: baseUrl.trim(),
         apiKey: "",
@@ -429,7 +464,19 @@ function useProviderSettings(provider: Provider): Settings {
     }
   };
 
-  return { name, kind, baseUrl, pending, error, setName, setKind, setBaseUrl, save };
+  return {
+    name,
+    slug,
+    kind,
+    baseUrl,
+    pending,
+    error,
+    setName,
+    setSlug,
+    setKind,
+    setBaseUrl,
+    save,
+  };
 }
 
 function ApiKeyCard({
@@ -596,6 +643,7 @@ function ModelsCard({
   const [alias, setAlias] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshed, setRefreshed] = useState<ProviderModelRefresh | "error" | null>(null);
+  const tags = useTags();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -618,8 +666,11 @@ function ModelsCard({
         <div className="grid gap-1">
           <CardTitle>Models</CardTitle>
           <CardDescription>
-            Alias is what clients send as <code>model</code>. Leave it empty to use the upstream
-            name.
+            Alias is what clients send as <code>model</code>. They can also send{" "}
+            <code>
+              {provider.slug === "" ? "<provider-slug>" : provider.slug}/&lt;upstream-model&gt;
+            </code>{" "}
+            to reach a model directly.
           </CardDescription>
         </div>
         {provider.kind === "kilocode" ? (
@@ -712,6 +763,7 @@ function ModelsCard({
                 key={model.id}
                 model={model}
                 pending={providers.pending}
+                tags={tagsOf(tags.tags, model.id)}
                 onRemove={() => {
                   void providers.removeModel(provider.id, model.id).then(onChanged);
                 }}
@@ -724,23 +776,43 @@ function ModelsCard({
   );
 }
 
+type ModelTag = { readonly slug: string; readonly priority: number };
+
+function tagsOf(tags: readonly Tag[], modelId: string): readonly ModelTag[] {
+  return tags.flatMap((tag) => {
+    const link = tag.models.find((model) => model.modelId === modelId);
+
+    return link === undefined ? [] : [{ slug: tag.slug, priority: link.priority }];
+  });
+}
+
 function ModelRow({
   model,
   pending,
+  tags,
   onRemove,
 }: {
   model: ProviderModel;
   pending: boolean;
+  tags: readonly ModelTag[];
   onRemove: () => void;
 }) {
   return (
-    <li className="group/model flex items-center gap-2 px-3 py-2 text-sm">
+    <li className="group/model flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
       <code className="truncate font-medium">{model.alias}</code>
-      {model.alias === model.upstreamModel ? null : (
-        <span className="truncate font-mono text-xs text-muted-foreground">
-          {model.upstreamModel}
+      <code className="truncate font-mono text-xs text-muted-foreground">{model.ref}</code>
+      {model.shadowed ? (
+        <span className="text-xs text-muted-foreground">an alias with this name wins</span>
+      ) : null}
+      {tags.map((tag) => (
+        <span
+          key={tag.slug}
+          className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[0.7rem]"
+        >
+          tags/{tag.slug}
+          <span className="ms-1 text-muted-foreground">#{tag.priority}</span>
         </span>
-      )}
+      ))}
       {model.inputPricePerMtok === null && model.outputPricePerMtok === null ? null : (
         <span className="text-xs text-muted-foreground">
           {formatUsd(model.inputPricePerMtok)} in / {formatUsd(model.outputPricePerMtok)} out per M

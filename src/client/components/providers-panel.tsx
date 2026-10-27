@@ -170,6 +170,8 @@ function ProviderRow({ provider }: { provider: Provider }) {
           <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>{KIND_LABELS[provider.kind]}</span>
             <span aria-hidden="true">·</span>
+            <span className="font-mono">{provider.slug}</span>
+            <span aria-hidden="true">·</span>
             <span>{count === 1 ? "1 model" : `${count} models`}</span>
           </span>
         </span>

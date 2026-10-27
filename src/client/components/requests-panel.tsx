@@ -57,6 +57,12 @@ export function RequestsPanel() {
                       </td>
                       <td className="py-2 pr-3">
                         <span className="font-mono text-xs">{request.model}</span>
+                        {request.reference === null ||
+                        request.reference === request.model ? null : (
+                          <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
+                            {request.reference}
+                          </span>
+                        )}
                         <span className="mt-0.5 block text-xs text-muted-foreground">
                           {request.providerKind}
                           {request.streamed ? "" : " · sync"}

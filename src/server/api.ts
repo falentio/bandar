@@ -33,7 +33,7 @@ import {
   updateProvider,
   type ProviderDeps,
 } from "./providers";
-import { UpstreamError } from "./router/types";
+import { UpstreamError } from "./providers/types";
 import { createTag, listTags, removeTag, setTagModels, TagRuleError } from "./tags";
 import { InputError, parseInput, type ParseableInput } from "./validation";
 

@@ -16,7 +16,7 @@ import type {
   CanonicalStreamEvent,
   CanonicalUsage,
   ProviderAdapter,
-} from "../../router/types";
+} from "../types";
 
 const UsageSchema = v.object({
   prompt_tokens: v.optional(v.nullable(v.number())),

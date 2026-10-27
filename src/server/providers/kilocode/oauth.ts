@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { UpstreamError } from "../../router/types";
+import { UpstreamError } from "../types";
 import type { DeviceLogin, DevicePollResult, OAuthConnector } from "../types";
 
 const DeviceLoginSchema = v.object({
@@ -16,7 +16,6 @@ const ProfileSchema = v.object({
   organizations: v.optional(v.array(v.object({ id: v.string() }))),
 });
 
-// The smoke run points this at a local fake so the device flow runs end to end.
 const KILO_API = Bun.env.BANDAR_KILOCODE_API ?? "https://api.kilo.ai";
 
 export const kilocodeConnector: OAuthConnector = {

@@ -8,7 +8,7 @@ import {
   type CanonicalUsage,
   type ProviderTarget,
   type UpstreamErrorKind,
-} from "./types";
+} from "../providers/types";
 import { completionResponse, openAiError, usageBody } from "./wire";
 
 export type ChatDeps = {

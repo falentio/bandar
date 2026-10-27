@@ -6,7 +6,7 @@ import { kilocodeConnector } from "./oauth";
 
 const settings = BUILT_IN_PROVIDERS.kilocode;
 
-export const kilocode: BuiltInProviderDefinition = {
+export const kilocode: BuiltInProviderDefinition<"kilocode"> = {
   kind: "kilocode",
   builtIn: {
     name: settings.name,
@@ -19,8 +19,7 @@ export const kilocode: BuiltInProviderDefinition = {
 };
 
 function kilocodeBaseUrl(): string {
-  const origin =
-    Bun.env.BANDAR_KILOCODE_API?.replace(/\/+$/, "") ?? new URL(settings.baseUrl).origin;
+  const origin = Bun.env.BANDAR_KILOCODE_API?.replace(/\/+$/, "");
 
-  return `${origin}/api/openrouter`;
+  return origin === undefined ? settings.baseUrl : `${origin}/api/openrouter`;
 }

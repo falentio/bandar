@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { UpstreamError } from "../../router/types";
+import { UpstreamError } from "../types";
 import type { ModelCatalogEntry } from "../types";
 
 const KILO_MODELS_URL = "https://api.kilo.ai/api/gateway/models";

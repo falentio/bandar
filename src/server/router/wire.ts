@@ -1,4 +1,4 @@
-import type { CanonicalResult, CanonicalUsage } from "./types";
+import type { CanonicalResult, CanonicalUsage } from "../providers/types";
 
 export function openAiError(
   status: number,

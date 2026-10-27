@@ -4,18 +4,29 @@ import { anthropic } from "./anthropic";
 import { google } from "./google";
 import { kilocode } from "./kilocode";
 import { openai } from "./openai";
-import type { BuiltInProviderDefinition, ProviderDefinition } from "./types";
+import type {
+  BuiltInProviderDefinition,
+  BuiltInProviderDefinitions,
+  GenericProviderDefinitions,
+  ProviderDefinitionRecord,
+} from "./types";
 
-const providerDefinitions = {
-  openai,
+const genericDefinitions = {
   anthropic,
+  openai,
   google,
+} satisfies GenericProviderDefinitions;
+
+const builtInDefinitions = {
   kilocode,
-} satisfies Record<ProviderKind, ProviderDefinition>;
+} satisfies BuiltInProviderDefinitions;
 
-type ProviderDefinitions = typeof providerDefinitions;
+const providerDefinitions: ProviderDefinitionRecord = {
+  ...genericDefinitions,
+  ...builtInDefinitions,
+};
 
-export function definitionFor<K extends ProviderKind>(kind: K): ProviderDefinitions[K] {
+export function definitionFor<K extends ProviderKind>(kind: K): ProviderDefinitionRecord[K] {
   return providerDefinitions[kind];
 }
 

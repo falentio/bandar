@@ -17,7 +17,7 @@ import { renumberTagPriorities } from "../tags";
 import { builtInProviders, definitionFor, reservedProviderSlugs } from "./registry";
 import type { ModelCatalogEntry } from "./types";
 
-export { builtInProviders, definitionFor, reservedProviderSlugs };
+export { definitionFor };
 
 export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
 

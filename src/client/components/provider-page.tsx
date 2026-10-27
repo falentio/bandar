@@ -22,6 +22,7 @@ import {
   GENERIC_PROVIDER_KINDS,
   PROVIDER_KIND_LABELS,
   type Provider,
+  type ProviderAuthMode,
   type ProviderKind,
   type ProviderModel,
   type ProviderModelRefresh,
@@ -60,6 +61,10 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   google: "https://generativelanguage.googleapis.com/v1beta",
   kilocode: BUILT_IN_PROVIDERS.kilocode.baseUrl,
 };
+
+function credentialsTabName(authModes: readonly ProviderAuthMode[]): string {
+  return authModes.includes("oauth") ? "Connection" : "Credentials";
+}
 
 export function ProviderPage({
   providerId,
@@ -177,7 +182,7 @@ export function ProviderPage({
               </TabsTrigger>
               <TabsTrigger value="credentials">
                 <KeyRoundIcon data-icon="inline-start" />
-                {provider.authModes.includes("oauth") ? "Connection" : "Credentials"}
+                {credentialsTabName(provider.authModes)}
                 {provider.credentials.length === 0 ? null : (
                   <span
                     className="size-1.5 rounded-full bg-emerald-500"
@@ -274,6 +279,7 @@ function SettingsCard({
   const settings = useProviderSettings(provider);
   const [saved, setSaved] = useState(false);
   const builtIn = provider.origin === "builtin";
+  const tabName = credentialsTabName(provider.authModes);
 
   const dirty =
     !builtIn &&
@@ -300,8 +306,8 @@ function SettingsCard({
         <CardTitle>Settings</CardTitle>
         <CardDescription>
           {builtIn
-            ? "Built-in providers are defined in code. Their kind, name, and URL are fixed; the credential is on the Connection tab."
-            : "Name, wire kind, and base URL. Changing the kind or URL affects every model on this provider. Credentials are on the Credentials tab."}
+            ? `Built-in providers are defined in code. Their kind, name, and URL are fixed; the credential is on the ${tabName} tab.`
+            : `Name, wire kind, and base URL. Changing the kind or URL affects every model on this provider. The credential is on the ${tabName} tab.`}
         </CardDescription>
       </CardHeader>
       <CardContent>

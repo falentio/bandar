@@ -18,7 +18,6 @@ import { applyMigrations, type Migration } from "./db/migrate";
 import { providerCredentials, providerModels, providers, tagModels, tags } from "./db/schema";
 import {
   addProviderModel,
-  assignProviderSlugs,
   createProvider,
   listProviders,
   ProviderRuleError,
@@ -28,6 +27,7 @@ import {
   updateProvider,
   type ProviderDeps,
 } from "./providers";
+import { assignProviderSlugs } from "./providers/seeding";
 import {
   addProviderCredential,
   addProviderCredentials,

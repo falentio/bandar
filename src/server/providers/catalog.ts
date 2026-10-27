@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { joinUrl, secretOf } from "./http";
+import { joinUrl, secretOf, type WireHeaders } from "./http";
 import { UpstreamError, type CatalogRequest, type ModelCatalogEntry } from "./types";
 
 const ModelIdsSchema = v.object({ data: v.array(v.object({ id: v.string() })) });
@@ -11,6 +11,7 @@ export type ModelPrices = {
 
 export const NO_PRICE: ModelPrices = { inputPricePerMtok: null, outputPricePerMtok: null };
 
+/** A keyed catalog: the model list behind the provider's bearer token. */
 export async function readModelIds(request: CatalogRequest): Promise<readonly string[]> {
   const credential = await request.credential();
 
@@ -18,8 +19,17 @@ export async function readModelIds(request: CatalogRequest): Promise<readonly st
     throw new UpstreamError("add a key before importing the catalog", "invalid_request");
   }
 
+  return readIds(request, { authorization: `Bearer ${secretOf(credential)}` });
+}
+
+/** A catalog anyone may read. Never touches `request.credential`. */
+export async function readPublicModelIds(request: CatalogRequest): Promise<readonly string[]> {
+  return readIds(request, {});
+}
+
+async function readIds(request: CatalogRequest, headers: WireHeaders): Promise<readonly string[]> {
   const response = await fetch(joinUrl(request.baseUrl, "models"), {
-    headers: { authorization: `Bearer ${secretOf(credential)}` },
+    headers,
     signal: request.signal,
   }).catch((error: Error) => {
     throw new UpstreamError(`could not read the model catalog: ${error.message}`, "network");

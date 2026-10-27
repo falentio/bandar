@@ -58,7 +58,7 @@ export function CredentialsCard({
         <CardAction>
           <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
             <PlusIcon data-icon="inline-start" />
-            Add credential
+            {provider.authModes.includes("api-key") ? "Add credential" : "Connect account"}
           </Button>
         </CardAction>
       </CardHeader>
@@ -67,13 +67,15 @@ export function CredentialsCard({
           <KeyRoundIcon className="size-4 shrink-0 text-muted-foreground" />
           <span className="text-muted-foreground">
             Credentials are sealed with AES-GCM and never returned by the API, so a saved value
-            cannot be shown again. To change a key, remove the credential and add a new one.
+            cannot be shown again. Remove it and add a new one to replace it.
           </span>
         </div>
 
         {provider.credentials.length === 0 ? (
           <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
-            No credential saved. Requests to this provider are sent without credentials.
+            {provider.authModes.includes("api-key")
+              ? "No credential saved. Requests to this provider are sent without credentials."
+              : "No account connected. Requests to this provider fail until you connect one."}
           </p>
         ) : (
           <ol className="divide-y rounded-lg border">

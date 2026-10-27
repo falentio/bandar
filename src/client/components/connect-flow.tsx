@@ -113,7 +113,7 @@ export function ConnectFlow({
           {phase.kind === "starting" ? "Starting…" : `Connect ${provider.name}`}
         </Button>
         <p className="text-xs text-muted-foreground">
-          Opens {provider.name} in a new tab. A device code is polled until you approve it.
+          Starts a device login. Approve the code on {provider.name}; this page waits for it.
         </p>
       </div>
     );

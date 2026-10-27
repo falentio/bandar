@@ -147,5 +147,7 @@ export async function listModelRefs(
     if (!byId.has(model.id)) byId.set(model.id, model);
   }
 
-  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+  return [...byId.values()].sort((left, right) =>
+    left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+  );
 }

@@ -60,6 +60,7 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   anthropic: "https://api.anthropic.com/v1",
   google: "https://generativelanguage.googleapis.com/v1beta",
   kilocode: BUILT_IN_PROVIDERS.kilocode.baseUrl,
+  tokenharbor: BUILT_IN_PROVIDERS.tokenharbor.baseUrl,
 };
 
 function credentialsTabName(authModes: readonly ProviderAuthMode[]): string {

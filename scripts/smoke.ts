@@ -99,12 +99,15 @@ const upstream = startUpstream();
 const upstreamOrigin = `http://127.0.0.1:${upstream.port}`;
 const kilocode = startKilocode();
 const kilocodeOrigin = `http://127.0.0.1:${kilocode.port}`;
+const builtIns = startBuiltIns();
+const builtInsOrigin = `http://127.0.0.1:${builtIns.port}`;
 
 let failures = 0;
 let cookie = "";
 let openaiProvider: ProviderSlot = { provider: null, modelId: "" };
 let claudeProvider: ProviderSlot = { provider: null, modelId: "" };
 const kiloProvider: ProviderSlot = { provider: null, modelId: "" };
+const tokenharborProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -156,22 +159,37 @@ try {
     cookie = sessionCookie(response);
   });
 
-  await check("GET /api/providers seeds the built-in Kilo Code provider", async () => {
+  await check("GET /api/providers seeds every built-in provider", async () => {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);
-    const builtIn = list.providers.find((provider) => provider.origin === "builtin");
+    const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
-    if (builtIn === undefined) throw new Error("the built-in Kilo Code provider is missing");
+    assert.deepEqual(builtIn.map((provider) => provider.kind).sort(), ["kilocode", "tokenharbor"]);
 
-    assert.equal(builtIn.kind, "kilocode");
-    assert.equal(builtIn.name, "Kilo Code");
-    assert.equal(builtIn.slug, "kilo");
-    assert.equal(builtIn.baseUrl, `${kilocodeOrigin}/api/openrouter`);
-    assert.deepEqual(builtIn.authModes, ["api-key", "oauth"]);
-    assert.equal(builtIn.hasCatalog, true);
-    assert.deepEqual(builtIn.credentials, []);
-    assert.deepEqual(builtIn.models, []);
+    const byKind = new Map(builtIn.map((provider) => [provider.kind, provider]));
+    const kilo = byKind.get("kilocode");
 
-    kiloProvider.provider = builtIn;
+    if (kilo === undefined) throw new Error("the built-in Kilo Code provider is missing");
+
+    assert.equal(kilo.name, "Kilo Code");
+    assert.equal(kilo.slug, "kilo");
+    assert.equal(kilo.baseUrl, `${kilocodeOrigin}/api/openrouter`);
+    assert.deepEqual(kilo.authModes, ["api-key", "oauth"]);
+    assert.equal(kilo.hasCatalog, true);
+    assert.deepEqual(kilo.credentials, []);
+    assert.deepEqual(kilo.models, []);
+
+    const harbor = byKind.get("tokenharbor");
+
+    if (harbor === undefined) throw new Error("the built-in Token Harbor provider is missing");
+
+    assert.equal(harbor.name, "Token Harbor");
+    assert.equal(harbor.slug, "tokenharbor");
+    assert.equal(harbor.baseUrl, `${builtInsOrigin}/tokenharbor/v1`);
+    assert.deepEqual(harbor.authModes, ["api-key"]);
+    assert.equal(harbor.hasCatalog, true);
+
+    kiloProvider.provider = kilo;
+    tokenharborProvider.provider = harbor;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -251,13 +269,13 @@ try {
     );
   });
 
-  await check("GET /api/providers lists three custom providers and the built-in Kilo", async () => {
+  await check("GET /api/providers lists three custom providers and every built-in", async () => {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);
     const custom = list.providers.filter((provider) => provider.origin === "custom");
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 1);
+    assert.equal(builtIn.length, 2);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -697,6 +715,44 @@ try {
     assert.equal(body.choices[0]?.finish_reason, "stop");
     assert.equal(body.usage.prompt_tokens, 3);
     assert.equal(body.usage.completion_tokens, 4);
+  });
+
+  await check("Token Harbor imports its keyed catalog and answers chat", async () => {
+    const id = tokenharborProvider.provider?.id ?? "";
+
+    await postJson(providerPaths.credentials(id), { apiKey: "thk_test" }, ProviderSchema, 201);
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 2);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "thk-mini",
+      "thk-pro",
+    ]);
+    assert.ok(
+      detail.provider.models.every(
+        (model) => model.inputPricePerMtok === null && model.outputPricePerMtok === null,
+      ),
+      "Token Harbor publishes no prices",
+    );
+
+    const response = await chatRequest("thk-pro", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Token Harbor");
+    assert.equal(body.usage?.prompt_tokens, 5);
+    assert.equal(body.usage?.completion_tokens, 2);
   });
 
   await check("providers carry derived slugs and model refs", async () => {
@@ -1450,16 +1506,20 @@ try {
 
     const list = await getJson(providerPaths.list, ProviderListSchema, 200, second.origin);
 
-    assert.equal(
-      list.providers.filter((provider) => provider.origin === "builtin").length,
-      1,
-      "the built-in Kilo Code provider was seeded twice",
+    assert.deepEqual(
+      list.providers
+        .filter((provider) => provider.origin === "builtin")
+        .map((provider) => provider.kind)
+        .sort(),
+      ["kilocode", "tokenharbor"],
+      "a built-in provider was seeded twice",
     );
   });
 } finally {
   await second.stop();
   await upstream.stop(true);
   await kilocode.stop(true);
+  await builtIns.stop(true);
   rmSync(workDir, { recursive: true, force: true });
 }
 
@@ -1507,6 +1567,7 @@ async function boot(port = 0): Promise<Booted> {
       BANDAR_AUTH_SECRET: AUTH_SECRET,
       BANDAR_KILOCODE_API: kilocodeOrigin,
       BANDAR_KILOCODE_MODELS_URL: `${kilocodeOrigin}/api/gateway/models`,
+      BANDAR_TOKENHARBOR_API: `${builtInsOrigin}/tokenharbor`,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -1992,6 +2053,45 @@ function startKilocode() {
       }
 
       return jsonError(404, `no fake kilo route for ${url.pathname}`);
+    },
+  });
+}
+
+function startBuiltIns() {
+  return Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url);
+      const authorization = request.headers.get("authorization") ?? "";
+
+      if (url.pathname === "/tokenharbor/v1/models") {
+        if (authorization !== "Bearer thk_test") return jsonError(401, "bad token harbor key");
+
+        return Response.json({
+          object: "list",
+          data: [
+            { id: "thk-pro", object: "model" },
+            { id: "thk-mini", object: "model" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/tokenharbor/v1/chat/completions") {
+        if (authorization !== "Bearer thk_test") return jsonError(401, "bad token harbor key");
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from Token Harbor" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        });
+      }
+
+      return jsonError(404, `no fake built-in route for ${url.pathname}`);
     },
   });
 }

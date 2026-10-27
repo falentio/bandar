@@ -4,6 +4,7 @@ import { anthropic } from "./anthropic";
 import { google } from "./google";
 import { kilocode } from "./kilocode";
 import { openai } from "./openai";
+import { tokenharbor } from "./tokenharbor";
 import type {
   BuiltInProviderDefinition,
   BuiltInProviderDefinitions,
@@ -19,6 +20,7 @@ const genericDefinitions = {
 
 const builtInDefinitions = {
   kilocode,
+  tokenharbor,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {

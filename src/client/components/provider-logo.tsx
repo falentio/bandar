@@ -30,4 +30,7 @@ const LOGO_PATHS: Record<ProviderKind, string> = {
   // Kilo Code's mark is its hexagon badge; the wordmark stays out of a 24px grid.
   kilocode:
     "M12 1.6 21 7v10l-9 5.4L3 17V7l9-5.4Zm0 2.6L5.2 8.2v7.6L12 19.8l6.8-4V8.2L12 4.2Zm-1.1 3.4 5 4.4-5 4.4V7.6Z",
+  // Token Harbor's anchor: a ring, a shaft, a stock, and two flukes.
+  tokenharbor:
+    "M12 2.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Zm0 1.9a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4ZM11 8.8h2v11.6h-2zm-5 2.6h12v1.9H6zm-1.6 3.1 1.7-1 2.9 5-1.7 1zm13.2 0 1.7 1-2.9 4.9-1.7-1z",
 };

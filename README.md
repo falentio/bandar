@@ -121,6 +121,9 @@ call it as `tags/<slug>`. The gateway tries the models in priority order.
   per attempt.
 - A tag with no enabled models is a 404 `model_not_found` with the message
   `tag <slug> has no enabled models`.
+- The overview counts attempts, so a fallback raises `requests` and the error
+  rate by one. The requests panel shows both rows, including the reference that
+  was called.
 
 Manage tags on the **Tags** page or over `/api/tags`. Every membership write
 replaces the whole list, so priorities are always 1-based and contiguous.

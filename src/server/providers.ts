@@ -13,7 +13,7 @@ import {
   type ProviderList,
   type ProviderModelInput,
 } from "../shared/providers";
-import { availableSlug, providerRefOf, slugify } from "../shared/slugs";
+import { availableSlug, providerRefOf, slugify, TAG_REF_PREFIX } from "../shared/slugs";
 import { parseCredential, type Credential } from "./credential";
 import { KILO_MODELS_URL } from "./router/adapters/kilocode";
 import type { Db } from "./db/client";
@@ -326,6 +326,8 @@ export async function syncProviderModels(
   const now = new Date();
 
   const missing = models.flatMap((model, index) => {
+    if (model.alias.startsWith(TAG_REF_PREFIX)) return [];
+
     if (takenUpstream.has(model.upstreamModel) || takenAlias.has(model.alias)) return [];
 
     takenAlias.add(model.alias);

@@ -32,9 +32,17 @@ export type ProviderTarget = {
 One implementation serves every OpenAI-compatible kind:
 `src/server/providers/openai/compatible.ts` exposes `bearerAdapter(kind, label?)`
 and `chatAdapter({ kind, label, headers })`, both returning `ProviderAdapter<K>`.
-`chatAdapter` takes the header hook a kind needs, and `bearerAdapter` is the
-hookless form. Kilo Code uses `chatAdapter` for its organization header and its
-own auth error; Token Harbor, Yeta, River, and Nous Portal use `bearerAdapter`.
+`headers` is a `HeaderFactory` from `src/server/providers/http.ts`, and
+`bearerAdapter` is its plain-bearer form. Kilo Code uses `chatAdapter` for its
+organization header and its own auth error; Token Harbor, Yeta, River, Nous Portal,
+Hyper, and the OpenCode Go chat wire reach it through `bearerAdapter`.
+
+The Messages and GenAI adapters are options factories with the same shape:
+`anthropicAdapter({ kind, label, headers })` and
+`googleAdapter({ kind, label, headers })`. Their native instances pass
+`apiKeyHeaders("x-api-key")` and `apiKeyHeaders("x-goog-api-key")`; a gateway
+passes `bearerHeaders` instead. `anthropic-version` stays inside the Messages
+wire, because it belongs to the protocol and not to the credential.
 
 `credential` is the attempt's credential. The gateway opens it immediately before
 the call and never passes more than one to an adapter. An OAuth credential that
@@ -95,6 +103,8 @@ const builtInDefinitions = {
   yeta,
   river,
   nous,
+  hyper,
+  opencode,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {
@@ -164,11 +174,11 @@ A built-in provider takes its name, slug, and default base URL from
 `BUILT_IN_PROVIDERS` and its kind from `BUILT_IN_PROVIDER_KINDS` in
 `src/shared/providers.ts`. Its behavior comes from the definition in
 `src/server/providers/<kind>/`. Its row has `origin = "builtin"` and is seeded
-for every account by `ensureBuiltInProviders`. There are five: Kilo Code, Token
-Harbor, Yeta, River, and Nous Portal. Each `index.ts` bundles its adapter with
-whatever else the provider has: a catalog for all five, an `OAuthConnector` for
-Kilo Code and Nous Portal, a `CredentialRenewer` for Nous Portal, and an
-env-aware `builtIn.baseUrl()`. The definition reads that function at seeding
+for every account by `ensureBuiltInProviders`. There are seven: Kilo Code,
+Token Harbor, Yeta, River, Nous Portal, Hyper, and OpenCode Go. Each `index.ts`
+bundles its adapter with whatever else the provider has: a catalog for all seven,
+an `OAuthConnector` for Kilo Code and Nous Portal, a `CredentialRenewer` for
+Nous Portal, and an env-aware `builtIn.baseUrl()`. The definition reads that function at seeding
 time, so `BANDAR_TOKENHARBOR_API` and its siblings can point the seeded rows at
 another origin. Built-in rows cannot be created through the provider API, edited
 in Settings, or removed; they reappear on the next listing if deleted directly.
@@ -180,10 +190,10 @@ same way. That fallback is assigned once: deleting the custom row does not
 restore the reserved slug. Built-ins appear in `BUILT_IN_PROVIDER_KINDS` order,
 even when one is seeded later than the rest.
 
-The distinction is about existence, not wire shape. Four built-ins speak the
-OpenAI wire, and their `index.ts` builds the shared adapter and adds only the
-catalog, the login, or the renewal that is theirs. Kilo Code is the one built-in
-that needs its own adapter headers.
+The distinction is about existence, not wire shape. Token Harbor, Yeta, River,
+Nous Portal, and Hyper build the shared OpenAI adapter, and their `index.ts` adds
+only the catalog, the login, or the renewal that is theirs. Kilo Code needs its
+own adapter headers, and OpenCode Go is the one built-in that serves three wires.
 
 ## Catalogs
 
@@ -205,19 +215,22 @@ import uses the same key the first chat attempt would. A public catalog never
 calls it, so it never decrypts a saved credential. `readModelIds` in
 `src/server/providers/catalog.ts` is the common keyed catalog: `GET {base}/models`
 with a bearer, and a null credential is an `invalid_request` that the API answers
-as 400 ("add a key before importing the catalog"). A public catalog ignores the
-credential, as Nous Portal's does.
+as 400 ("add a key before importing the catalog"). `readPublicModelIds` is its
+anonymous counterpart: one parser and one error mapping, no credential. Nous
+Portal, Hyper, and OpenCode Go read their lists that way.
 
 Prices are optional metadata. Each wire joins them its own way, and a failed join
 leaves the models unpriced rather than failing the import:
 
-| Provider     | Model list                         | Price join                                                       |
-| ------------ | ---------------------------------- | ---------------------------------------------------------------- |
-| Token Harbor | keyed `/models`                    | none; every price is null                                        |
-| Yeta         | keyed `/models`                    | `GET {origin}/api/pricing`; input is `model_ratio * 2` USD/Mtok  |
-| River        | public pricing JSON                | the list and the prices are the same document (`input`/`output`) |
-| Nous Portal  | public OpenRouter-shaped `/models` | `pricing.prompt`/`completion` per token, times 1e6               |
-| Kilo Code    | keyed gateway catalog              | `pricing.prompt`/`completion` per token, times 1e6               |
+| Provider     | Model list                         | Price join                                                                     |
+| ------------ | ---------------------------------- | ------------------------------------------------------------------------------ |
+| Token Harbor | keyed `/models`                    | none; every price is null                                                      |
+| Yeta         | keyed `/models`                    | `GET {origin}/api/pricing`; input is `model_ratio * 2` USD/Mtok                |
+| River        | public pricing JSON                | the list and the prices are the same document (`input`/`output`)               |
+| Nous Portal  | public OpenRouter-shaped `/models` | `pricing.prompt`/`completion` per token, times 1e6                             |
+| Kilo Code    | keyed gateway catalog              | `pricing.prompt`/`completion` per token, times 1e6                             |
+| Hyper        | public `/models`                   | `pricing.input`/`output` already USD/Mtok, so no scaling                       |
+| OpenCode Go  | public `/go/v1/models`, ids only   | the table's base-tier prices; a listed id the table cannot route never imports |
 
 Yeta is a New API gateway: one ratio unit is $0.002 per 1K tokens, so a ratio is
 worth $2 per million and the output price is the input price times
@@ -228,6 +241,11 @@ group's `group_ratio`, which the import does not apply. The public pricing URL d
 `BANDAR_RIVER_PRICING_URL`; when that document cannot be read, River falls back
 to its keyed `/models` list with null prices. Nous Portal keeps only models whose
 `architecture.output_modalities` includes `text`.
+
+Hyper quotes per-million-token prices and serves one wire, so its catalog imports
+every id it lists with the published price. OpenCode Go is the opposite case: the
+list carries no price and no wire, so the imported set is the table's callable
+rows that the list contains, in table order.
 
 ## Errors
 
@@ -252,7 +270,8 @@ Helpers in `src/server/providers/http.ts`:
 - `requireOk(response)` reads an error envelope (`error.message`, `message`, or
   plain text) and classifies the status.
 - `sseData(body, signal)` yields the joined `data:` lines of each SSE event.
-- `apiKeyHeader(name, key)` omits the header when the upstream needs no key.
+- `apiKeyHeaders(name)` returns a `HeaderFactory` that omits the header when the
+  upstream needs no key, and `bearerHeaders` is the `Authorization: Bearer` one.
 
 ## Wire mapping
 
@@ -272,8 +291,8 @@ Anthropic and Google reject adjacent messages with the same role in some
 configurations, so both adapters merge consecutive same-role messages. Every
 other wire is the OpenAI chat shape, so it is passed through unchanged apart from
 optional fields the canonical request does not carry. That is one adapter
-implementation, not five: Kilo Code, Token Harbor, Yeta, River, and Nous Portal
-all differ only in their headers and their catalogs.
+implementation, not six: Kilo Code, Token Harbor, Yeta, River, Nous Portal, and
+Hyper all differ only in their headers and their catalogs.
 
 Kilo Code has two URLs: the OpenRouter-shaped gateway at
 `https://api.kilo.ai/api/openrouter` for chat, and the catalog at
@@ -283,6 +302,41 @@ catalog for **Import catalog** and turns per-token pricing into
 per-million-token prices. A `-1` price means Kilo routes the model dynamically
 and is stored as `null`. River's catalog is its console's public pricing JSON,
 which is why it can list models before any key is saved.
+
+## Multi-wire gateways
+
+OpenCode Go is one kind serving three wires under one bearer. Its table lives in
+`./src/server/providers/opencode/models.ts`; the mount and the adapter for each
+wire live in one `Record<OpenCodeWire, OpenCodeRoute>`, so a wire cannot be added
+without its route:
+
+| Wire        | Mount               | Adapter            | Auth                                          |
+| ----------- | ------------------- | ------------------ | --------------------------------------------- |
+| `openai`    | `/go/openai/v1`     | `chatAdapter`      | `Authorization: Bearer`                       |
+| `anthropic` | `/go/anthropic/v1`  | `anthropicAdapter` | `Authorization: Bearer` + `anthropic-version` |
+| `google`    | `/go/google/v1beta` | `googleAdapter`    | `Authorization: Bearer`                       |
+
+`opencodeAdapter.chat` and `.stream` look the model up in the table, reject an
+unknown or gapped id with `invalid_request` before any request leaves the process,
+clone the target with the wire's mount joined onto its base URL, and delegate.
+There is no `try`/`catch`, so the sub-adapter's `UpstreamError` kind and status
+survive unchanged.
+
+Two rules keep a multi-wire catalog honest:
+
+1. **The table is the authority; the live list is the gate.** Only rows that are
+   both listed and callable import, in table order, so a model bandar cannot route
+   never becomes a row the router will try.
+2. **A gap is data, not an omission.** The five Responses-only ids (`grok-4.7`,
+   `gpt-6-luna`, `gpt-5.6-luna`, `muse-spark-1.3-contributor`,
+   `muse-spark-1.2-contributor`) and the eight ids the docs omit (`glm-5.1`,
+   `grok-4.6`, `kimi-k2.6`, `minimax-m2.5`, `minimax-m2.7`, `omen-alpha`,
+   `qwen3.6-plus`, `qwen3.7-max`) stay in the table with their reason, so a
+   hand-added id fails with that reason instead of a generic error. bandar has no
+   Responses adapter, so the first five cannot be called at all.
+
+A single-wire gateway is the opposite policy: Hyper imports every id its public
+list returns, because its one wire cannot list a model it cannot serve.
 
 ## Streaming rules
 
@@ -308,7 +362,9 @@ not measure time, and non-streaming requests have no TTFT.
 2. Create `src/server/providers/<kind>/index.ts` with the definition, annotated
    with its own kind. An OpenAI-compatible kind builds its adapter with
    `bearerAdapter("<kind>")`; a wire that needs its own headers builds one with
-   `chatAdapter({ kind, label, headers })`. Add an `OAuthConnector`, a
+   `chatAdapter({ kind, label, headers })`. The Messages and GenAI adapters are
+   built the same way, with `anthropicAdapter({ kind, label, headers })` and
+   `googleAdapter({ kind, label, headers })`. Add an `OAuthConnector`, a
    `ProviderCatalog`, or a `CredentialRenewer` when the provider has one.
 3. Register the definition in `genericDefinitions` or `builtInDefinitions` in
    `src/server/providers/registry.ts`. Both `satisfies` records report a missing
@@ -418,14 +474,17 @@ fails the same way.
 
 The smoke run is the adapter conformance suite. It boots the compiled binary,
 points one custom provider of each generic wire at a local fake upstream, checks
-that the five built-in rows were seeded with their auth modes and catalogs, drives
+that the seven built-in rows were seeded with their auth modes and catalogs, drives
 the gateway with a gateway key, and reads the analytics row back. That covers key
 decryption, header construction, request translation, non-stream parsing, SSE
 parsing, usage extraction, finish normalization, TTFT, and tokens-per-second.
 
 The built-in checks go through fake catalog, pricing, and device-auth servers.
 They import each catalog: one keyed with null prices, one keyed with a ratio join,
-one public with per-token prices. They approve both device logins, prove Nous
+one public with per-token prices, one public with per-million-token prices, and one
+public id list that must intersect a built-in table. OpenCode Go answers one chat
+on each of its three mounts, and a hand-added Responses-only model is a 400 with no
+upstream request. They approve both device logins, prove Nous
 Portal rejects an API key, call the gateway with each credential, renew a Nous
 token under two concurrent chats and assert exactly one refresh with no replayed
 refresh token, prove a spent refresh token and a credential without one are

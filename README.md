@@ -20,9 +20,10 @@ SQLite.
 - Tags as ordered fallback chains, managed in the dashboard.
 - Several ordered credentials per provider, tried in priority order.
 - Three generic wires for custom providers: `openai`, `anthropic`, and `google`.
-- Five built-in providers on every account: Kilo Code, Token Harbor, Yeta, River,
-  and Nous Portal. The last four speak the OpenAI wire; Kilo Code and Nous Portal
-  also sign in with a device code.
+- Seven built-in providers on every account: Kilo Code, Token Harbor, Yeta,
+  River, Nous Portal, Hyper, and OpenCode Go. Most speak the OpenAI wire; Kilo Code
+  and Nous Portal also sign in with a device code, and OpenCode Go picks a wire per
+  model across the chat, messages, and GenAI endpoints.
 - Custom providers added from the dashboard without changing code.
 - Provider and model-alias management in the dashboard or over `/api`.
 - Gateway keys from better-auth's API-key plugin, sent as
@@ -42,11 +43,13 @@ BANDAR_AUTH_URL=http://localhost:5173 bun run dev   # client :5173, API :3000
 
 Open <http://localhost:5173>, create an account, then:
 
-1. **Kilo Code**, **Token Harbor**, **Yeta**, **River**, and **Nous Portal** are
-   already on the Providers page. Add an API key on the **Credentials** tab, or
-   approve a device code on the **Connection** tab for Kilo Code and Nous Portal.
-   Then **Import catalog** on the **Models** tab adds that provider's models, with
-   prices when the provider publishes them.
+1. **Kilo Code**, **Token Harbor**, **Yeta**, **River**, **Nous Portal**, **Hyper**,
+   and **OpenCode Go** are already on the Providers page. Add an API key on the
+   **Credentials** tab, or approve a device code on the **Connection** tab for Kilo
+   Code and Nous Portal. Then **Import catalog** on the **Models** tab adds that
+   provider's models, with prices when the provider publishes them. Hyper and
+   OpenCode Go publish their lists to anyone, so those imports need no key;
+   OpenCode Go prices its models from a built-in table.
 2. To add a custom upstream, click **Add custom provider**, pick one of the three generic
    wires, and paste its base URL and key. Then add models: upstream model
    `gpt-4o-mini` with alias `fast` makes `fast` the name clients send.
@@ -273,6 +276,8 @@ throw `UpstreamError` with a kind the gateway maps to an HTTP status.
 | `BANDAR_RIVER_PRICING_URL`   | `https://console.river.ai/api/public/pricing` | River's public pricing JSON, which is also its model list.                                 |
 | `BANDAR_NOUS_API`            | `https://inference-api.nousresearch.com`      | Nous inference origin; the seeded base URL is this plus `/v1`.                             |
 | `BANDAR_NOUS_PORTAL`         | `https://portal.nousresearch.com`             | Nous Portal origin for the device login and token renewal.                                 |
+| `BANDAR_HYPER_API`           | `https://hyper.charm.land`                    | Hyper origin; the seeded base URL is this plus `/v1`.                                      |
+| `BANDAR_OPENCODE_API`        | `https://opencode.ai`                         | OpenCode Go origin; the seeded base URL is this plus `/inference`.                         |
 
 Invalid values fail at startup before the port opens.
 
@@ -343,19 +348,20 @@ semicolons out of string literals in a migration.
 | `bun run check`          | Format, lint, and type-check.                                                    |
 | `bun run check:fix`      | The same with fixes.                                                             |
 | `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                       |
-| `bun run smoke`          | Boot `dist/bandar` and run 64 end-to-end checks against fake upstreams.          |
+| `bun run smoke`          | Boot `dist/bandar` and run 70 end-to-end checks against fake upstreams.          |
 | `bun run verify`         | `check`, `test`, `build`, `smoke`.                                               |
 | `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                    |
 | `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                       |
 | `bun run duck:fetch`     | Copy the platform DuckDB library into `vendor/duckdb/`.                          |
 
 The smoke run mints a user, creates one provider per generic wire against local
-fake upstreams, checks the five seeded built-ins, imports every catalog (one with
-an alias collision, one joined to a pricing table, one public), approves fake Kilo
+fake upstreams, checks the seven seeded built-ins, imports every catalog (one with
+an alias collision, one joined to a pricing table, three public), approves fake Kilo
 Code and Nous Portal device logins, renews a Nous token under two concurrent
-chats, calls the gateway streaming and non-streaming, walks a tag with a failing
-first model, checks the recorded references, rejects reserved slugs, revokes the
-key, restarts the binary, and proves the analytics rows survived.
+chats, calls the gateway streaming and non-streaming, calls one OpenCode Go model
+on each of its three mounts, walks a tag with a failing first model, checks the
+recorded references, rejects reserved slugs, revokes the key, restarts the binary,
+and proves the analytics rows survived.
 
 ## Layout
 
@@ -473,7 +479,7 @@ a catalog import when the provider has one), and **Credentials** or
 **Connection** (the ordered credential list: add, move, and remove a key, connect
 an OAuth account, remove a custom provider). The tab lives in the URL as `?tab=`,
 so a reload or a shared link opens the same tab. Custom providers are created
-empty and grow models one at a time; the five built-ins are seeded empty for
+empty and grow models one at a time; the seven built-ins are seeded empty for
 every account. Built-in settings come from code and are read-only, and a built-in
 cannot be removed. `PUT /api/providers/:id` replaces name, slug, kind, and base
 URL for a custom provider. Credentials change only through the credential routes.
@@ -520,6 +526,13 @@ yet.
   token and before the row is written, the stored refresh token is spent; reconnect.
 - **Yeta prices are the default group's.** The import uses the default group's
   ratios; `group_ratio` for another group is not applied.
+- **OpenCode Go prices are the base tier.** The table stores the base context
+  tier's USD per million tokens and DeepSeek's peak rate, so a long-context tier or
+  an off-peak DeepSeek call costs less than the recorded number. Gemini's price is
+  not published, so it imports unpriced.
+- **Thirteen OpenCode Go ids cannot be called.** Five answer only on the Responses
+  wire, which bandar does not speak, and the docs name no wire for eight more.
+  Neither group imports; typing one in fails with a 400 that names the gap.
 - **A catalog re-import does not reprice.** It adds new upstream models and leaves
   prices on existing models alone.
 - **A built-in can carry a suffixed slug.** If a custom provider already owns the

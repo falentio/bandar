@@ -165,39 +165,41 @@ function updateSubject(db: Db, subject: Subject, failures: number, flaggedUntil:
 }
 
 export function recordSuccess(db: Db, subjects: readonly Subject[]): void {
-  for (const subject of subjects) {
-    switch (subject.kind) {
-      case "provider": {
-        db.update(providers)
-          .set({ failures: 0, flaggedUntil: null })
-          .where(eq(providers.id, subject.id))
-          .run();
-        break;
-      }
+  db.transaction((tx) => {
+    for (const subject of subjects) {
+      switch (subject.kind) {
+        case "provider": {
+          tx.update(providers)
+            .set({ failures: 0, flaggedUntil: null })
+            .where(eq(providers.id, subject.id))
+            .run();
+          break;
+        }
 
-      case "model": {
-        db.update(providerModels)
-          .set({ failures: 0, flaggedUntil: null })
-          .where(eq(providerModels.id, subject.id))
-          .run();
-        break;
-      }
+        case "model": {
+          tx.update(providerModels)
+            .set({ failures: 0, flaggedUntil: null })
+            .where(eq(providerModels.id, subject.id))
+            .run();
+          break;
+        }
 
-      case "credential": {
-        db.update(providerCredentials)
-          .set({ failures: 0, flaggedUntil: null })
-          .where(eq(providerCredentials.id, subject.id))
-          .run();
-        break;
-      }
+        case "credential": {
+          tx.update(providerCredentials)
+            .set({ failures: 0, flaggedUntil: null })
+            .where(eq(providerCredentials.id, subject.id))
+            .run();
+          break;
+        }
 
-      default: {
-        const _exhaustive: never = subject;
+        default: {
+          const _exhaustive: never = subject;
 
-        return _exhaustive;
+          return _exhaustive;
+        }
       }
     }
-  }
+  });
 }
 
 function subjectNameOf(subject: Subject, context: FailureContext): string {

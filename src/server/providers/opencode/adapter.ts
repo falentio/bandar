@@ -15,9 +15,17 @@ type OpenCodeRoute = {
   readonly adapter: ProviderAdapter<"opencode">;
 };
 
+/** Every path opencode serves, under one base URL. */
+export const OPENCODE_MOUNTS = {
+  models: "/go/v1",
+  openai: "/go/openai/v1",
+  anthropic: "/go/anthropic/v1",
+  google: "/go/google/v1beta",
+} as const;
+
 const ROUTES: Record<OpenCodeWire, OpenCodeRoute> = {
   openai: {
-    mount: "/go/openai/v1",
+    mount: OPENCODE_MOUNTS.openai,
     adapter: chatAdapter({
       kind: "opencode",
       label: "opencode go (openai)",
@@ -25,7 +33,7 @@ const ROUTES: Record<OpenCodeWire, OpenCodeRoute> = {
     }),
   },
   anthropic: {
-    mount: "/go/anthropic/v1",
+    mount: OPENCODE_MOUNTS.anthropic,
     adapter: anthropicAdapter({
       kind: "opencode",
       label: "opencode go (anthropic)",
@@ -33,7 +41,7 @@ const ROUTES: Record<OpenCodeWire, OpenCodeRoute> = {
     }),
   },
   google: {
-    mount: "/go/google/v1beta",
+    mount: OPENCODE_MOUNTS.google,
     adapter: googleAdapter({
       kind: "opencode",
       label: "opencode go (google)",

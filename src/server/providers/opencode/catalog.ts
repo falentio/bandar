@@ -1,6 +1,7 @@
 import { entryOf, readPublicModelIds } from "../catalog";
 import { joinUrl } from "../http";
 import type { CatalogRequest, ModelCatalogEntry } from "../types";
+import { OPENCODE_MOUNTS } from "./adapter";
 import { OPENCODE_MODELS } from "./models";
 
 /** The servable models among the ids the gateway lists, priced from the table. */
@@ -19,7 +20,7 @@ export async function fetchOpenCodeCatalog(
 ): Promise<readonly ModelCatalogEntry[]> {
   const listed = await readPublicModelIds({
     ...request,
-    baseUrl: joinUrl(request.baseUrl, "go/v1"),
+    baseUrl: joinUrl(request.baseUrl, OPENCODE_MOUNTS.models),
   });
 
   return opencodeEntries(listed);

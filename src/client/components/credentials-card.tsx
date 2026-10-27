@@ -1,12 +1,17 @@
-import { type FormEvent, useState } from "react";
+import { useState } from "react";
 import { ArrowDownIcon, ArrowUpIcon, KeyRoundIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import type { Provider, ProviderAuthMode, ProviderCredential } from "../../shared/providers";
 import { useProviders } from "../use-providers";
-import { ConnectFlow } from "./connect-flow";
+import { AddCredentialDialog } from "./credential-dialog";
 
 const AUTH_MODE_LABELS: Record<ProviderAuthMode, string> = {
   "api-key": "API key",
@@ -24,8 +29,7 @@ export function CredentialsCard({
   onChanged: () => void;
   onRemoveProvider: () => Promise<boolean>;
 }) {
-  const [label, setLabel] = useState("");
-  const [apiKey, setApiKey] = useState("");
+  const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState(false);
 
   const current = provider.credentials.map((credential) => credential.id);
@@ -45,21 +49,6 @@ export function CredentialsCard({
     if (await providers.removeCredential(provider.id, credentialId)) onChanged();
   };
 
-  const add = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const added = await providers.addCredential(provider.id, {
-      label: label.trim() === "" ? undefined : label.trim(),
-      apiKey: apiKey.trim(),
-    });
-
-    if (!added) return;
-
-    setLabel("");
-    setApiKey("");
-    onChanged();
-  };
-
   return (
     <Card>
       <CardHeader>
@@ -71,18 +60,14 @@ export function CredentialsCard({
             ? "Connect a Kilo Code account with a device code, or save an API key. Each connection joins the chain."
             : "The gateway tries each credential in order. A rejected key falls back to the next one."}
         </CardDescription>
+        <CardAction>
+          <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+            <PlusIcon data-icon="inline-start" />
+            Add credential
+          </Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
-        {provider.kind === "kilocode" ? (
-          <ConnectFlow
-            provider={provider}
-            onConnected={(updated) => {
-              providers.apply(updated);
-              onChanged();
-            }}
-          />
-        ) : null}
-
         <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
           <KeyRoundIcon className="size-4 shrink-0 text-muted-foreground" />
           <span className="text-muted-foreground">
@@ -145,44 +130,6 @@ export function CredentialsCard({
           </ol>
         )}
 
-        <form
-          onSubmit={(event) => void add(event)}
-          className="grid gap-3 border-t pt-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
-        >
-          <div className="grid gap-1.5">
-            <Label htmlFor="credential-label" className="text-xs">
-              Label
-            </Label>
-            <Input
-              id="credential-label"
-              value={label}
-              onChange={(event) => setLabel(event.target.value)}
-              placeholder="work"
-              maxLength={60}
-              disabled={providers.pending}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="credential-key" className="text-xs">
-              API key
-            </Label>
-            <Input
-              id="credential-key"
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder="sk-…"
-              autoComplete="off"
-              maxLength={500}
-              disabled={providers.pending}
-            />
-          </div>
-          <Button type="submit" size="sm" disabled={providers.pending || apiKey.trim() === ""}>
-            <PlusIcon data-icon="inline-start" />
-            Add credential
-          </Button>
-        </form>
-
         {providers.error === null ? null : (
           <p className="text-sm text-destructive">{providers.error}</p>
         )}
@@ -210,6 +157,13 @@ export function CredentialsCard({
           </div>
         ) : null}
       </CardContent>
+      <AddCredentialDialog
+        provider={provider}
+        providers={providers}
+        onChanged={onChanged}
+        open={adding}
+        onOpenChange={setAdding}
+      />
     </Card>
   );
 }

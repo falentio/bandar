@@ -29,6 +29,7 @@ import {
 } from "../shared/auth";
 import {
   ProviderCreateInputSchema,
+  ProviderCredentialBulkInputSchema,
   ProviderCredentialInputSchema,
   ProviderCredentialOrderInputSchema,
   ProviderDetailSchema,
@@ -92,6 +93,11 @@ export const providerApi = {
     request(providerPaths.credentials(id), ProviderSchema, {
       method: "POST",
       body: JSON.stringify(v.parse(ProviderCredentialInputSchema, input)),
+    }),
+  addCredentials: (id: string, apiKeys: readonly string[]): Promise<Provider> =>
+    request(providerPaths.credentialsBulk(id), ProviderSchema, {
+      method: "POST",
+      body: JSON.stringify(v.parse(ProviderCredentialBulkInputSchema, { apiKeys })),
     }),
   reorderCredentials: (id: string, credentialIds: readonly string[]): Promise<Provider> =>
     request(providerPaths.credentialOrder(id), ProviderSchema, {

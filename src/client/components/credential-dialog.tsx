@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from "react";
+import { KeyRoundIcon, ListPlusIcon, LogInIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,6 +32,12 @@ const TAB_LABELS: Record<CredentialTab, string> = {
   single: "Single",
   bulk: "Bulk",
   oauth: "OAuth",
+};
+
+const TAB_ICONS: Record<CredentialTab, typeof KeyRoundIcon> = {
+  single: KeyRoundIcon,
+  bulk: ListPlusIcon,
+  oauth: LogInIcon,
 };
 
 const TABS_BY_AUTH_MODE: Record<ProviderAuthMode, readonly CredentialTab[]> = {
@@ -203,11 +210,16 @@ export function AddCredentialDialog({
         >
           {tabs.length > 1 ? (
             <TabsList>
-              {tabs.map((value) => (
-                <TabsTrigger key={value} value={value}>
-                  {TAB_LABELS[value]}
-                </TabsTrigger>
-              ))}
+              {tabs.map((value) => {
+                const Icon = TAB_ICONS[value];
+
+                return (
+                  <TabsTrigger key={value} value={value}>
+                    <Icon data-icon="inline-start" />
+                    {TAB_LABELS[value]}
+                  </TabsTrigger>
+                );
+              })}
             </TabsList>
           ) : null}
           {tabs.map((value) => (

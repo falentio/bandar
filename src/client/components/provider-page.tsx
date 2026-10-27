@@ -63,6 +63,7 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   tokenharbor: BUILT_IN_PROVIDERS.tokenharbor.baseUrl,
   yeta: BUILT_IN_PROVIDERS.yeta.baseUrl,
   river: BUILT_IN_PROVIDERS.river.baseUrl,
+  nous: BUILT_IN_PROVIDERS.nous.baseUrl,
 };
 
 function credentialsTabName(authModes: readonly ProviderAuthMode[]): string {

@@ -3,6 +3,7 @@ import { TAG_SLUG } from "../../shared/slugs";
 import { anthropic } from "./anthropic";
 import { google } from "./google";
 import { kilocode } from "./kilocode";
+import { nous } from "./nous";
 import { openai } from "./openai";
 import { river } from "./river";
 import { tokenharbor } from "./tokenharbor";
@@ -25,6 +26,7 @@ const builtInDefinitions = {
   tokenharbor,
   yeta,
   river,
+  nous,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {

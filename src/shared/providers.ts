@@ -6,7 +6,13 @@ import { MAX_UPSTREAM_MODEL_LENGTH, SlugSchema, TAG_REF_PREFIX } from "./slugs";
 export const GENERIC_PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
 
 // Built-in providers come from code, exist for every account, and are not added by hand.
-export const BUILT_IN_PROVIDER_KINDS = ["kilocode", "tokenharbor", "yeta", "river"] as const;
+export const BUILT_IN_PROVIDER_KINDS = [
+  "kilocode",
+  "tokenharbor",
+  "yeta",
+  "river",
+  "nous",
+] as const;
 
 export const PROVIDER_KINDS = [...GENERIC_PROVIDER_KINDS, ...BUILT_IN_PROVIDER_KINDS] as const;
 
@@ -40,6 +46,12 @@ export const BUILT_IN_PROVIDERS = {
     name: "River",
     slug: "river",
     baseUrl: "https://api.river.ai/v1",
+  },
+  nous: {
+    kind: "nous",
+    name: "Nous Portal",
+    slug: "nous",
+    baseUrl: "https://inference-api.nousresearch.com/v1",
   },
 } satisfies Record<
   BuiltInProviderKind,
@@ -213,6 +225,7 @@ export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
   tokenharbor: "Token Harbor",
   yeta: "Yeta",
   river: "River",
+  nous: "Nous Portal",
 };
 
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;

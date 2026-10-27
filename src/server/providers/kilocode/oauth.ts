@@ -87,6 +87,8 @@ export const kilocodeConnector: OAuthConnector = {
         authMode: "oauth",
         accessToken: approved.output.token,
         organizationId: await organizationOf(approved.output.token, signal),
+        refreshToken: null,
+        expiresAt: null,
       },
     };
   },

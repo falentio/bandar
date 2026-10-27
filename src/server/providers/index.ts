@@ -399,15 +399,18 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
 
   const present = new Set(rows.filter((row) => row.origin === "builtin").map((row) => row.kind));
   const names = new Set(rows.map((row) => row.name));
+  const slugs = new Set(rows.flatMap((row) => (row.slug === "" ? [] : [row.slug])));
   const now = new Date();
 
   for (const definition of builtInProviders) {
     if (present.has(definition.kind)) continue;
 
+    // A custom row can already hold a slug that has since become reserved.
     const name = availableName(definition.builtIn.name, names);
-    const slug = definition.builtIn.slug;
+    const slug = availableSlug(definition.builtIn.slug, slugs);
 
     names.add(name);
+    slugs.add(slug);
 
     deps.db
       .insert(providers)

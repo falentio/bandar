@@ -14,26 +14,39 @@ export type JsonPost = {
   readonly signal: AbortSignal;
 };
 
+export type FormPost = {
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly form: Readonly<Record<string, string>>;
+  readonly signal: AbortSignal;
+};
+
 export function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
 export async function postJson(request: JsonPost): Promise<Response> {
-  try {
-    return await fetch(request.url, {
+  return send(
+    request.url,
+    {
       method: "POST",
       headers: { "content-type": "application/json", ...request.headers },
       body: request.body,
-      signal: request.signal,
-    });
-  } catch (error) {
-    if (request.signal.aborted) throw new UpstreamError("request aborted", "network");
+    },
+    request.signal,
+  );
+}
 
-    throw new UpstreamError(
-      error instanceof Error ? error.message : "upstream request failed",
-      "network",
-    );
-  }
+export async function postForm(request: FormPost): Promise<Response> {
+  return send(
+    request.url,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", ...request.headers },
+      body: new URLSearchParams(request.form).toString(),
+    },
+    request.signal,
+  );
 }
 
 export async function requireOk(response: Response): Promise<void> {
@@ -41,6 +54,19 @@ export async function requireOk(response: Response): Promise<void> {
 
   const message = await errorMessage(response);
   throw new UpstreamError(message, kindForStatus(response.status), response.status);
+}
+
+async function send(url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal });
+  } catch (error) {
+    if (signal.aborted) throw new UpstreamError("request aborted", "network");
+
+    throw new UpstreamError(
+      error instanceof Error ? error.message : "upstream request failed",
+      "network",
+    );
+  }
 }
 
 export function protocolError(message: string): UpstreamError {

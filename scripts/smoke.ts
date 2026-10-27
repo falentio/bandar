@@ -110,6 +110,7 @@ const kiloProvider: ProviderSlot = { provider: null, modelId: "" };
 const tokenharborProvider: ProviderSlot = { provider: null, modelId: "" };
 const yetaProvider: ProviderSlot = { provider: null, modelId: "" };
 const riverProvider: ProviderSlot = { provider: null, modelId: "" };
+const nousProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -167,6 +168,7 @@ try {
 
     assert.deepEqual(builtIn.map((provider) => provider.kind).sort(), [
       "kilocode",
+      "nous",
       "river",
       "tokenharbor",
       "yeta",
@@ -215,10 +217,21 @@ try {
     assert.deepEqual(river.authModes, ["api-key"]);
     assert.equal(river.hasCatalog, true);
 
+    const nous = byKind.get("nous");
+
+    if (nous === undefined) throw new Error("the built-in Nous Portal provider is missing");
+
+    assert.equal(nous.name, "Nous Portal");
+    assert.equal(nous.slug, "nous");
+    assert.equal(nous.baseUrl, `${builtInsOrigin}/nous/v1`);
+    assert.deepEqual(nous.authModes, ["oauth"]);
+    assert.equal(nous.hasCatalog, true);
+
     kiloProvider.provider = kilo;
     tokenharborProvider.provider = harbor;
     yetaProvider.provider = yeta;
     riverProvider.provider = river;
+    nousProvider.provider = nous;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -304,7 +317,7 @@ try {
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 4);
+    assert.equal(builtIn.length, 5);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -848,6 +861,89 @@ try {
     assert.equal(body.choices[0]?.message.content, "Hello from River");
     assert.equal(body.usage?.prompt_tokens, 4);
     assert.equal(body.usage?.completion_tokens, 3);
+  });
+
+  await check("the Nous Portal device login returns a code and connects", async () => {
+    const id = nousProvider.provider?.id ?? "";
+
+    const start = await postJson(providerPaths.oauthStart(id), {}, ProviderOAuthStartSchema, 200);
+
+    assert.equal(start.userCode, "NOUS-CODE");
+    assert.equal(
+      start.verificationUrl,
+      "https://portal.nousresearch.com/manage-subscription?code=NOUS-CODE",
+    );
+    assert.equal(start.expiresInSeconds, 600);
+
+    const pending = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(pending.state, "pending");
+
+    const connected = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(connected.state, "connected");
+    assert.equal(connected.authMode, "oauth");
+  });
+
+  await check("a device-login provider rejects an API key", async () => {
+    const id = nousProvider.provider?.id ?? "";
+
+    const single = await post(providerPaths.credentials(id), { apiKey: "nous-key" });
+
+    assert.equal(single.status, 400);
+    assert.equal((await errorBody(single)).code, "unsupported_mode");
+
+    const bulk = await post(providerPaths.credentialsBulk(id), { apiKeys: ["nous-key"] });
+
+    assert.equal(bulk.status, 400);
+    assert.equal((await errorBody(bulk)).code, "unsupported_mode");
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(
+      detail.provider.credentials.map((credential) => credential.authMode),
+      ["oauth"],
+    );
+  });
+
+  await check("the Nous Portal imports its public catalog with per-token prices", async () => {
+    const id = nousProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 2);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "nous-omni",
+      "nous-text-large",
+    ]);
+
+    const large = detail.provider.models.find((model) => model.alias === "nous-text-large");
+    const omni = detail.provider.models.find((model) => model.alias === "nous-omni");
+
+    assert.equal(large?.inputPricePerMtok, 3);
+    assert.equal(large?.outputPricePerMtok, 15);
+    assert.equal(omni?.inputPricePerMtok, 1);
+    assert.equal(omni?.outputPricePerMtok, 2);
+  });
+
+  await check("the Nous Portal answers chat with its oauth bearer", async () => {
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Nous Portal");
+    assert.equal(body.usage?.prompt_tokens, 6);
+    assert.equal(body.usage?.completion_tokens, 5);
   });
 
   await check("providers carry derived slugs and model refs", async () => {
@@ -1606,7 +1702,7 @@ try {
         .filter((provider) => provider.origin === "builtin")
         .map((provider) => provider.kind)
         .sort(),
-      ["kilocode", "river", "tokenharbor", "yeta"],
+      ["kilocode", "nous", "river", "tokenharbor", "yeta"],
       "a built-in provider was seeded twice",
     );
   });
@@ -1666,6 +1762,8 @@ async function boot(port = 0): Promise<Booted> {
       BANDAR_YETA_API: `${builtInsOrigin}/yeta`,
       BANDAR_RIVER_API: `${builtInsOrigin}/river`,
       BANDAR_RIVER_PRICING_URL: `${builtInsOrigin}/river/pricing`,
+      BANDAR_NOUS_API: `${builtInsOrigin}/nous`,
+      BANDAR_NOUS_PORTAL: `${builtInsOrigin}/portal`,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -2156,6 +2254,8 @@ function startKilocode() {
 }
 
 function startBuiltIns() {
+  let nousPolls = 0;
+
   return Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -2272,6 +2372,86 @@ function startBuiltIns() {
           ],
           usage: { prompt_tokens: 4, completion_tokens: 3 },
         });
+      }
+
+      if (url.pathname === "/nous/v1/models") {
+        return Response.json({
+          data: [
+            {
+              id: "nous-text-large",
+              architecture: { output_modalities: ["text"] },
+              pricing: { prompt: "0.000003", completion: "0.000015" },
+            },
+            {
+              id: "nous-omni",
+              architecture: { output_modalities: ["text", "image"] },
+              pricing: { prompt: "0.000001", completion: "0.000002" },
+            },
+            {
+              id: "nous-image",
+              architecture: { output_modalities: ["image"] },
+              pricing: { prompt: "0.00001", completion: "0.00002" },
+            },
+            { id: "nous-unpriced" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/nous/v1/chat/completions") {
+        if (!authorization.startsWith("Bearer nous-access-")) {
+          return jsonError(401, "bad nous access token");
+        }
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from Nous Portal" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 6, completion_tokens: 5 },
+        });
+      }
+
+      if (url.pathname === "/portal/api/oauth/device/code" && request.method === "POST") {
+        const form = new URLSearchParams(await request.text());
+
+        if (form.get("client_id") !== "hermes-cli" || form.get("scope") !== "inference:invoke") {
+          return jsonError(400, "bad nous device code request");
+        }
+
+        return Response.json({
+          device_code: "nous-device-1",
+          user_code: "NOUS-CODE",
+          verification_uri: "https://portal.nousresearch.com/manage-subscription",
+          verification_uri_complete:
+            "https://portal.nousresearch.com/manage-subscription?code=NOUS-CODE",
+          expires_in: 600,
+          interval: 5,
+        });
+      }
+
+      if (url.pathname === "/portal/api/oauth/token" && request.method === "POST") {
+        const form = new URLSearchParams(await request.text());
+
+        if (form.get("client_id") !== "hermes-cli") return jsonError(400, "bad nous client");
+
+        if (form.get("grant_type") === "urn:ietf:params:oauth:grant-type:device_code") {
+          nousPolls += 1;
+
+          if (nousPolls === 1) {
+            return Response.json({ error: "authorization_pending" }, { status: 400 });
+          }
+
+          return Response.json({
+            access_token: "nous-access-1",
+            refresh_token: "rt-1",
+            token_type: "Bearer",
+            expires_in: 0,
+          });
+        }
+
+        return jsonError(400, "unsupported nous grant");
       }
 
       return jsonError(404, `no fake built-in route for ${url.pathname}`);

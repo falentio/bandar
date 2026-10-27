@@ -62,7 +62,8 @@ export type UpstreamErrorKind =
   | "not_found"
   | "unavailable"
   | "protocol"
-  | "network";
+  | "network"
+  | "unknown";
 
 export class UpstreamError extends Error {
   readonly kind: UpstreamErrorKind;

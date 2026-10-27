@@ -72,6 +72,7 @@ const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
   "unavailable",
   "protocol",
   "network",
+  "unknown",
 ]);
 
 export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Response> {
@@ -139,7 +140,7 @@ async function complete(
       const failed =
         error instanceof Error
           ? failureOf(error)
-          : new UpstreamError("unexpected upstream failure", "network");
+          : new UpstreamError("unexpected upstream failure", "unknown");
 
       const aborted = input.signal.aborted;
 
@@ -157,11 +158,12 @@ async function complete(
         return openAiError(400, "request aborted", "aborted", "upstream_error");
       }
 
+      attempts.failed(attempt, failed.kind, new Date());
+
       if (!RETRYABLE.has(failed.kind)) {
         return openAiError(statusFor(failed), failed.message, failed.kind, "upstream_error");
       }
 
-      attempts.failed(attempt, failed.kind, new Date());
       lastFailure = failed;
     }
   }
@@ -331,7 +333,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
           const failed =
             error instanceof Error
               ? failureOf(error)
-              : new UpstreamError("unexpected upstream failure", "network");
+              : new UpstreamError("unexpected upstream failure", "unknown");
 
           const aborted = abort.signal.aborted;
 
@@ -351,13 +353,14 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             return;
           }
 
+          attempts.failed(attempt, failed.kind, new Date());
+
           if (chunksSent > 0 || !RETRYABLE.has(failed.kind)) {
             fail(failed.message, failed.kind);
 
             return;
           }
 
-          attempts.failed(attempt, failed.kind, new Date());
           lastFailure = failed;
         }
       }
@@ -545,7 +548,7 @@ function recordSafe(deps: ChatDeps, base: EventBase, outcome: Outcome): void {
 function failureOf(error: Error | UpstreamError): UpstreamError {
   if (error instanceof UpstreamError) return error;
 
-  return new UpstreamError(error.message, "network");
+  return new UpstreamError(error.message, "unknown");
 }
 
 function statusFor(error: UpstreamError): number {
@@ -560,6 +563,7 @@ function statusFor(error: UpstreamError): number {
     case "unavailable":
     case "protocol":
     case "network":
+    case "unknown":
       return 502;
     default: {
       const _exhaustive: never = error.kind;

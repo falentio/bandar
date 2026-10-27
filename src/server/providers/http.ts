@@ -176,5 +176,5 @@ function kindForStatus(status: number): UpstreamErrorKind {
 
   if (status >= 500) return "unavailable";
 
-  return "protocol";
+  return "unknown";
 }

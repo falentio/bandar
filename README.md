@@ -130,7 +130,8 @@ A tag is a named fallback chain. It holds an ordered list of models, and clients
 call it as `tags/<slug>`. The gateway tries the models in priority order.
 
 - The chain is retried only on `auth`, `rate_limit`, `not_found`, `unavailable`,
-  `protocol`, and `network`. An `invalid_request` or an aborted request is final.
+  `protocol`, `network`, and `unknown`. An `invalid_request` or an aborted request
+  is final.
 - There is no attempt cap. The chain is walked in full, so a long tag can mean
   several upstream calls for one client request.
 - Each attempt writes one DuckDB event. A fallback therefore adds a row for the
@@ -161,7 +162,7 @@ appends each in order, and, for a provider with a device login, an **OAuth** tab
   the next model in a tag. A tag with two models that each hold two credentials
   can make four upstream calls for one client request.
 - The retry set is the tag chain's: `auth`, `rate_limit`, `not_found`,
-  `unavailable`, `protocol`, and `network`. An `invalid_request` or an
+  `unavailable`, `protocol`, `network`, and `unknown`. An `invalid_request` or an
   aborted request is final.
 - Each attempt writes one DuckDB event, so a key fallback adds a row beside the
   row for the key that answered.
@@ -183,14 +184,19 @@ appends each in order, and, for a provider with a device login, an **OAuth** tab
 
 ### Cooldowns
 
-A retryable failure flags one subject:
+A failure flags at most one subject:
 
-| Error kind               | Flagged              |
-| ------------------------ | -------------------- |
-| `auth`, `rate_limit`     | the credential       |
-| `unavailable`, `network` | the provider         |
-| `protocol`, `not_found`  | the model            |
-| `invalid_request`        | nothing, it is final |
+| Error kind               | Flagged                   |
+| ------------------------ | ------------------------- |
+| `auth`, `rate_limit`     | the credential            |
+| `unavailable`, `network` | the provider              |
+| `protocol`, `not_found`  | the model                 |
+| `invalid_request`        | nothing, it is final      |
+| `unknown`                | nothing, it falls through |
+
+`unknown` covers a status the gateway does not classify and a bug in an adapter.
+Neither says anything about the model, the provider, or the credential, so it
+convicts nobody and the chain still falls through it.
 
 A retired model answers 404, which is `not_found`, so a tag falls through it
 like any other retryable failure. A flagged subject cools down for
@@ -210,7 +216,8 @@ Every failure that flags a subject writes one immutable row to
 credential when one was involved, the error kind, the reference, the new failure
 count, the cooldown, and the flag time. Rows are denormalized and have no foreign
 keys, so deleting a provider or a model keeps its history. Each user keeps the
-newest 500 rows. An `invalid_request`, an abort, and a success write nothing.
+newest 500 rows. An `invalid_request`, an `unknown`, an abort, and a success
+write nothing.
 
 The **Errors** page lists the newest 100, and `GET /api/cooldowns?limit=100`
 returns the same list. On that page a flag in the future reads "cooling down"

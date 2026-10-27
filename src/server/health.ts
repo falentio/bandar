@@ -66,7 +66,8 @@ export function subjectFor(kind: UpstreamErrorKind, target: FailureTarget): Subj
       return { kind: "model", id: target.modelId };
     }
 
-    case "invalid_request": {
+    case "invalid_request":
+    case "unknown": {
       return null;
     }
 

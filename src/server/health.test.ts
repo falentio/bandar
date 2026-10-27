@@ -64,6 +64,7 @@ describe("subjectFor", () => {
 
   test("flags nothing for a final or anonymous failure", () => {
     expect(subjectFor("invalid_request", target)).toBeNull();
+    expect(subjectFor("unknown", target)).toBeNull();
     expect(subjectFor("auth", anonymous)).toBeNull();
     expect(subjectFor("rate_limit", anonymous)).toBeNull();
   });

@@ -8,7 +8,7 @@ import {
   requireOk,
   secretOf,
   sseData,
-} from "./http";
+} from "../http";
 import {
   UpstreamError,
   type AdapterInput,
@@ -17,7 +17,7 @@ import {
   type CanonicalStreamEvent,
   type CanonicalUsage,
   type ProviderAdapter,
-} from "../types";
+} from "../../router/types";
 
 const UsageSchema = v.object({
   input_tokens: v.optional(v.nullable(v.number())),
@@ -57,7 +57,7 @@ type ChatBody = {
   stop_sequences?: string[];
 };
 
-export const anthropic: ProviderAdapter = {
+export const anthropicAdapter: ProviderAdapter = {
   kind: "anthropic",
 
   async chat(input: AdapterInput): Promise<CanonicalResult> {

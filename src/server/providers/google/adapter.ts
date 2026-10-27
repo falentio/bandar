@@ -8,7 +8,7 @@ import {
   requireOk,
   secretOf,
   sseData,
-} from "./http";
+} from "../http";
 import {
   UpstreamError,
   type AdapterInput,
@@ -17,7 +17,7 @@ import {
   type CanonicalStreamEvent,
   type CanonicalUsage,
   type ProviderAdapter,
-} from "../types";
+} from "../../router/types";
 
 const UsageSchema = v.object({
   promptTokenCount: v.optional(v.nullable(v.number())),
@@ -52,7 +52,7 @@ type ChatBody = {
   };
 };
 
-export const google: ProviderAdapter = {
+export const googleAdapter: ProviderAdapter = {
   kind: "google",
 
   async chat(input: AdapterInput): Promise<CanonicalResult> {

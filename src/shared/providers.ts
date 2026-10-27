@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { ProviderUsageSchema } from "./analytics";
-import { MAX_UPSTREAM_MODEL_LENGTH, SlugSchema, TAG_REF_PREFIX, TAG_SLUG } from "./slugs";
+import { MAX_UPSTREAM_MODEL_LENGTH, SlugSchema, TAG_REF_PREFIX } from "./slugs";
 
 // Generic wires are the kinds a user can add as a custom provider.
 export const GENERIC_PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
@@ -9,8 +9,6 @@ export const GENERIC_PROVIDER_KINDS = ["openai", "anthropic", "google"] as const
 export const BUILT_IN_PROVIDER_KINDS = ["kilocode"] as const;
 
 export const PROVIDER_KINDS = [...GENERIC_PROVIDER_KINDS, ...BUILT_IN_PROVIDER_KINDS] as const;
-
-export const OAUTH_PROVIDER_KINDS = ["kilocode"] as const;
 
 export const PROVIDER_AUTH_MODES = ["api-key", "oauth"] as const;
 
@@ -34,11 +32,6 @@ export const BUILT_IN_PROVIDERS = {
     readonly baseUrl: string;
   }
 >;
-
-export const RESERVED_PROVIDER_SLUGS: ReadonlySet<string> = new Set([
-  TAG_SLUG,
-  ...BUILT_IN_PROVIDER_KINDS.map((kind) => BUILT_IN_PROVIDERS[kind].slug),
-]);
 
 export const ProviderKindSchema = v.picklist(PROVIDER_KINDS);
 
@@ -148,8 +141,6 @@ export const providerPaths = {
 export type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
 
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;
-
-export type OAuthProviderKind = (typeof OAUTH_PROVIDER_KINDS)[number];
 
 export type ProviderAuthMode = v.InferOutput<typeof ProviderAuthModeSchema>;
 

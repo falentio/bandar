@@ -463,6 +463,53 @@ try {
     );
   });
 
+  await check("GET /api/analytics filters by provider, account and model", async () => {
+    const anthropicOnly = await getJson(
+      `${analyticsPaths.analytics}?days=30&providerKind=anthropic`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(anthropicOnly.summary.requests, 1);
+    assert.deepEqual(
+      anthropicOnly.models.map((model) => model.model),
+      ["claude"],
+    );
+
+    const account = await getJson(
+      `${analyticsPaths.analytics}?days=30&providerId=${claudeProvider.provider?.id ?? ""}`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(account.summary.requests, 1);
+
+    const models = await getJson(
+      `${analyticsPaths.analytics}?days=30&model=fast`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(models.summary.requests, 1);
+    assert.equal(models.summary.inputTokens, 11);
+
+    const twoKinds = await getJson(
+      `${analyticsPaths.analytics}?days=30&providerKind=openai&providerKind=google`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(twoKinds.summary.requests, 2);
+
+    const none = await getJson(
+      `${analyticsPaths.analytics}?days=30&model=absent`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(none.summary.requests, 0);
+    assert.equal(none.daily.length, 30);
+  });
   await check("POST /api/providers cannot create another built-in provider", async () => {
     const response = await post(providerPaths.list, {
       name: "Another Kilo",
@@ -836,6 +883,36 @@ try {
     );
   });
 
+  await check("GET /api/analytics filters by tag and intersects with a model", async () => {
+    const tag = await getJson(
+      `${analyticsPaths.analytics}?days=30&tag=failover`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.ok(tag.summary.requests >= 5, `tag filter saw ${tag.summary.requests} requests`);
+    assert.deepEqual(tag.models.map((model) => model.model).sort(), ["dead-model", "fast"]);
+
+    const narrowed = await getJson(
+      `${analyticsPaths.analytics}?days=30&tag=failover&model=fast`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.ok(narrowed.summary.requests < tag.summary.requests);
+    assert.deepEqual(
+      narrowed.models.map((model) => model.model),
+      ["fast"],
+    );
+
+    const absent = await getJson(
+      `${analyticsPaths.analytics}?days=30&tag=absent`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(absent.summary.requests, 0);
+  });
   await check("an alias wins over an identical provider ref", async () => {
     const provider = await postJson(
       providerPaths.list,

@@ -43,6 +43,13 @@
       "when": 1793107363883,
       "tag": "0005_provider_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793112081307,
+      "tag": "0006_tags_and_slugs",
+      "breakpoints": true
     }
   ]
 }

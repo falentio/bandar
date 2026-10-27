@@ -1,5 +1,6 @@
 import * as v from "valibot";
 import { ProviderUsageSchema } from "./analytics";
+import { SlugSchema, TAG_REF_PREFIX } from "./slugs";
 
 // Generic wires are the kinds a user can add as a custom provider.
 export const GENERIC_PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
@@ -21,12 +22,24 @@ export const BUILT_IN_PROVIDERS = {
   kilocode: {
     kind: "kilocode",
     name: "Kilo Code",
+    slug: "kilo",
     baseUrl: "https://api.kilo.ai/api/openrouter",
   },
 } satisfies Record<
   BuiltInProviderKind,
-  { readonly kind: BuiltInProviderKind; readonly name: string; readonly baseUrl: string }
+  {
+    readonly kind: BuiltInProviderKind;
+    readonly name: string;
+    readonly slug: string;
+    readonly baseUrl: string;
+  }
 >;
+
+// `tags/` is the reference namespace, so no provider may claim it.
+export const RESERVED_PROVIDER_SLUGS: ReadonlySet<string> = new Set([
+  "tags",
+  ...BUILT_IN_PROVIDER_KINDS.map((kind) => BUILT_IN_PROVIDERS[kind].slug),
+]);
 
 export const ProviderKindSchema = v.picklist(PROVIDER_KINDS);
 
@@ -40,6 +53,8 @@ export const ProviderModelSchema = v.object({
   id: v.string(),
   upstreamModel: v.string(),
   alias: v.string(),
+  ref: v.string(),
+  shadowed: v.boolean(),
   inputPricePerMtok: v.nullable(v.number()),
   outputPricePerMtok: v.nullable(v.number()),
 });
@@ -47,6 +62,7 @@ export const ProviderModelSchema = v.object({
 export const ProviderSchema = v.object({
   id: v.string(),
   name: v.string(),
+  slug: v.string(),
   kind: ProviderKindSchema,
   origin: ProviderOriginSchema,
   baseUrl: v.string(),
@@ -65,18 +81,25 @@ export const ProviderDetailSchema = v.object({
   usage: ProviderUsageSchema,
 });
 
-export const ProviderModelInputSchema = v.object({
-  upstreamModel: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200)),
-  alias: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100))),
-  inputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-  outputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-});
+export const ProviderModelInputSchema = v.pipe(
+  v.object({
+    upstreamModel: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200)),
+    alias: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100))),
+    inputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+    outputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+  }),
+  v.check(
+    (input) => !(input.alias ?? input.upstreamModel).startsWith(TAG_REF_PREFIX),
+    `an alias cannot start with ${TAG_REF_PREFIX}`,
+  ),
+);
 
 export const ProviderInputSchema = v.object({
   name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(60)),
   kind: ProviderKindSchema,
   baseUrl: v.pipe(v.string(), v.trim(), v.url()),
   apiKey: v.optional(v.pipe(v.string(), v.maxLength(500)), ""),
+  slug: v.optional(SlugSchema),
 });
 
 export const ProviderCreateInputSchema = v.object({

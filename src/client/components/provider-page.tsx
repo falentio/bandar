@@ -43,6 +43,7 @@ import { useProviders } from "../use-providers";
 import { useRequests } from "../use-requests";
 import { useTags } from "../use-tags";
 import { CredentialsCard } from "./credentials-card";
+import { HealthBadge } from "./health-badge";
 import { ProviderLogo } from "./provider-logo";
 
 const RANGES = [7, 30, 90] as const;
@@ -662,6 +663,7 @@ function ModelRow({
       {model.shadowed ? (
         <span className="text-xs text-muted-foreground">an alias with this name wins</span>
       ) : null}
+      <HealthBadge failures={model.failures} flaggedUntil={model.flaggedUntil} />
       {tags.map((tag) => (
         <span
           key={tag.slug}

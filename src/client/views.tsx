@@ -4,6 +4,7 @@ import {
   ScrollTextIcon,
   ServerIcon,
   TagsIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 
 export const views = [
@@ -11,6 +12,7 @@ export const views = [
   { to: "/providers", label: "Providers", icon: ServerIcon },
   { to: "/tags", label: "Tags", icon: TagsIcon },
   { to: "/requests", label: "Requests", icon: ScrollTextIcon },
+  { to: "/errors", label: "Errors", icon: TriangleAlertIcon },
   { to: "/api-keys", label: "API keys", icon: KeyRoundIcon },
 ] as const;
 

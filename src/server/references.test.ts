@@ -47,6 +47,12 @@ afterEach(() => {
   open = [];
 });
 
+const INSERT_PROVIDER_SQL =
+  "INSERT INTO providers (id, user_id, name, slug, kind, base_url, origin, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+
+const INSERT_MODEL_SQL =
+  "INSERT INTO provider_models (id, user_id, provider_id, alias, upstream_model, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
+
 describe("model refs", () => {
   test("the longest provider ref fits the gateway model field", () => {
     const ref = providerRefOf("s".repeat(MAX_SLUG_LENGTH), "m".repeat(MAX_UPSTREAM_MODEL_LENGTH));
@@ -324,42 +330,40 @@ describe("provider models", () => {
     );
 
     handle.db.insert(user).values({ id: "user-1", name: "User", email: "user-1@test" }).run();
-    handle.db
-      .insert(providers)
-      .values({
-        id: "provider-1",
-        userId: "user-1",
-        name: "Provider",
-        slug: "provider",
-        kind: "openai",
-        baseUrl: "https://example.com",
-        origin: "custom",
-        createdAt: new Date("2026-01-01T00:00:00.000Z"),
-      })
-      .run();
-    handle.db
-      .insert(providerModels)
-      .values([
-        {
-          id: "model-1",
-          userId: "user-1",
-          providerId: "provider-1",
-          alias: "one",
-          upstreamModel: "same",
-          enabled: true,
-          createdAt: new Date("2026-01-02T00:00:00.000Z"),
-        },
-        {
-          id: "model-2",
-          userId: "user-1",
-          providerId: "provider-1",
-          alias: "two",
-          upstreamModel: "same",
-          enabled: true,
-          createdAt: new Date("2026-01-03T00:00:00.000Z"),
-        },
-      ])
-      .run();
+    handle.sqlite
+      .query(INSERT_PROVIDER_SQL)
+      .run(
+        "provider-1",
+        "user-1",
+        "Provider",
+        "provider",
+        "openai",
+        "https://example.com",
+        "custom",
+        Date.parse("2026-01-01T00:00:00.000Z"),
+      );
+    handle.sqlite
+      .query(INSERT_MODEL_SQL)
+      .run(
+        "model-1",
+        "user-1",
+        "provider-1",
+        "one",
+        "same",
+        1,
+        Date.parse("2026-01-02T00:00:00.000Z"),
+      );
+    handle.sqlite
+      .query(INSERT_MODEL_SQL)
+      .run(
+        "model-2",
+        "user-1",
+        "provider-1",
+        "two",
+        "same",
+        1,
+        Date.parse("2026-01-03T00:00:00.000Z"),
+      );
     handle.db
       .insert(tags)
       .values([
@@ -405,18 +409,17 @@ describe("provider models", () => {
 
     expect(links).toEqual(["tag-both:model-1:1", "tag-second:model-1:1"]);
     expect(() =>
-      handle.db
-        .insert(providerModels)
-        .values({
-          id: "model-3",
-          userId: "user-1",
-          providerId: "provider-1",
-          alias: "three",
-          upstreamModel: "same",
-          enabled: true,
-          createdAt: new Date("2026-01-06T00:00:00.000Z"),
-        })
-        .run(),
+      handle.sqlite
+        .query(INSERT_MODEL_SQL)
+        .run(
+          "model-3",
+          "user-1",
+          "provider-1",
+          "three",
+          "same",
+          1,
+          Date.parse("2026-01-06T00:00:00.000Z"),
+        ),
     ).toThrow(/UNIQUE constraint failed/);
   });
 });
@@ -591,6 +594,8 @@ describe("provider credentials", () => {
         label: "",
         authMode: "api-key",
         priority: 1,
+        failures: 0,
+        flaggedUntil: null,
         createdAt: keyed.credentials[0]?.createdAt,
       },
     ]);
@@ -755,7 +760,10 @@ describe("provider credentials", () => {
        VALUES ('model-keyed', 'user-1', 'provider-keyed', 'fast', 'gpt', 1, 3)`,
     );
 
-    expect(applyMigrations(handle.sqlite, all).applied).toEqual(["0008_provider_credentials"]);
+    expect(applyMigrations(handle.sqlite, all).applied).toEqual([
+      "0008_provider_credentials",
+      "0009_remarkable_ronan",
+    ]);
 
     const rows = handle.sqlite
       .query<{ provider_id: string; credential: string; auth_mode: string; priority: number }, []>(

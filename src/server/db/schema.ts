@@ -8,6 +8,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { CooldownSubject } from "../../shared/cooldowns";
 import type { ProviderAuthMode, ProviderKind, ProviderOrigin } from "../../shared/providers";
 import { user } from "./auth-schema";
 
@@ -23,6 +24,8 @@ export const providers = sqliteTable(
     kind: text("kind").$type<ProviderKind>().notNull(),
     baseUrl: text("base_url").notNull(),
     origin: text("origin").$type<ProviderOrigin>().notNull().default("custom"),
+    failures: integer("failures").notNull().default(0),
+    flaggedUntil: integer("flagged_until", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
@@ -44,6 +47,8 @@ export const providerCredentials = sqliteTable(
     credential: text("credential").notNull(),
     authMode: text("auth_mode").$type<ProviderAuthMode>().notNull().default("api-key"),
     priority: integer("priority").notNull(),
+    failures: integer("failures").notNull().default(0),
+    flaggedUntil: integer("flagged_until", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
@@ -66,6 +71,8 @@ export const providerModels = sqliteTable(
     inputPricePerMtok: real("input_price_per_mtok"),
     outputPricePerMtok: real("output_price_per_mtok"),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    failures: integer("failures").notNull().default(0),
+    flaggedUntil: integer("flagged_until", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
@@ -103,6 +110,29 @@ export const tagModels = sqliteTable(
     uniqueIndex("tag_models_tag_priority").on(table.tagId, table.priority),
     index("tag_models_model").on(table.modelId),
   ],
+);
+
+export const cooldownEvents = sqliteTable(
+  "cooldown_events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    subject: text("subject").$type<CooldownSubject>().notNull(),
+    subjectName: text("subject_name").notNull(),
+    providerId: text("provider_id").notNull(),
+    providerName: text("provider_name").notNull(),
+    modelId: text("model_id").notNull(),
+    modelAlias: text("model_alias").notNull(),
+    credentialId: text("credential_id"),
+    credentialName: text("credential_name"),
+    errorKind: text("error_kind").notNull(),
+    reference: text("reference").notNull(),
+    failures: integer("failures").notNull(),
+    cooldownMs: integer("cooldown_ms").notNull(),
+    flaggedUntil: integer("flagged_until", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("cooldown_events_user_created").on(table.userId, table.createdAt)],
 );
 
 export type ProviderRow = typeof providers.$inferSelect;

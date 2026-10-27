@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { joinUrl, secretOf, type WireHeaders } from "./http";
+import { bearerHeaders, joinUrl, type WireHeaders } from "./http";
 import { UpstreamError, type CatalogRequest, type ModelCatalogEntry } from "./types";
 
 const ModelIdsSchema = v.object({ data: v.array(v.object({ id: v.string() })) });
@@ -19,9 +19,7 @@ export async function readModelIds(request: CatalogRequest): Promise<readonly st
     throw new UpstreamError("add a key before importing the catalog", "invalid_request");
   }
 
-  const response = await readModelResponse(request, {
-    authorization: "Bearer " + secretOf(credential),
-  });
+  const response = await readModelResponse(request, bearerHeaders(credential));
 
   const parsed = v.safeParse(ModelIdsSchema, await response.json().catch(() => null));
 

@@ -36,13 +36,13 @@ describe("isCoolingDown", () => {
   const now = Date.parse("2026-01-01T00:00:00.000Z");
 
   test("reads a flag in the future as cooling down", () => {
-    expect(isCoolingDown({ failures: 1, flaggedUntil: new Date(now + 1) }, now)).toBe(true);
+    expect(isCoolingDown(new Date(now + 1), now)).toBe(true);
   });
 
   test("reads a missing or elapsed flag as available", () => {
-    expect(isCoolingDown({ failures: 0, flaggedUntil: null }, now)).toBe(false);
-    expect(isCoolingDown({ failures: 1, flaggedUntil: new Date(now - 1) }, now)).toBe(false);
-    expect(isCoolingDown({ failures: 1, flaggedUntil: new Date(now) }, now)).toBe(false);
+    expect(isCoolingDown(null, now)).toBe(false);
+    expect(isCoolingDown(new Date(now - 1), now)).toBe(false);
+    expect(isCoolingDown(new Date(now), now)).toBe(false);
   });
 });
 

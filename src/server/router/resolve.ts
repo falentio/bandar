@@ -17,11 +17,8 @@ export type ResolvedAttempt = {
   readonly sealedKey: string;
   readonly modelId: string;
   readonly providerName: string;
-  readonly providerFailures: number;
   readonly providerFlaggedUntil: Date | null;
-  readonly modelFailures: number;
   readonly modelFlaggedUntil: Date | null;
-  readonly credentialFailures: number;
   readonly credentialFlaggedUntil: Date | null;
 };
 
@@ -46,11 +43,8 @@ type AttemptRow = {
   readonly sealedKey: string | null;
   readonly modelId: string;
   readonly providerName: string;
-  readonly providerFailures: number;
   readonly providerFlaggedUntil: Date | null;
-  readonly modelFailures: number;
   readonly modelFlaggedUntil: Date | null;
-  readonly credentialFailures: number | null;
   readonly credentialFlaggedUntil: Date | null;
 };
 
@@ -67,11 +61,8 @@ const attemptColumns = {
   sealedKey: providerCredentials.credential,
   modelId: providerModels.id,
   providerName: providers.name,
-  providerFailures: providers.failures,
   providerFlaggedUntil: providers.flaggedUntil,
-  modelFailures: providerModels.failures,
   modelFlaggedUntil: providerModels.flaggedUntil,
-  credentialFailures: providerCredentials.failures,
   credentialFlaggedUntil: providerCredentials.flaggedUntil,
 };
 
@@ -81,7 +72,6 @@ function attemptsOf(rows: readonly AttemptRow[]): readonly ResolvedAttempt[] {
     ...row,
     credentialLabel: row.credentialLabel ?? "",
     sealedKey: row.sealedKey ?? "",
-    credentialFailures: row.credentialFailures ?? 0,
   }));
 }
 

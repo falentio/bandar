@@ -7,8 +7,6 @@ export const COOLDOWN_BASE_MS = 30_000;
 export const COOLDOWN_CAP_MS = 24 * 60 * 60 * 1000;
 export const COOLDOWN_HISTORY_LIMIT = 500;
 
-export type Health = { failures: number; flaggedUntil: Date | null };
-
 export type Subject =
   | { kind: "provider"; id: string }
   | { kind: "credential"; id: string }
@@ -44,8 +42,8 @@ export function cooldownMs(failures: number): number {
   return Math.min(growth, COOLDOWN_CAP_MS);
 }
 
-export function isCoolingDown(health: Health, now: number): boolean {
-  return health.flaggedUntil !== null && health.flaggedUntil.getTime() > now;
+export function isCoolingDown(flaggedUntil: Date | null, now: number): boolean {
+  return flaggedUntil !== null && flaggedUntil.getTime() > now;
 }
 
 export function subjectFor(kind: UpstreamErrorKind, target: FailureTarget): Subject | null {

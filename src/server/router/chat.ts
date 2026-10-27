@@ -5,7 +5,6 @@ import {
   recordSuccess,
   subjectFor,
   subjectKey,
-  type Health,
   type Subject,
 } from "../health";
 import { definitionFor, type ProviderDeps } from "../providers";
@@ -402,7 +401,7 @@ function attemptPlan(
     let skippable = false;
 
     for (const subject of subjectsOf(attempt)) {
-      if (isCoolingDown(healthOf(attempt, subject), now)) {
+      if (isCoolingDown(flaggedUntilOf(attempt, subject), now)) {
         cooling.add(subjectKey(subject));
         skippable = true;
       }
@@ -468,27 +467,18 @@ function subjectsOf(attempt: ResolvedAttempt): readonly Subject[] {
   return subjects;
 }
 
-function healthOf(attempt: ResolvedAttempt, subject: Subject): Health {
+function flaggedUntilOf(attempt: ResolvedAttempt, subject: Subject): Date | null {
   switch (subject.kind) {
     case "provider": {
-      return {
-        failures: attempt.providerFailures,
-        flaggedUntil: attempt.providerFlaggedUntil,
-      };
+      return attempt.providerFlaggedUntil;
     }
 
     case "model": {
-      return {
-        failures: attempt.modelFailures,
-        flaggedUntil: attempt.modelFlaggedUntil,
-      };
+      return attempt.modelFlaggedUntil;
     }
 
     case "credential": {
-      return {
-        failures: attempt.credentialFailures,
-        flaggedUntil: attempt.credentialFlaggedUntil,
-      };
+      return attempt.credentialFlaggedUntil;
     }
 
     default: {

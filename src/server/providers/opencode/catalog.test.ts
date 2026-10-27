@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 import { opencodeEntries } from "./catalog";
+import { OPENCODE_MODELS } from "./models";
 
 describe("opencode go catalog", () => {
   test("imports only the listed ids the table can serve, in table order", () => {
@@ -50,5 +51,17 @@ describe("opencode go catalog", () => {
 
   test("a gapped or unknown id never imports, even when the gateway lists it", () => {
     expect(opencodeEntries(["gpt-6-luna", "glm-5.1", "not-a-go-model"])).toEqual([]);
+  });
+});
+
+describe("opencode go catalog against the full gateway list", () => {
+  test("the 38 listed ids import as the 25 servable rows", () => {
+    const listed = OPENCODE_MODELS.map((model) => model.id);
+    const entries = opencodeEntries(listed);
+
+    expect(entries).toHaveLength(25);
+    expect(new Set(entries.map((entry) => entry.upstreamModel))).toEqual(
+      new Set(OPENCODE_MODELS.filter((model) => model.wire !== null).map((model) => model.id)),
+    );
   });
 });

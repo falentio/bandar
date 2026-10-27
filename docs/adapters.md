@@ -62,14 +62,22 @@ Each provider is a directory under `src/server/providers/<kind>/`. Its
 capability the provider has. `src/server/providers/registry.ts` holds the record:
 
 ```ts
-const providerDefinitions = {
+const genericDefinitions = {
   openai,
   anthropic,
   google,
-  kilocode,
-} satisfies Record<ProviderKind, ProviderDefinition>;
+} satisfies GenericProviderDefinitions;
 
-export function definitionFor<K extends ProviderKind>(kind: K): ProviderDefinitions[K] {
+const builtInDefinitions = {
+  kilocode,
+} satisfies BuiltInProviderDefinitions;
+
+const providerDefinitions: ProviderDefinitionRecord = {
+  ...genericDefinitions,
+  ...builtInDefinitions,
+};
+
+export function definitionFor<K extends ProviderKind>(kind: K): ProviderDefinitionRecord[K] {
   return providerDefinitions[kind];
 }
 ```
@@ -84,27 +92,27 @@ type ProviderCapabilities = {
   readonly catalog?: ProviderCatalog;
 };
 
-export type GenericProviderDefinition = ProviderCapabilities & {
-  readonly kind: GenericProviderKind;
-  readonly builtIn?: undefined;
-};
-
-export type BuiltInProviderDefinition = ProviderCapabilities & {
-  readonly kind: BuiltInProviderKind;
-  readonly builtIn: {
-    readonly name: string;
-    readonly slug: string;
-    readonly baseUrl: () => string;
+export type GenericProviderDefinition<K extends GenericProviderKind = GenericProviderKind> =
+  ProviderCapabilities & {
+    readonly kind: K;
+    readonly builtIn?: undefined;
   };
-};
+
+export type BuiltInProviderDefinition<K extends BuiltInProviderKind = BuiltInProviderKind> =
+  ProviderCapabilities & {
+    readonly kind: K;
+    readonly builtIn: BuiltInProviderSettings;
+  };
 ```
 
-`satisfies Record<ProviderKind, ProviderDefinition>` makes the compiler fail when
-`PROVIDER_KINDS` gains a member without a definition, when an entry carries a
-`kind` that disagrees with its key, and when a built-in has no `builtIn`
-settings. `builtInProviders` derives the seeding list from
-`BUILT_IN_PROVIDER_KINDS`, so seeding order does not depend on the record's key
-order.
+`GenericProviderDefinitions` and `BuiltInProviderDefinitions` make the compiler
+fail when a kind list gains a member without a definition, when an entry carries
+a `kind` that disagrees with its key, and when a built-in has no `builtIn`
+settings. The key check works because each definition is annotated with its own
+kind, as in `GenericProviderDefinition<"openai">` or
+`BuiltInProviderDefinition<"kilocode">`. `builtInProviders` derives the seeding
+list from `BUILT_IN_PROVIDER_KINDS`, so seeding order does not depend on the
+record's key order.
 
 There is no dynamic loading: the binary is compiled, so a static, exhaustive
 record is the registration mechanism.
@@ -204,11 +212,13 @@ not measure time, and non-streaming requests have no TTFT.
 2. Create `src/server/providers/<kind>/adapter.ts`. Import the helpers from
    `src/server/providers/http.ts`, implement `chat` and `stream`, and keep every
    wire type inside the file.
-3. Create `src/server/providers/<kind>/index.ts` with the definition. Add an
-   `OAuthConnector` or a `ProviderCatalog` when the provider has one.
-4. Register the definition in `providerDefinitions` in
-   `src/server/providers/registry.ts`. The `satisfies` record reports a missing
-   entry, and a built-in without its `builtIn` settings does not compile.
+3. Create `src/server/providers/<kind>/index.ts` with the definition, annotated
+   with its own kind. Add an `OAuthConnector` or a `ProviderCatalog` when the
+   provider has one.
+4. Register the definition in `genericDefinitions` or `builtInDefinitions` in
+   `src/server/providers/registry.ts`. Both `satisfies` records report a missing
+   entry, a wrong kind for the key, and a built-in without its `builtIn`
+   settings.
 5. Add a branch to the fake upstream in `scripts/smoke.ts` and two checks: one
    non-streaming text/usage assertion and one SSE text/usage/finish assertion.
    The fake upstream verifies the adapter's auth header too.

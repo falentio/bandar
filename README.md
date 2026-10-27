@@ -159,22 +159,27 @@ The overview defaults to 30 days and can switch to 7 or 90. The API is
 
 ## Adding a provider
 
-A provider is one directory under `./src/server/providers/<kind>/` plus one
-registry entry. The definition object bundles the wire adapter with every
-capability the provider has: a device login, a model catalog, and the settings a
-built-in seeds. The registry is a `satisfies Record<ProviderKind,
-ProviderDefinition>`, so a new kind fails the type check until it is registered.
+Adding a provider touches the shared kind lists, one provider directory, the
+registry, and the dashboard. The definition object bundles the wire adapter with
+every capability the provider has: a device login, a model catalog, and the
+settings a built-in seeds. `GenericProviderDefinitions` and
+`BuiltInProviderDefinitions` make the compiler reject a kind without a
+definition, a definition whose `kind` disagrees with its key, and a built-in
+without its `builtIn` settings.
 
 1. Add the kind to `GENERIC_PROVIDER_KINDS` in `./src/shared/providers.ts` for a
    custom wire, or to `BUILT_IN_PROVIDER_KINDS` and `BUILT_IN_PROVIDERS` for a
    built-in.
 2. Create `./src/server/providers/<kind>/adapter.ts` implementing `ProviderAdapter`.
-3. Create `./src/server/providers/<kind>/index.ts` with the definition. Add an
-   `oauth` connector or a `catalog` reader when the provider has one.
-4. Register the definition in `./src/server/providers/registry.ts`. The record
-   reports a missing entry, and a built-in without its `builtIn` settings does
-   not compile.
-5. Add a fake upstream branch and one streaming plus one non-streaming smoke
+3. Create `./src/server/providers/<kind>/index.ts` with the definition, annotated
+   `GenericProviderDefinition<"<kind>">` or
+   `BuiltInProviderDefinition<"<kind>">`. Add an `oauth` connector or a `catalog`
+   reader when the provider has one.
+4. Register the definition in `./src/server/providers/registry.ts`.
+5. Add the logo to `./src/client/components/provider-logo.tsx` and the label to
+   the provider pages. The client's `Record<ProviderKind, ...>` tables fail until
+   the new kind has both.
+6. Add a fake upstream branch and one streaming plus one non-streaming smoke
    check in `./scripts/smoke.ts`.
 
 The full contract, wire mapping, and streaming rules are in

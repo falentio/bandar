@@ -1,17 +1,47 @@
 import { type AnyElysia, Elysia } from "elysia";
 import * as v from "valibot";
+import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
-import { NoteIdSchema, NoteInputSchema } from "../shared/notes";
+import { ProviderInputSchema, ProviderParamsSchema } from "../shared/providers";
+import { readAnalytics, readRequests } from "./analytics";
 import type { Auth, SessionUser } from "./auth";
 import type { MigrationResult } from "./db/migrate";
-import type { NotesRepo } from "./notes";
+import type { DuckDb } from "./duck/client";
+import {
+  createProvider,
+  listProviders,
+  removeProvider,
+  updateProvider,
+  type ProviderDeps,
+} from "./providers";
 import { InputError, parseInput, type ParseableInput } from "./validation";
 
-const NoteParamsSchema = v.object({ id: NoteIdSchema });
+export type ApiDeps = {
+  readonly auth: Auth;
+  readonly duck: DuckDb;
+  readonly providers: ProviderDeps;
+  readonly migration: MigrationResult;
+  readonly duckMigration: { readonly current: string | null };
+};
 
-export function createApi(repo: NotesRepo, migration: MigrationResult, auth: Auth): AnyElysia {
-  // Elysia binds the error handler when a route is registered, so onError comes first.
+type Caller = { readonly userId: string; readonly apiKeyId: string | null };
+
+const AnalyticsQuerySchema = v.object({
+  days: v.optional(
+    v.pipe(v.string(), v.transform(Number), v.integer(), v.minValue(1), v.maxValue(365)),
+    "30",
+  ),
+});
+
+const RequestsQuerySchema = v.object({
+  limit: v.optional(
+    v.pipe(v.string(), v.transform(Number), v.integer(), v.minValue(1), v.maxValue(200)),
+    "50",
+  ),
+});
+
+export function createApi(deps: ApiDeps): AnyElysia {
   return new Elysia({ prefix: "/api" })
     .onError(({ code, error, path, set }) => {
       if (error instanceof InputError) {
@@ -31,63 +61,138 @@ export function createApi(repo: NotesRepo, migration: MigrationResult, auth: Aut
 
       return failure("internal", "unexpected server error");
     })
-    .all("/auth/*", ({ request }) => auth.handler(request))
-    .get("/health", health(migration), { response: HealthSchema })
-    .get("/notes", async ({ request }) => {
-      const user = await authenticate(auth, request);
+    .all("/auth/*", ({ request }) => deps.auth.handler(request))
+    .get("/health", health(deps.migration, deps.duckMigration), { response: HealthSchema })
+    .get("/providers", async ({ request }) => {
+      const caller = await authenticate(deps.auth, request);
 
-      if (user instanceof Response) return user;
+      if (caller instanceof Response) return caller;
 
-      return [...repo.list(user.id)];
+      return listProviders(deps.providers, caller.userId);
     })
-    .post("/notes", async ({ body, request, set }) => {
-      const user = await authenticate(auth, request);
+    .post("/providers", async ({ body, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
 
-      if (user instanceof Response) return user;
+      if (caller instanceof Response) return caller;
 
       // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
-      const input = parseInput(NoteInputSchema, body as ParseableInput);
+      const input = parseInput(ProviderInputSchema, body as ParseableInput);
 
-      set.status = 201;
+      try {
+        const provider = await createProvider(deps.providers, caller.userId, input);
 
-      return repo.create(user.id, input);
+        set.status = 201;
+
+        return provider;
+      } catch (error) {
+        if (error instanceof Error && isUniqueViolation(error)) {
+          set.status = 409;
+
+          return failure("conflict", "a provider name or model alias already exists");
+        }
+
+        throw error;
+      }
     })
-    .delete("/notes/:id", async ({ params, request, set }) => {
-      const user = await authenticate(auth, request);
+    .put("/providers/:id", async ({ body, params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
 
-      if (user instanceof Response) return user;
+      if (caller instanceof Response) return caller;
 
-      const { id } = parseInput(NoteParamsSchema, params);
+      const { id } = parseInput(ProviderParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(ProviderInputSchema, body as ParseableInput);
 
-      if (!repo.remove(user.id, id)) {
+      try {
+        const provider = await updateProvider(deps.providers, caller.userId, id, input);
+
+        if (provider === null) {
+          set.status = 404;
+
+          return failure("not_found", `provider ${id} not found`);
+        }
+
+        return provider;
+      } catch (error) {
+        if (error instanceof Error && isUniqueViolation(error)) {
+          set.status = 409;
+
+          return failure("conflict", "a model alias already exists");
+        }
+
+        throw error;
+      }
+    })
+    .delete("/providers/:id", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+
+      if (!(await removeProvider(deps.providers, caller.userId, id))) {
         set.status = 404;
 
-        return failure("not_found", `note ${id} not found`);
+        return failure("not_found", `provider ${id} not found`);
       }
 
       set.status = 204;
+    })
+    .get("/analytics", async ({ query, request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { days } = parseInput(AnalyticsQuerySchema, query);
+      const analytics = readAnalytics(deps.duck, { userId: caller.userId, days });
+
+      return v.parse(AnalyticsSchema, analytics);
+    })
+    .get("/requests", async ({ query, request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { limit } = parseInput(RequestsQuerySchema, query);
+
+      return v.parse(RequestListSchema, readRequests(deps.duck, { userId: caller.userId, limit }));
     });
 }
 
-function health(migration: MigrationResult): () => Health {
-  return () => ({ ok: true, migration: migration.current });
+function health(
+  migration: MigrationResult,
+  duckMigration: { readonly current: string | null },
+): () => Health {
+  return () => ({
+    ok: true,
+    migration: migration.current,
+    duckMigration: duckMigration.current,
+  });
 }
 
-async function authenticate(auth: Auth, request: Request): Promise<SessionUser | Response> {
+async function authenticate(auth: Auth, request: Request): Promise<Caller | Response> {
   const key = request.headers.get(API_KEY_HEADER);
 
   // A bad key is final: falling back to the cookie would hide a wrong key behind a live session.
   if (key !== null) {
-    const user = await auth.verifyApiKey(key);
+    const verified = await auth.verifyApiKey(key);
 
-    return (
-      user ?? Response.json(failure("unauthorized", "that API key is not valid"), { status: 401 })
-    );
+    if (verified === null) {
+      return Response.json(failure("unauthorized", "that API key is not valid"), { status: 401 });
+    }
+
+    return { userId: verified.userId, apiKeyId: verified.keyId };
   }
 
-  const user = await auth.getSession(request.headers);
+  const user: SessionUser | null = await auth.getSession(request.headers);
 
-  return user ?? Response.json(failure("unauthorized", "sign in to use notes"), { status: 401 });
+  return user === null
+    ? Response.json(failure("unauthorized", "sign in to use the API"), { status: 401 })
+    : { userId: user.id, apiKeyId: null };
+}
+
+function isUniqueViolation(error: Error): boolean {
+  return error.message.includes("UNIQUE constraint failed");
 }
 
 function failure(code: string, message: string, issues: readonly string[] = []): ApiErrorBody {

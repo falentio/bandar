@@ -1,4 +1,4 @@
-import { GalleryVerticalEndIcon } from "lucide-react";
+import { RouteIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -23,11 +23,11 @@ export function AppSidebar({
       <SidebarHeader>
         <div className="flex items-center gap-2 p-2 group-data-[collapsible=icon]:p-0">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-            <GalleryVerticalEndIcon className="size-4" />
+            <RouteIcon className="size-4" />
           </div>
           <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
             <span className="truncate font-medium">bandar</span>
-            <span className="truncate text-xs">Single-binary notes</span>
+            <span className="truncate text-xs">LLM gateway</span>
           </div>
         </div>
       </SidebarHeader>

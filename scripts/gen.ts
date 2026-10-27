@@ -13,6 +13,7 @@ import { dirname, join, posix, relative, sep } from "node:path";
 const ROOT = join(import.meta.dir, "..");
 const DRIZZLE_DIR = join(ROOT, "drizzle");
 const JOURNAL = join(DRIZZLE_DIR, "meta/_journal.json");
+const DUCK_DIR = join(ROOT, "duckdb");
 const CLIENT_DIR = join(ROOT, "dist/client");
 const STAGING_DIR = join(ROOT, ".build/embed");
 const GENERATED_DIR = join(ROOT, "src/server/generated");
@@ -24,6 +25,7 @@ type Journal = { readonly entries: readonly { readonly idx: number; readonly tag
 export type GenReport = {
   readonly assets: number;
   readonly migrations: number;
+  readonly duckMigrations: number;
   readonly changed: readonly string[];
 };
 
@@ -34,13 +36,27 @@ export function generate(options: { readonly strict?: boolean } = {}): GenReport
   const migrations = readMigrations(strict);
   writeGenerated(join(GENERATED_DIR, "migrations.ts"), renderMigrations(migrations), changed);
 
+  const duckMigrations = readDuckMigrations(strict);
+  writeGenerated(
+    join(GENERATED_DIR, "duck-migrations.ts"),
+    renderDuckMigrations(duckMigrations),
+    changed,
+  );
+
   const files = readClientFiles(strict);
   rmSync(STAGING_DIR, { recursive: true, force: true });
   writeGenerated(join(GENERATED_DIR, "client-assets.ts"), renderClientFiles(files), changed);
 
-  console.log(`gen: ${files.length} assets, ${migrations.length} migrations`);
+  console.log(
+    `gen: ${files.length} assets, ${migrations.length} migrations, ${duckMigrations.length} duckdb migrations`,
+  );
 
-  return { assets: files.length, migrations: migrations.length, changed };
+  return {
+    assets: files.length,
+    migrations: migrations.length,
+    duckMigrations: duckMigrations.length,
+    changed,
+  };
 }
 
 type MigrationSource = { readonly tag: string; readonly file: string };
@@ -69,6 +85,32 @@ function readMigrations(strict: boolean): readonly MigrationSource[] {
 
     return { tag: entry.tag, file };
   });
+}
+
+type DuckMigrationSource = { readonly tag: string; readonly file: string };
+
+function readDuckMigrations(strict: boolean): readonly DuckMigrationSource[] {
+  if (!existsSync(DUCK_DIR)) {
+    if (strict) throw new Error("gen: missing duckdb/; add a DuckDB migration first");
+    console.error("gen: no duckdb/ directory; emitting an empty duckdb migration list");
+
+    return [];
+  }
+
+  const sources = readdirSync(DUCK_DIR)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => ({ tag: name.slice(0, -4), file: join(DUCK_DIR, name) }));
+
+  for (const source of sources) {
+    if (!/^\d{4}_[a-z0-9_]+$/.test(source.tag)) {
+      throw new Error(
+        `gen: ${fromRoot(source.file)} must be named NNNN_lower_snake.sql, got ${source.tag}`,
+      );
+    }
+  }
+
+  return sources;
 }
 
 function readClientFiles(strict: boolean): readonly GeneratedFile[] {
@@ -116,6 +158,21 @@ function renderMigrations(migrations: readonly MigrationSource[]): string {
   const rows = migrations.map((m, i) => `  { tag: ${quote(m.tag)}, sql: m${i} },`);
 
   return `${head}\n${imports.join("\n")}\n\nexport const migrations = [\n${rows.join("\n")}\n] satisfies readonly Migration[];\n`;
+}
+
+function renderDuckMigrations(migrations: readonly DuckMigrationSource[]): string {
+  const head = 'import type { DuckMigration } from "../duck/migrate";\n';
+
+  if (migrations.length === 0)
+    return `${head}\nexport const duckMigrations: readonly DuckMigration[] = [];\n`;
+
+  const imports = migrations.map(
+    (m, i) => `import m${i} from ${quote(importSpecifier(m.file))} with { type: "text" };`,
+  );
+
+  const rows = migrations.map((m, i) => `  { tag: ${quote(m.tag)}, sql: m${i} },`);
+
+  return `${head}\n${imports.join("\n")}\n\nexport const duckMigrations = [\n${rows.join("\n")}\n] satisfies readonly DuckMigration[];\n`;
 }
 
 function renderClientFiles(files: readonly GeneratedFile[]): string {

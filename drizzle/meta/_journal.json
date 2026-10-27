@@ -22,6 +22,13 @@
       "when": 1793084897424,
       "tag": "0002_api_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793098158150,
+      "tag": "0003_router",
+      "breakpoints": true
     }
   ]
 }

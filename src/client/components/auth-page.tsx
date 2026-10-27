@@ -1,4 +1,4 @@
-import { GalleryVerticalEndIcon } from "lucide-react";
+import { RouteIcon } from "lucide-react";
 import type { SessionControls } from "../use-session";
 import { LoginForm } from "./login-form";
 
@@ -8,7 +8,7 @@ export function AuthPage({ auth }: { auth: SessionControls }) {
       <div className="flex w-full max-w-sm flex-col gap-6">
         <div className="flex items-center gap-2 self-center font-medium">
           <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <GalleryVerticalEndIcon className="size-4" />
+            <RouteIcon className="size-4" />
           </div>
           bandar
         </div>

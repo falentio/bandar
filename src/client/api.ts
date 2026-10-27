@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { ApiErrorBodySchema, HealthSchema, apiPaths } from "../shared/api";
+import { ApiErrorBodySchema } from "../shared/api";
 import {
   ApiKeyListSchema,
   CreatedApiKeySchema,
@@ -8,6 +8,13 @@ import {
   type ApiKeyList,
   type CreatedApiKey,
 } from "../shared/api-keys";
+import {
+  AnalyticsSchema,
+  RequestListSchema,
+  analyticsPaths,
+  type Analytics,
+  type RequestList,
+} from "../shared/analytics";
 import {
   AuthErrorSchema,
   AuthResultSchema,
@@ -18,7 +25,15 @@ import {
   type SignInInput,
   type SignUpInput,
 } from "../shared/auth";
-import { NoteListSchema, NoteSchema, type Note, type NoteInput } from "../shared/notes";
+import {
+  ProviderInputSchema,
+  ProviderListSchema,
+  ProviderSchema,
+  providerPaths,
+  type Provider,
+  type ProviderInput,
+  type ProviderList,
+} from "../shared/providers";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -32,14 +47,23 @@ export class ApiError extends Error {
   }
 }
 
-export const notesApi = {
-  list: (): Promise<Note[]> => request(apiPaths.notes, NoteListSchema),
-  create: (input: NoteInput): Promise<Note> =>
-    request(apiPaths.notes, NoteSchema, { method: "POST", body: JSON.stringify(input) }),
-  remove: async (id: number): Promise<void> => {
-    await send(apiPaths.note(id), { method: "DELETE" });
+export const providerApi = {
+  list: (): Promise<ProviderList> => request(providerPaths.list, ProviderListSchema),
+  create: (input: ProviderInput): Promise<Provider> =>
+    request(providerPaths.list, ProviderSchema, {
+      method: "POST",
+      body: JSON.stringify(v.parse(ProviderInputSchema, input)),
+    }),
+  remove: async (id: string): Promise<void> => {
+    await send(providerPaths.remove(id), { method: "DELETE" });
   },
-  health: () => request(apiPaths.health, HealthSchema),
+};
+
+export const analyticsApi = {
+  overview: (days: number): Promise<Analytics> =>
+    request(`${analyticsPaths.analytics}?days=${days}`, AnalyticsSchema),
+  requests: (limit = 50): Promise<RequestList> =>
+    request(`${analyticsPaths.requests}?limit=${limit}`, RequestListSchema),
 };
 
 export const apiKeyApi = {

@@ -54,7 +54,7 @@ export function LoginForm({ auth }: { auth: SessionControls }) {
           {mode === "sign-in" ? "Welcome back" : "Create your account"}
         </CardTitle>
         <CardDescription>
-          {mode === "sign-in" ? "Sign in to your own notes." : "One account, your own notes."}
+          {mode === "sign-in" ? "Sign in to your gateway." : "One account, every model."}
         </CardDescription>
       </CardHeader>
       <CardContent>

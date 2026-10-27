@@ -6,6 +6,7 @@ export type Config = {
   readonly host: string;
   readonly port: number;
   readonly databasePath: string;
+  readonly duckdbPath: string;
   readonly authUrl: string;
   readonly authSecret: string;
   readonly trustedOrigins: readonly string[];
@@ -41,6 +42,7 @@ const ConfigSchema = v.object({
     String(DEFAULT_API_PORT),
   ),
   BANDAR_DB: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1)), "./bandar.db"),
+  BANDAR_DUCKDB: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1)), "./bandar.duckdb"),
   BANDAR_AUTH_URL: v.optional(v.pipe(v.string(), v.trim(), v.url())),
   BANDAR_AUTH_SECRET: v.optional(v.pipe(v.string(), v.minLength(1))),
   BANDAR_TRUSTED_ORIGINS: v.optional(
@@ -78,6 +80,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     host: values.BANDAR_HOST,
     port: values.BANDAR_PORT,
     databasePath: values.BANDAR_DB,
+    duckdbPath: values.BANDAR_DUCKDB,
     authUrl: values.BANDAR_AUTH_URL ?? `http://localhost:${values.BANDAR_PORT}`,
     authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
     trustedOrigins: values.BANDAR_TRUSTED_ORIGINS.split(",")

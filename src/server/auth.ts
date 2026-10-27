@@ -7,10 +7,12 @@ import type { Db } from "./db/client";
 
 export type SessionUser = { readonly id: string };
 
+export type VerifiedKey = { readonly userId: string; readonly keyId: string };
+
 export type Auth = {
   readonly handler: (request: Request) => Promise<Response>;
   readonly getSession: (headers: Headers) => Promise<SessionUser | null>;
-  readonly verifyApiKey: (key: string) => Promise<SessionUser | null>;
+  readonly verifyApiKey: (key: string) => Promise<VerifiedKey | null>;
 };
 
 export function createAuth(db: Db, config: Config): Auth {
@@ -29,7 +31,9 @@ export function createAuth(db: Db, config: Config): Auth {
     verifyApiKey: async (key) => {
       const result = await auth.api.verifyApiKey({ body: { key } });
 
-      return result.valid && result.key !== null ? { id: result.key.referenceId } : null;
+      return result.valid && result.key !== null
+        ? { userId: result.key.referenceId, keyId: result.key.id }
+        : null;
     },
   };
 }

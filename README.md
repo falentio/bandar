@@ -1,373 +1,334 @@
 # bandar
 
-One executable. It carries a React client, an Elysia API on Bun, and the SQLite
-migrations that shape its database. You build it once, copy it anywhere, and run
-it; it creates its SQLite file beside itself and serves the whole app on one port.
-No `node_modules`, no `dist/`, no migration folder beside the binary.
+A self-hosted LLM gateway that ships as one binary. Clients speak OpenAI's chat
+completions API; bandar resolves the model alias to a provider, translates the
+request to that provider's wire, streams the answer back, and records one
+analytics event per attempt in an embedded DuckDB database.
 
-The app in the box is a notes demo: email + password sign-up, three notes
-routes, and a signed-in shell with two views. It exists to prove every layer
-(browser → API → Drizzle → SQLite file → back, with a session cookie in the
-middle) in code you can read in one sitting.
+The dashboard covers providers, requests, API keys, and usage: tokens, time to
+first token, tokens per second, error rate, p95 latency, daily tokens, and a
+30-day average. Provider credentials are sealed before they reach SQLite.
 
-## Run it
+## What works
+
+- OpenAI-compatible `POST /v1/chat/completions`, streaming and non-streaming.
+- OpenAI-compatible `GET /v1/models` for the caller's aliases.
+- Three upstream adapter kinds: `openai`, `anthropic`, and `google`.
+- Provider and model-alias management in the dashboard or over `/api`.
+- Gateway keys from better-auth's API-key plugin, sent as
+  `Authorization: Bearer <key>` or `x-api-key`.
+- Per-request analytics in DuckDB with SQL migrations embedded in the binary.
+- Email/password accounts and per-user data isolation.
+
+Not in v1: tools, images, embeddings, the responses API, fallback chains, and
+cost sync from provider price lists. The adapter contract is text-only and says
+so.
+
+## Quickstart
 
 ```sh
-bun install          # also generates src/server/generated/*
-bun run dev          # http://127.0.0.1:5173, API proxied to :3000
+bun install          # fetches the DuckDB library and generates embedded modules
+BANDAR_AUTH_URL=http://localhost:5173 bun run dev   # client :5173, API :3000
 ```
 
-The dev server binds every interface (`host: true`) and accepts Tailscale
-MagicDNS hostnames, so another device on the tailnet opens the same page at
-`http://<machine>.<tailnet>.ts.net:5173`; HMR runs over that name too. Vite's
-host check is still on: an unknown `Host` is a 403. A custom tailnet domain goes
-next to `.ts.net` in `server.allowedHosts` in `./vite.config.ts`.
+Open <http://localhost:5173>, create an account, then:
 
-The compiled artifact:
+1. Open **Providers** and add a provider. Pick its kind, paste the base URL and
+   upstream key, and list models one per line:
+   `fast=gpt-4o-mini` routes the alias `fast` to upstream `gpt-4o-mini`.
+2. Open **API keys** and mint a key. The plaintext appears once.
+3. Call the gateway:
 
 ```sh
-bun run build        # dist/bandar, ~92 MB
-BANDAR_AUTH_SECRET=$(openssl rand -hex 32) ./dist/bandar   # http://0.0.0.0:3000
+curl http://localhost:3000/v1/chat/completions \
+  -H "Authorization: Bearer bandar_..." \
+  -H "content-type: application/json" \
+  -d '{"model":"fast","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-Without `BANDAR_AUTH_SECRET` the binary generates one per boot: it warns, and
-every session ends when the process restarts.
+Add `"stream": true` for server-sent events. The response uses OpenAI's chunk
+format and ends with `data: [DONE]`.
 
-## Commands
-
-| Script                   | What it runs                                                                       |
-| ------------------------ | ---------------------------------------------------------------------------------- |
-| `bun run dev`            | `gen`, then `vp dev` (HMR client) and `bun --watch src/server/main.ts` in parallel |
-| `bun run dev:web`        | `vp dev` alone, on `DEFAULT_WEB_PORT`                                              |
-| `bun run dev:server`     | `gen`, then the API with `bun --watch` on `DEFAULT_API_PORT`                       |
-| `bun run gen`            | `bun scripts/gen.ts` — write the two generated modules                             |
-| `bun run build:client`   | `vp build` → `dist/client`                                                         |
-| `bun run compile`        | `gen --strict`, then `bun build --compile` → `dist/bandar`                         |
-| `bun run build`          | `build:client`, then `compile`                                                     |
-| `bun run start`          | `./dist/bandar`                                                                    |
-| `bun run check`          | `gen`, then `vp check` (oxfmt + oxlint + tsgolint)                                 |
-| `bun run check:fix`      | same with `--fix`                                                                  |
-| `bun run test`           | `gen`, then `bun --bun vp test run`                                                |
-| `bun run smoke`          | boot `dist/bandar` on an ephemeral port and assert the whole loop                  |
-| `bun run verify`         | `check`, `test`, `build`, `smoke` in order                                         |
-| `bun run db:generate`    | `drizzle-kit generate` → `drizzle/000N_<name>.sql`                                 |
-| `bun run db:auth-schema` | `@better-auth/cli generate` → `src/server/db/auth-schema.ts`                       |
-| `postinstall`            | `gen`, so a fresh clone type-checks before its first build                         |
-
-`test` runs `bun --bun vp test run`, not plain `vp test run`: vitest's Node workers
-cannot resolve `bun:sqlite`, and the idempotency test deliberately uses it.
-
-## Lint policy
-
-`vp check` runs oxfmt, oxlint and tsgolint, plus the vendored
-[anti-slop](https://github.com/dmmulroy/anti-slop) rules in
-`./tools/oxlint/anti-slop/`. Upstream publishes no npm package on purpose: the
-rules are meant to be copied in and edited. This copy is MIT-licensed, from
-commit `13909c9`, and registered in the `lint` block of `./vite.config.ts`.
-
-Every generic rule is enabled as an error: the array-method and reducer-shape
-rules, `no-chained-type-assertions`, `no-known-value-widening`,
-`no-object-parameters`, the `unknown` family (`no-unknown-parameters`,
-`no-unknown-returns`, `no-unknown-type-aliases`, `no-unsafe-dictionary-type`,
-`no-widen-then-assert`), `no-runtime-typeof`, `no-module-mocking`,
-`no-shape-in-symbol-names`, `require-readable-spacing`,
-`require-safety-comment-for-type-assertion`, and `oxc/no-accumulating-spread`.
-
-The Effect rule group stays out; this project does not use Effect. A type
-assertion needs a `// SAFETY:` line stating the invariant the assertion relies
-on, and a value of unknown type gets narrowed by an `instanceof` or a type
-predicate before any helper sees it, not passed along as `unknown`.
-
-The vendored files are local policy: change a rule here when it disagrees with
-the project. `@oxlint/plugins` is pinned to the exact `oxlint` version
-`vite-plus` resolves (1.89.0); bump both together or the plugin stops loading.
-`tools/oxlint/anti-slop/**` is ignored by lint and format so the vendored code
-stays as upstream wrote it.
-
-## Environment
-
-| Variable                 | Default                                       | Meaning                                                               |
-| ------------------------ | --------------------------------------------- | --------------------------------------------------------------------- |
-| `BANDAR_HOST`            | `0.0.0.0`                                     | Bind address. The default is reachable on loopback, LAN, and tailnet. |
-| `BANDAR_PORT`            | `3000`                                        | Listen port. `0` picks a free port and the boot line reports it.      |
-| `BANDAR_DB`              | `./bandar.db`                                 | SQLite file path. Created on first boot, WAL mode.                    |
-| `BANDAR_AUTH_URL`        | `http://localhost:<port>`                     | Origin better-auth uses as its base URL.                              |
-| `BANDAR_AUTH_SECRET`     | random per boot                               | Signs session cookies. Set it to keep sessions across restarts.       |
-| `BANDAR_TRUSTED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated origins allowed to POST to `/api/auth/*`.             |
-
-Invalid values fail at startup with every offending variable listed, before the
-port is bound.
-
-## Layout
-
-The signed-out page and the signed-in shell are the shadcn `login-03` and
-`sidebar-07` blocks, adapted here: sign-up gains a confirm field, and the sidebar
-carries this app's two views instead of the demo's teams and projects.
-
-```
-bandar/
-├── index.html                    # mounts /src/client/main.tsx at #root
-├── vite.config.ts                # Vite, aliases, dev proxy, oxlint/oxfmt config
-├── drizzle.config.ts             # drizzle-kit: schema in TS, SQL out
-├── drizzle/                      # generated SQL + journal, committed
-├── public/favicon.svg            # copied from assets/icon.svg
-├── scripts/
-│   ├── gen.ts                    # client + migration embedding generator
-│   ├── auth-schema.config.ts     # config only `db:auth-schema` reads (no bun:sqlite)
-│   └── smoke.ts                  # end-to-end check of dist/bandar
-├── src/shared/                   # valibot only, imported by both sides
-│   ├── notes.ts                  # note + note input schemas, NOTE_BODY_MAX
-│   ├── auth.ts                   # auth paths, sign-up/sign-in, session schemas
-│   ├── api-keys.ts               # key paths, header name, key schemas
-│   ├── api.ts                    # api paths, isApiPath, error envelope, health
-│   └── topology.ts               # dev ports
-├── src/server/
-│   ├── main.ts                   # config → db → migrations → auth → bundle → serve
-│   ├── app.ts                    # App.handle: /api to Elysia, everything else to static
-│   ├── api.ts                    # Elysia routes, session gate, error envelope
-│   ├── auth.ts                   # better-auth handler + getSession seam
-│   ├── validation.ts             # parseInput, InputError, issue formatting
-│   ├── assets.ts                 # ClientBundle + serveStatic (MIME, cache, SPA fallback)
-│   ├── config.ts                 # BANDAR_* parsing, ConfigError
-│   ├── notes.ts                  # NotesRepo, scoped by user id
-│   ├── embedded.d.ts             # types for *.embed and *.sql imports
-│   ├── db/
-│   │   ├── schema.ts             # drizzle tables
-│   │   ├── auth-schema.ts        # generated; user, session, account, verification, apikey
-│   │   ├── client.ts             # bun:sqlite + drizzle, pragmas
-│   │   ├── migrate.ts            # embedded SQL, journaled ledger, drift/downgrade refusal
-│   │   └── migrate.test.ts       # idempotency, rollback, drift, downgrade
-│   └── generated/                # gitignored; written by scripts/gen.ts
-├── src/client/
-│   ├── main.tsx                  # createRoot + RouterProvider
-│   ├── router.tsx                # route table, session gate, login and app shells
-│   ├── views.tsx                 # view registry: path, label, icon
-│   ├── api.ts                    # fetch + valibot parse + ApiError
-│   ├── use-session.tsx           # SessionProvider + useSession consumer, auth actions
-│   ├── use-notes.ts              # NotesState machine, one pending flag
-│   ├── use-api-keys.ts           # ApiKeysState machine, create/revoke
-│   ├── components/app-shell.tsx  # sidebar provider, breadcrumb header, routed Outlet
-│   ├── components/app-sidebar.tsx # brand, NavMain, NavUser
-│   ├── components/nav-main.tsx   # routed view links
-│   ├── components/nav-user.tsx   # account menu and sign out
-│   ├── components/auth-page.tsx  # signed-out split shell
-│   ├── components/login-form.tsx # sign-in / create-account card
-│   ├── components/notes-panel.tsx
-│   ├── components/api-keys-panel.tsx # mint, show once, revoke
-│   └── index.css                 # tailwind + shadcn tokens
-├── src/components/ui/            # shadcn primitives (login-03 / sidebar-07 blocks)
-│   ├── avatar.tsx
-│   ├── breadcrumb.tsx
-│   ├── button.tsx
-│   ├── card.tsx
-│   ├── dropdown-menu.tsx
-│   ├── field.tsx
-│   ├── input.tsx
-│   ├── label.tsx
-│   ├── separator.tsx
-│   ├── sheet.tsx
-│   ├── sidebar.tsx
-│   ├── skeleton.tsx
-│   └── tooltip.tsx
-├── src/hooks/use-mobile.ts       # sidebar breakpoint hook
-├── src/lib/utils.ts              # re-exports cn
-└── tools/oxlint/anti-slop/       # vendored anti-slop rules (MIT)
-```
-
-Two tsconfig projects split the type surface: `tsconfig.app.json` has DOM and no
-Bun types, `tsconfig.server.json` has Bun and no DOM. A Drizzle table imported
-from a client file fails `vp check` rather than shipping in the bundle.
+The dev client proxies `/api` and `/v1` to the API port, so a page loaded from
+`:5173` can call the gateway at the same origin.
 
 ## How a request flows
 
-```
-Request
-├── path starts with /api
-│   ├── /api/auth/*
-│   │   └── src/server/auth.ts     # better-auth handler, cookies untouched
-│   └── any other /api route
-│       └── src/server/api.ts      # session gate, valibot parse, error envelope
-│           └── src/server/notes.ts    # NotesRepo, scoped by user id
-│               └── src/server/db/client.ts + schema.ts   # Drizzle → bun:sqlite
-└── any other path
-    └── src/server/assets.ts       # exact file, /assets/ miss → 404,
-                                   # extensionless miss → /index.html, else 404
+```text
+POST /v1/chat/completions [1]
+├── authenticate the gateway key [1a] ✗ 401
+├── parse the OpenAI body with valibot [1b] ✗ 422
+├── resolve the alias for this user [1c] ✗ 404 model_not_found
+├── pick the adapter for the provider kind [1d]
+├── call the upstream [1e] ✗ 502/429 and record the failure
+│   └── normalize wire events into canonical text, usage and finish events [1e1]
+├── stream OpenAI chunks back to the client [1f]
+└── record one DuckDB event with tokens, TTFT, duration and tokens/sec [1g]
 ```
 
-The SQLite file, the client assets, and the migrations are all inside the binary;
-the only thing on disk at runtime is the database.
+Provider keys are decrypted only inside `resolveTarget` for the duration of an
+upstream call. `GET /api/providers` returns `hasKey`, never the key.
 
-## Navigation
+## Analytics
 
-The client routes with TanStack Router. The table in `src/client/router.tsx`
-declares every URL.
+Each attempt writes one row to `request_events`, including failures and aborts.
+The fields are denormalized, so deleting a provider does not erase its history.
 
-| URL         | Screen                       |
-| ----------- | ---------------------------- |
-| `/notes`    | Notes                        |
-| `/api-keys` | API keys                     |
-| `/login`    | Sign in or create an account |
+| Metric             | Definition                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| TTFT               | Gateway time from request start to the first non-empty text delta.                                                 |
+| Duration           | Gateway time from request start to the last byte handled.                                                          |
+| Tokens/sec         | `output_tokens / ((duration - ttft) / 1000)`. Null when either side is unknown or the denominator is not positive. |
+| Average tokens/day | Total input + output tokens in the window divided by the number of days.                                           |
+| Error rate         | Non-success events divided by all events.                                                                          |
+| p50 / p95 latency  | Approximate quantiles of `duration_ms`.                                                                            |
+| Cost               | Input and output tokens priced per million when the model has prices. Null otherwise.                              |
 
-`/` redirects to `/notes`, and any other path renders a not-found page.
+Non-streaming requests have no observable first token, so they record
+`ttft_ms = null` and `tokens_per_second = null`. The dashboard shows `—`.
 
-A signed-out request for a view redirects to `/login?redirect=<view>`, and
-signing in returns to that view. Signing out redirects to
-`/login?redirect=<current view>`. The `redirect` value is either `/notes` or
-`/api-keys`; anything else falls back to `/notes`.
+The overview defaults to 30 days and can switch to 7 or 90. The API is
+`GET /api/analytics?days=30`; recent attempts are `GET /api/requests?limit=50`.
 
-A refresh or deep link works because the server serves the SPA shell for any
-extension-less path (`src/server/assets.ts`), and the Vite dev server does the
-same. The router then resolves the URL on the client.
+## Adding a provider adapter
 
-## Auth
+An adapter is one file plus one registry entry. The registry is a `satisfies
+Record<ProviderKind, ProviderAdapter>`, so a new kind fails the type check until
+every switch has an adapter.
 
-`src/server/auth.ts` builds better-auth/minimal with the Drizzle adapter over the
-same `bun:sqlite` handle, and `src/server/api.ts` mounts the whole handler at
-`/api/auth/*`, before any notes route. Email and password is on; better-auth owns
-the session cookie, and no other module reads the token.
+1. Add the kind to `PROVIDER_KINDS` in `./src/shared/providers.ts`.
+2. Create `./src/server/router/adapters/<kind>.ts` implementing `ProviderAdapter`.
+3. Register it in `./src/server/router/adapters/index.ts`.
+4. Add a fake upstream branch and one streaming plus one non-streaming smoke
+   check in `./scripts/smoke.ts`.
 
-Notes belong to the session user. `notes.user_id` is a `NOT NULL` foreign key to
-`user.id` with `ON DELETE cascade`, and every `/api/notes` route answers 401
-`{ error: { code: "unauthorized", ... } }` without a session. The pre-auth notes
-are not migrated: migration 0001 rebuilds `notes` with the new column and drops
-the old rows.
+The full contract, wire mapping, and streaming rules are in
+[`docs/adapters.md`](./docs/adapters.md). Adapters never return wire types to the
+gateway: they normalize to `CanonicalResult` or `CanonicalStreamEvent`, and they
+throw `UpstreamError` with a kind the gateway maps to an HTTP status.
 
-better-auth rejects a POST whose `Origin` is neither `BANDAR_AUTH_URL` nor an
-entry in `BANDAR_TRUSTED_ORIGINS`, answering 403 `{"code":"INVALID_ORIGIN"}`.
-The dev browser posts from `http://localhost:5173` (or
-`http://127.0.0.1:5173`), which the defaults trust. On the tailnet, add the Vite
-origin, for example `BANDAR_TRUSTED_ORIGINS=http://localhost:5173,http://box.tailnet.ts.net:5173`.
-A script posting to `/api/auth/*` must send a matching `Origin` header too.
+## Environment
 
-`BANDAR_AUTH_SECRET` signs session cookies. When unset, `parseConfig` generates
-32 random bytes per boot and warns once; restarting the process logs everyone
-out. Set a fixed 32-byte hex value wherever sessions must outlive a restart.
+| Variable                 | Default                                       | Meaning                                                                           |
+| ------------------------ | --------------------------------------------- | --------------------------------------------------------------------------------- |
+| `BANDAR_HOST`            | `0.0.0.0`                                     | Bind address for the API and the compiled binary.                                 |
+| `BANDAR_PORT`            | `3000`                                        | API port. `0` picks a free port and the boot line reports it.                     |
+| `BANDAR_WEB_PORT`        | `5173`                                        | Vite dev port. Not read by the compiled binary.                                   |
+| `BANDAR_DB`              | `./bandar.db`                                 | SQLite metadata path. Created on first boot.                                      |
+| `BANDAR_DUCKDB`          | `./bandar.duckdb`                             | DuckDB analytics path. Created on first boot.                                     |
+| `BANDAR_AUTH_URL`        | `http://localhost:<BANDAR_PORT>`              | better-auth base URL. In dev, set it to the Vite origin.                          |
+| `BANDAR_AUTH_SECRET`     | random per boot                               | Signs sessions and derives the provider-key encryption key. Set it in production. |
+| `BANDAR_TRUSTED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated origins allowed to POST to `/api/auth/*`.                         |
+| `BANDAR_DUCKDB_LIB`      | unset                                         | Override the `libduckdb` shared library path, for a manual install.               |
 
-`src/server/db/auth-schema.ts` comes from `bun run db:auth-schema`, which runs the
-CLI against `scripts/auth-schema.config.ts`. That config exists only for the CLI:
-it runs under Node, which cannot import `bun:sqlite`, so the config builds the
-adapter over a stub `drizzle-orm/sqlite-proxy` client. After changing auth
-options, rerun the script and then `bun run db:generate --name <change>` for the
-table diff. Never edit the generated file by hand.
+Invalid values fail at startup before the port opens.
 
-### API keys
+In dev, a custom web port also needs a matching auth origin:
 
-`@better-auth/api-key` lets a signed-in user mint keys for scripts and send them
-as `x-api-key` on `/api/notes`. A key is `bandar_` plus 64 random characters. The
-plaintext is returned once; the `apikey` row stores the hash and the first 11
-characters as `start`, which is all the list shows.
+```sh
+BANDAR_WEB_PORT=4000 \
+BANDAR_AUTH_URL=http://localhost:4000 \
+BANDAR_TRUSTED_ORIGINS=http://localhost:4000 \
+bun run dev
+```
 
-- `POST /api/auth/api-key/create` with `{ "name": "laptop" }` → the plaintext key.
-- `GET /api/auth/api-key/list` → the caller's keys, never the plaintext.
-- `POST /api/auth/api-key/delete` with `{ "keyId": "..." }` → `{ "success": true }`.
+## Build
 
-The signed-in screen makes the same three calls in an API keys card below the
-notes, and shows the plaintext once with a Dismiss button. A request carrying
-`x-api-key` is gated by the key alone: an unknown or revoked key answers 401
-`{ "error": { "code": "unauthorized", ... } }`, and the cookie is not consulted.
-Every key is rate limited to 1000 requests per hour.
+```sh
+bun run build        # dist/bandar, about 181 MB
+BANDAR_AUTH_SECRET=$(openssl rand -hex 32) ./dist/bandar
+```
 
-`enableSessionForAPIKeys` stays off. With it on, a key would also satisfy the
-session guard on `/api/auth/*`, so a leaked key could mint more keys.
+The binary serves the client and API on one port (`BANDAR_PORT`, default 3000)
+and creates `bandar.db` and `bandar.duckdb` beside the working directory. It
+carries the built React assets, both migration sets, and the DuckDB shared
+library. Nothing else is needed at runtime.
 
-The plugin's `apikey` table lives in `src/server/db/auth-schema.ts` (regeneration
-keeps it because `scripts/auth-schema.config.ts` lists the plugin) and ships in
-`drizzle/0002_api_keys.sql`. It has no foreign key: `reference_id` holds the user
-id.
+### How DuckDB is embedded
 
-## Adding an entity
+`bun build --compile` embeds `./vendor/duckdb/libduckdb.so` through an import
+with `type: "file"`. At boot, `bun:ffi` opens that virtual path directly, so no
+library is written beside the binary. `bun run duck:fetch` copies the platform
+library from `@duckdb/node-bindings` into `vendor/duckdb/`; it runs on install and
+before every dev start and compile.
 
-Rename or add around these files, in this order. Nothing else knows about notes.
-
-1. `src/server/db/schema.ts` — add the `sqliteTable`, export its row type.
-2. `bun run db:generate --name <entity>` — writes `drizzle/000N_<entity>.sql`
-   and updates `drizzle/meta/_journal.json`. Both are inputs; commit them.
-3. `src/shared/<entity>.ts` — the wire schemas (`Input`, item, list, id). valibot only,
-   no Drizzle or Bun imports.
-4. `src/server/<entity>.ts` — a repo with `list`, `create`, `remove`; the shared
-   db is passed in from `src/server/app.ts`.
-5. `src/server/api.ts` — mount the routes under the `/api` prefix.
-6. `src/server/app.ts` — build the repo from `deps.db` and pass it to `createApi`.
-7. `src/client/api.ts` — one function per route, each parsing with the shared schema.
-8. `src/client/use-<entity>.ts` — the state machine, following `use-notes.ts`.
-9. `src/client/components/<entity>-panel.tsx` — the screen; add its path to
-   `src/client/views.tsx` and its route to `src/client/router.tsx`.
-
-Then `bun run check && bun run test && bun run smoke`. `scripts/smoke.ts` is the
-one place that asserts the new routes end to end; add a check per new route.
-
-## Deleting the demo slice
-
-The scaffold stays useful with the notes demo gone. Delete, in this order:
-
-1. Auth: `src/client/components/auth-page.tsx`,
-   `src/client/components/login-form.tsx`, `src/client/use-session.tsx`, and the
-   session gate plus `loginRoute` in `src/client/router.tsx`; `src/shared/auth.ts`
-   and `authApi` in `src/client/api.ts`; `src/server/auth.ts`, the `/auth/*` route,
-   and `authenticate` in `src/server/api.ts`. The API keys card goes with it:
-   `src/client/components/api-keys-panel.tsx`, `src/client/use-api-keys.ts`,
-   `src/shared/api-keys.ts`, and `apiKeyApi` in `src/client/api.ts`.
-2. `src/server/db/auth-schema.ts` (the `user`, `session`, `account`,
-   `verification`, and `apikey` tables), `scripts/auth-schema.config.ts`, and the
-   `db:auth-schema` script.
-3. `src/client/components/notes-panel.tsx`, `src/client/use-notes.ts` — and the
-   `notes` entry in `src/client/views.tsx` and `notesRoute` in
-   `src/client/router.tsx`.
-4. `src/shared/notes.ts`, and the notes calls and `ApiError` usage in
-   `src/client/api.ts` (keep `request`, `send`, and `ApiError`).
-5. `src/server/notes.ts`, and its routes in `src/server/api.ts`.
-6. The `notes` table in `src/server/db/schema.ts`.
-7. `src/server/db/migrate.test.ts` — or keep it, it tests the migrator, not notes.
-
-Then write a migration that drops the tables (`bun run db:generate --name
-drop-demo` after editing the schema) instead of editing `drizzle/0000_init.sql`;
-`migrate.ts` refuses a changed body for an applied tag. `scripts/smoke.ts` and
-`src/server/app.ts` keep working with no repos mounted.
-
-Deleting auth alone means dropping the five tables (`account`, `session`, `user`,
-`verification`, `apikey`), removing `notes.user_id`, and removing the session
-gate. Drop the session gate first, remove `userId` from the notes table, delete
-the auth tables from the schema, then run `bun run db:generate --name drop-auth`.
-The `user` rows go with the table; notes keep their bodies once `user_id` is gone.
-
-## Generated files
-
-`src/server/generated/migrations.ts` and `src/server/generated/client-assets.ts`
-are written by `scripts/gen.ts` and gitignored — hashed client filenames change on
-every build, so committing them only produces conflicts.
-
-- `gen` reads `drizzle/meta/_journal.json`, imports each `drizzle/<tag>.sql` as
-  text, and stages every file under `dist/client` into `.build/embed/<rel>.embed`
-  before importing it with `type: "file"`.
-- The `.embed` suffix is required: Bun treats an imported `.html` with
-  `type: "file"` as an HTML entrypoint and hands back an `HTMLBundle`, not a path.
-- With no `dist/client`, `gen` warns and emits an empty bundle, so a fresh clone
-  still type-checks. `gen --strict`, which `compile` uses, throws instead.
-- `gen` writes only when the rendered text changes, so it is safe to rerun.
-
-`bun --watch src/server/main.ts` restarts when `gen` rewrites the generated
-modules, which happens after a client build. That restart is expected.
+This is why the binary is large: the DuckDB shared library is about 92 MB.
+DuckDB calls are synchronous, so a dashboard query blocks the event loop for its
+duration. The event inserts and the bounded analytics queries take milliseconds;
+a large ad-hoc scan would need a worker.
 
 ## Migrations
 
-`applyMigrations` runs on every boot, before the port opens, over the SQL embedded
-at compile time:
+Two independent ledgers run at boot, before the port opens.
 
-- The ledger is `_bandar_migrations(tag, checksum, applied_at)`; the checksum is
-  `Bun.hash.crc32(sql)` computed at boot, not baked in.
-- A ledger tag the binary does not embed → `MigrationDowngradeError`.
-- An applied tag whose checksum differs → `MigrationDriftError`.
-- Each pending migration runs inside `BEGIN IMMEDIATE`, writes its ledger row, then
-  commits; a throw rolls the whole migration back, so a crash leaves no partial DDL.
+**SQLite metadata.** Drizzle Kit writes `./drizzle/000N_<name>.sql` and the
+journal. `./scripts/gen.ts` embeds every journal entry. The ledger is
+`_bandar_migrations(tag, checksum, applied_at)`; a missing embedded tag is a
+downgrade error, a changed body is a drift error, and each pending migration runs
+inside `BEGIN IMMEDIATE`. Fix a shipped migration by adding the next one.
 
-Consequence: fix a shipped migration by adding the next one, never by editing it.
-`GET /api/health` reports the current tag, which is how `smoke` knows the second
-boot applied nothing.
+**DuckDB analytics.** Add `./duckdb/000N_<snake_name>.sql`. `gen` sorts and embeds
+the whole directory, so there is no journal to edit. The ledger is
+`_bandar_duck_migrations` with the same checksum, drift, downgrade, and
+transaction rules. Statements are split on semicolons outside quotes; keep
+semicolons out of string literals in a migration.
 
-## Static serving
+`GET /api/health` reports both current tags.
 
-MIME comes from the request path (`CONTENT_TYPES` in `src/server/assets.ts`), not
-from the embedded file: the staged copy ends in `.embed`, so `Bun.file().type`
-would be useless. `/assets/*` is immutable for a year; everything else is
-`no-cache`. A `HEAD` returns the same headers with no body. With no client bundle
-embedded, every page request is a 503 naming `bun run build`.
+## Commands
+
+| Script                   | What it does                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| `bun run dev`            | Fetch DuckDB, `gen`, Vite, and the watched API in parallel.                      |
+| `bun run dev:web`        | Vite alone.                                                                      |
+| `bun run dev:server`     | `gen`, then the API with `bun --watch`.                                          |
+| `bun run gen`            | Embed client assets, SQLite migrations, DuckDB migrations, and the library path. |
+| `bun run build:client`   | `vp build` to `dist/client`.                                                     |
+| `bun run compile`        | `gen --strict` then `bun build --compile` to `dist/bandar`.                      |
+| `bun run build`          | Client build, then compile.                                                      |
+| `bun run start`          | Run `./dist/bandar`.                                                             |
+| `bun run check`          | Format, lint, and type-check.                                                    |
+| `bun run check:fix`      | The same with fixes.                                                             |
+| `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                       |
+| `bun run smoke`          | Boot `dist/bandar` and run 21 end-to-end checks against fake upstreams.          |
+| `bun run verify`         | `check`, `test`, `build`, `smoke`.                                               |
+| `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                    |
+| `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                       |
+| `bun run duck:fetch`     | Copy the platform DuckDB library into `vendor/duckdb/`.                          |
+
+The smoke run mints a user, creates one provider per kind against local fake
+upstreams, calls the gateway streaming and non-streaming, asserts TTFT/tokens-per-
+second in DuckDB, revokes the key, restarts the binary, and proves the analytics
+rows survived.
+
+## Layout
+
+```text
+bandar/
+├── duckdb/                         # DuckDB migrations, embedded by gen
+├── drizzle/                        # SQLite migrations + journal
+├── scripts/
+│   ├── gen.ts                      # asset + migration embedding
+│   ├── fetch-duckdb.ts             # platform library into vendor/
+│   └── smoke.ts                    # compiled-binary end-to-end checks
+├── src/shared/                     # valibot schemas and paths for both sides
+│   ├── chat.ts                     # OpenAI ingress schema, model list
+│   ├── providers.ts                # provider kinds, provider/model schemas
+│   ├── analytics.ts                # analytics and request schemas
+│   ├── api.ts                      # /api and /v1 prefix guards, health
+│   ├── api-keys.ts                 # gateway key paths and schemas
+│   ├── auth.ts                     # auth paths and session schemas
+│   └── topology.ts                 # dev ports
+├── src/server/
+│   ├── main.ts                     # config → SQLite → DuckDB → auth → serve
+│   ├── app.ts                      # /v1 → gateway, /api → API, else static
+│   ├── gateway.ts                  # Elysia /v1 routes and caller auth
+│   ├── api.ts                      # management routes, session/key gate
+│   ├── analytics.ts                # DuckDB reads and window math
+│   ├── providers.ts                # provider/model repo, target resolution
+│   ├── seal.ts                     # AES-GCM provider-key sealing
+│   ├── router/
+│   │   ├── types.ts                # canonical request/result/stream contract
+│   │   ├── metrics.ts              # tokens/sec, cost, error-rate math
+│   │   ├── record.ts               # one request event -> DuckDB
+│   │   ├── chat.ts                 # resolve, call, stream, record
+│   │   ├── wire.ts                 # OpenAI response and error envelopes
+│   │   └── adapters/
+│   │       ├── index.ts            # satisfies Record<ProviderKind, Adapter>
+│   │       ├── http.ts             # URL join, SSE parsing, upstream errors
+│   │       ├── openai.ts
+│   │       ├── anthropic.ts
+│   │       └── google.ts
+│   ├── duck/
+│   │   ├── ffi.ts                  # dlopen + symbol table
+│   │   ├── client.ts               # prepared queries, typed binds
+│   │   └── migrate.ts              # DuckDB ledger and statement splitter
+│   ├── db/                         # drizzle schema, client, SQLite migrator
+│   ├── auth.ts                     # better-auth handler, session, key verify
+│   └── assets.ts                   # embedded client bundle and SPA fallback
+├── src/client/
+│   ├── router.tsx                  # /overview, /providers, /requests, /api-keys
+│   ├── views.tsx                   # navigation registry
+│   ├── use-providers.ts            # provider list/create/remove state
+│   ├── use-analytics.ts            # overview window state
+│   ├── use-requests.ts             # recent request state
+│   └── components/
+│       ├── overview-panel.tsx      # stat cards, 30-day chart, model table
+│       ├── providers-panel.tsx     # provider form and list
+│       ├── requests-panel.tsx      # recent attempts
+│       ├── api-keys-panel.tsx      # mint, show once, revoke, curl example
+│       ├── app-shell.tsx           # sidebar shell and breadcrumb
+│       └── auth-page.tsx           # sign-in / sign-up
+├── src/components/ui/              # shadcn primitives
+├── vendor/duckdb/                  # gitignored platform library
+└── tools/oxlint/anti-slop/         # vendored lint rules
+```
+
+## API surface
+
+| Route                           | Auth                   | Purpose                                             |
+| ------------------------------- | ---------------------- | --------------------------------------------------- |
+| `POST /v1/chat/completions`     | Gateway key            | OpenAI-compatible chat, streaming or not.           |
+| `GET /v1/models`                | Gateway key            | Aliases for the caller.                             |
+| `GET/POST /api/providers`       | Session or `x-api-key` | List or create providers.                           |
+| `PUT/DELETE /api/providers/:id` | Session or `x-api-key` | Replace or remove a provider.                       |
+| `GET /api/analytics?days=30`    | Session or `x-api-key` | Window summary, daily series, model breakdown.      |
+| `GET /api/requests?limit=50`    | Session or `x-api-key` | Recent attempts.                                    |
+| `GET /api/health`               | none                   | Both current migration tags.                        |
+| `/api/auth/*`                   | better-auth            | Sign-up, sign-in, sessions, key create/list/delete. |
+
+`PUT /api/providers/:id` replaces the model list and leaves the key unchanged
+when `apiKey` is empty. Model prices are accepted by the API
+(`inputPricePerMtok`, `outputPricePerMtok`) but are not in the form yet.
+
+## Security notes
+
+- Provider keys are sealed with AES-GCM under a key derived from
+  `BANDAR_AUTH_SECRET`. Changing the secret makes stored keys unreadable; the
+  gateway returns an upstream error until they are re-entered.
+- Provider keys never appear in API responses, logs, or analytics events.
+- A bad gateway key is final: it is a 401 and the session cookie is not consulted
+  on `/v1`.
+- One user cannot resolve another user's aliases, providers, events, or keys.
+- The `BANDAR_AUTH_SECRET` default is generated per boot. Set it to keep sessions
+  and stored provider keys across restarts.
+
+## Limits and next steps
+
+- **Text only.** The canonical request carries messages, temperature, top-p,
+  max tokens, and stop. Tools, multimodal parts, and reasoning controls are not
+  translated.
+- **One writer for DuckDB.** Do not run two bandar processes against the same
+  analytics file. SQLite is WAL, DuckDB is not multi-process-writer.
+- **Single process.** DuckDB FFI is synchronous. Move slow scans to a worker or a
+  pre-aggregated table before the history gets large.
+- **No fallbacks or retries.** One alias maps to one model. The alias table can
+  grow an ordered fallback list without changing the adapter contract.
+- **No pricing UI.** Set prices through the API; the overview computes cost only
+  for priced models.
+
+## Lint policy
+
+`vp check` runs oxfmt, oxlint, tsgolint, and the vendored
+[anti-slop](https://github.com/dmmulroy/anti-slop) rules in
+`./tools/oxlint/anti-slop/`. The generic rules are errors, including the `unknown`
+family, `no-runtime-typeof`, `no-known-value-widening`, `no-object-parameters`,
+and `require-safety-comment-for-type-assertion`. A type assertion needs a
+`// SAFETY:` line that states the invariant. The vendored copy is MIT-licensed
+and is local policy: edit it here when it disagrees with the project.
+
+## Generated files
+
+`src/server/generated/` is gitignored and written by `scripts/gen.ts` and the
+DuckDB fetch script:
+
+- `client-assets.ts` stages every `dist/client` file and imports it with
+  `type: "file"`.
+- `migrations.ts` imports each journaled SQLite migration as text.
+- `duck-migrations.ts` imports every `duckdb/*.sql` as text, sorted by filename.
+- `duck-lib.ts` imports the vendored DuckDB library with `type: "file"`.
+
+`gen` writes only on change. `gen --strict`, used by compile, refuses to build
+without a client bundle, a SQLite journal, or a DuckDB migration. A fresh clone
+still type-checks before its first build because `gen` emits empty lists with a
+warning.

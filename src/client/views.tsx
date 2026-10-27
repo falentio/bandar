@@ -1,7 +1,9 @@
-import { KeyRoundIcon, StickyNoteIcon } from "lucide-react";
+import { KeyRoundIcon, LayoutDashboardIcon, ScrollTextIcon, ServerIcon } from "lucide-react";
 
 export const views = [
-  { to: "/notes", label: "Notes", icon: StickyNoteIcon },
+  { to: "/overview", label: "Overview", icon: LayoutDashboardIcon },
+  { to: "/providers", label: "Providers", icon: ServerIcon },
+  { to: "/requests", label: "Requests", icon: ScrollTextIcon },
   { to: "/api-keys", label: "API keys", icon: KeyRoundIcon },
 ] as const;
 

@@ -9,3 +9,7 @@ src/server/generated/
 *.tsbuildinfo
 
 .DS_Store
+
+vendor/
+*.duckdb
+*.duckdb.wal

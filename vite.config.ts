@@ -13,6 +13,7 @@ const ignored = [
 ];
 
 const apiPort = Number(process.env.BANDAR_PORT ?? DEFAULT_API_PORT);
+const webPort = Number(process.env.BANDAR_WEB_PORT ?? DEFAULT_WEB_PORT);
 
 // Vendored from https://github.com/dmmulroy/anti-slop. Rules are local policy; edit them here.
 const antiSlopRules = {
@@ -50,12 +51,13 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: DEFAULT_WEB_PORT,
+    port: webPort,
     // MagicDNS names resolve to this machine on the tailnet; Vite rejects unknown Host headers.
     allowedHosts: [".ts.net"],
     proxy: {
       // Segment match, not a prefix: /api-keys is a client route, not the API.
       "^/api(?:/|$)": { target: loopbackOrigin(apiPort), changeOrigin: true },
+      "^/v1(?:/|$)": { target: loopbackOrigin(apiPort), changeOrigin: true },
     },
   },
   fmt: { ignorePatterns: ignored },

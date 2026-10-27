@@ -4,23 +4,34 @@ import { createAuth } from "./auth";
 import { parseConfig } from "./config";
 import { openDatabase } from "./db/client";
 import { applyMigrations } from "./db/migrate";
+import { DuckDb } from "./duck/client";
+import { embeddedDuckLibrary } from "./duck/embedded";
+import { applyDuckMigrations } from "./duck/migrate";
+import { duckMigrations } from "./generated/duck-migrations";
 import { clientFiles } from "./generated/client-assets";
 import { migrations } from "./generated/migrations";
+import { createSealer } from "./seal";
 
 export async function main(env: Record<string, string | undefined>): Promise<void> {
   const config = parseConfig(env);
 
   const { sqlite, db } = openDatabase(config.databasePath);
   const migration = applyMigrations(sqlite, migrations);
+
+  const duck = new DuckDb(config.duckdbPath, embeddedDuckLibrary);
+  const duckMigration = applyDuckMigrations(duck, duckMigrations);
+
   const client = createClientBundle(clientFiles);
   const auth = createAuth(db, config);
+  const sealer = await createSealer(config.authSecret);
 
-  const app = createApp({ db, client, migration, auth });
+  const app = createApp({ db, duck, sealer, client, migration, duckMigration, auth });
   const server = Bun.serve({ hostname: config.host, port: config.port, fetch: app.handle });
 
   console.log(
-    `bandar: listening on ${String(server.url)} (migrations: ${migration.applied.length} applied, ` +
-      `current ${migration.current ?? "none"}, client: ${client.kind})`,
+    `bandar: listening on ${String(server.url)} (sqlite: ${migration.applied.length} applied, ` +
+      `${migration.current ?? "none"}; duckdb: ${duckMigration.applied.length} applied, ` +
+      `${duckMigration.current ?? "none"}; client: ${client.kind})`,
   );
 }
 

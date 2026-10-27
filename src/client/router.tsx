@@ -12,12 +12,17 @@ import * as v from "valibot";
 import { ApiKeysPanel } from "./components/api-keys-panel";
 import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
-import { NotesPanel } from "./components/notes-panel";
+import { OverviewPanel } from "./components/overview-panel";
+import { ProvidersPanel } from "./components/providers-panel";
+import { RequestsPanel } from "./components/requests-panel";
 import { SessionProvider, useSession } from "./use-session";
 import { isViewPath } from "./views";
 
 const loginSearch = v.object({
-  redirect: v.optional(v.picklist(["/notes", "/api-keys"]), "/notes"),
+  redirect: v.optional(
+    v.picklist(["/overview", "/providers", "/requests", "/api-keys"]),
+    "/overview",
+  ),
 });
 
 type LoginSearch = v.InferOutput<typeof loginSearch>;
@@ -35,7 +40,7 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   beforeLoad: () => {
-    throw redirect({ to: "/notes" });
+    throw redirect({ to: "/overview" });
   },
 });
 
@@ -45,7 +50,7 @@ const loginRoute = createRoute({
   validateSearch: (search): LoginSearch => {
     const parsed = v.safeParse(loginSearch, search);
 
-    return parsed.success ? parsed.output : { redirect: "/notes" };
+    return parsed.success ? parsed.output : { redirect: "/overview" };
   },
   component: LoginPage,
 });
@@ -56,10 +61,22 @@ const appRoute = createRoute({
   component: AppLayout,
 });
 
-const notesRoute = createRoute({
+const overviewRoute = createRoute({
   getParentRoute: () => appRoute,
-  path: "/notes",
-  component: NotesPanel,
+  path: "/overview",
+  component: OverviewPanel,
+});
+
+const providersRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/providers",
+  component: ProvidersPanel,
+});
+
+const requestsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/requests",
+  component: RequestsPanel,
 });
 
 const apiKeysRoute = createRoute({
@@ -71,7 +88,7 @@ const apiKeysRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
-  appRoute.addChildren([notesRoute, apiKeysRoute]),
+  appRoute.addChildren([overviewRoute, providersRoute, requestsRoute, apiKeysRoute]),
 ]);
 
 export const router = createRouter({ routeTree });
@@ -122,8 +139,8 @@ function NotFoundPage() {
   return (
     <main className="flex min-h-svh flex-col items-center justify-center gap-2 bg-muted">
       <p className="text-sm text-muted-foreground">This page does not exist.</p>
-      <Link to="/notes" className="text-sm font-medium underline underline-offset-4">
-        Back to notes
+      <Link to="/overview" className="text-sm font-medium underline underline-offset-4">
+        Back to overview
       </Link>
     </main>
   );

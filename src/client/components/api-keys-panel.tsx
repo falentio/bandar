@@ -24,8 +24,8 @@ export function ApiKeysPanel() {
       <CardHeader>
         <CardTitle>API keys</CardTitle>
         <CardDescription>
-          Send a key as the {API_KEY_HEADER} header on /api/notes to call the notes API without a
-          browser session.
+          Send a key as <code>Authorization: Bearer &lt;key&gt;</code> (or the {API_KEY_HEADER}{" "}
+          header) to the gateway. Keys are shown once and can call every model you configure.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -54,6 +54,16 @@ export function ApiKeysPanel() {
             </Button>
           </div>
         )}
+
+        <div className="space-y-1 rounded-md border bg-muted/40 p-3">
+          <p className="text-xs font-medium">Try it</p>
+          <pre className="overflow-x-auto font-mono text-xs whitespace-pre-wrap text-muted-foreground">
+            {`curl ${window.location.origin}/v1/chat/completions \
+  -H "Authorization: Bearer bandar_..." \
+  -H "content-type: application/json" \
+  -d '{"model":"your-alias","messages":[{"role":"user","content":"hello"}]}'`}
+          </pre>
+        </div>
 
         {apiKeys.status === "loading" ? (
           <p className="text-sm text-muted-foreground">Loading keys…</p>

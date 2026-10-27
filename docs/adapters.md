@@ -40,6 +40,11 @@ API-key adapters read `apiKey`. An OAuth kind reads `accessToken` and any
 provider-specific account field. Kilo Code sends the token as a bearer and adds
 `X-Kilocode-OrganizationID` when the account profile named an organization.
 
+Each credential is one `provider_credentials` row: a sealed bundle, its
+`auth_mode`, a display name, and health (`failures`, `flagged_until`). A
+provider owns an ordered list of them and the gateway decrypts exactly one per
+attempt, so `ProviderTarget.credential` stays a single bundle.
+
 `CanonicalRequest` carries `messages` (`system | user | assistant`), `temperature`,
 `topP`, `maxTokens`, and `stop`. `CanonicalResult` carries `text`, `finishReason`,
 and `usage` (`inputTokens`, `outputTokens`, each `number | null`).
@@ -225,9 +230,9 @@ not measure time, and non-streaming requests have no TTFT.
 6. Run `bun run check && bun run test && bun run build && bun run smoke`.
 
 No database migration is needed for a new kind: `providers.kind` is text and its
-TypeScript type comes from `ProviderKind`. Credentials already have an
-`auth_mode` column and a sealed bundle, so an API-key kind and an OAuth kind use
-the same row shape. `origin` separates a seeded built-in from a custom row. The
+TypeScript type comes from `ProviderKind`. Each credential row carries an
+`auth_mode` and a sealed bundle, so an API-key kind and an OAuth kind use the
+same row shape. `origin` separates a seeded built-in from a custom row. The
 dashboard's kind picker, the add dialog, and the provider logo table read the
 generic and built-in lists, so a new kind appears once it has a path in
 `./src/client/components/provider-logo.tsx`.
@@ -236,8 +241,8 @@ generic and built-in lists, so a new kind appears once it has a path in
 
 Kilo Code is the first provider that logs in instead of accepting a key. A
 definition with an `oauth` connector serves the
-`/api/providers/:id/oauth/{start,poll}` routes; without one, both routes answer 400. The dashboard shows the **Connection** tab for Kilo Code by kind, so a new
-OAuth kind also needs a branch in `src/client/components/provider-page.tsx`.
+`/api/providers/:id/oauth/{start,poll}` routes; without one, both routes answer 400. Every provider's **Connection** tab lists credentials, so a new OAuth kind
+adds its device login above that list in `src/client/components/provider-page.tsx`.
 
 The connector contract lives in `src/server/providers/types.ts`:
 
@@ -251,10 +256,10 @@ export interface OAuthConnector {
 `src/server/providers/kilocode/oauth.ts` implements it. The API keeps the device
 code server-side, keyed by user and provider; the start response returns only
 the short user code and the verification URL. The poll stores the token with
-`saveOAuthCredential`, which seals the OAuth bundle and sets
-`providers.auth_mode = "oauth"`. An API key saved later replaces the connection
-and switches the mode back to `"api-key"`. A built-in provider's row is seeded
-before login, so the Connection tab works on the first visit.
+`addOAuthCredential`, which appends a credential row with
+`auth_mode = "oauth"`. An API key added later is another credential, and the
+chain tries credentials in the order they were added. A built-in provider's row
+is seeded before login, so the Connection tab works on the first visit.
 
 An OAuth connector that needs an account identifier should look it up during
 `poll` and return it in the bundle, as Kilo Code does with `organizationId`. The

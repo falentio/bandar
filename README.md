@@ -21,6 +21,8 @@ SQLite.
 - Three generic wires for custom providers: `openai`, `anthropic`, and `google`.
 - Built-in Kilo Code, present on every account, with a device-code login.
 - Custom providers added from the dashboard without changing code.
+- Several credentials per provider, tried in order, with a cooldown flag that
+  skips a failing credential, provider, or model.
 - Provider and model-alias management in the dashboard or over `/api`.
 - Gateway keys from better-auth's API-key plugin, sent as
   `Authorization: Bearer <key>` or `x-api-key`.
@@ -75,10 +77,11 @@ POST /v1/chat/completions [1]
 └── record one DuckDB event with tokens, TTFT, duration and tokens/sec [1g]
 ```
 
-Provider credentials are decrypted per attempt, immediately before an upstream
-call, so a credential is in memory only for the length of that call and a tag
-never opens keys for models it does not try. `GET /api/providers` returns
-`authMode` and `hasKey`, never the key or token. A device-code login keeps the
+One attempt is one model and one credential pair. The credential is decrypted
+immediately before that upstream call, so it is in memory only for the length of
+the call, and a tag never opens keys for models it does not try.
+`GET /api/providers` returns each provider's credentials with their auth mode and
+health, plus `hasKey`, never the key or token. A device-code login keeps the
 device code on the server: the browser sees only the short user code it types at
 kilocode.ai.
 
@@ -127,6 +130,33 @@ call it as `tags/<slug>`. The gateway tries the models in priority order.
 
 Manage tags on the **Tags** page or over `/api/tags`. Every membership write
 replaces the whole list, so priorities are always 1-based and contiguous.
+
+## Credentials and cooldown
+
+A provider owns an ordered list of credentials. The gateway tries them first in,
+first out, by `createdAt` and then id, and a provider with none is called
+anonymously. Across a plan the order is: for each model in plan order, that
+provider's credentials in order. Add and remove keys on the provider's
+**Connection** tab or with `POST /api/providers/:id/credentials` and
+`DELETE /api/providers/:id/credentials/:credentialId`.
+
+A retryable failure flags one subject:
+
+| Error kind               | Flagged               |
+| ------------------------ | --------------------- |
+| `auth`, `rate_limit`     | the credential        |
+| `unavailable`, `network` | the provider          |
+| `protocol`               | the model             |
+| `invalid_request`        | nothing (it is final) |
+
+A flagged subject cools down for `min(30s * 2^(failures - 1), 24h)`, so repeated
+failures grow the wait to one day. A success clears the failure count and the
+flag on the provider, the model, and the credential of that attempt.
+
+An attempt is skipped when its provider, its model, or its credential is cooling
+down. When every attempt in the plan is skipped, the gateway runs the full plan
+anyway: a request is never failed just because everything is flagged, and the
+probe can clear the flags again. Flags live in SQLite, so they survive a restart.
 
 ## Analytics
 
@@ -331,6 +361,7 @@ bandar/
 │   ├── providers.ts                # provider/model repo, catalog import, slug backfill
 │   ├── tags.ts                     # tag list and membership writes
 │   ├── credential.ts               # api-key / oauth credential union
+│   ├── health.ts                   # cooldown policy and per-subject flags
 │   ├── oauth.ts                    # device-code connectors per OAuth kind
 │   ├── seal.ts                     # AES-GCM credential sealing
 │   ├── router/
@@ -404,15 +435,15 @@ bandar/
 Each provider has its own page at `/providers/<id>` with four tabs:
 **Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
 (name, slug, kind, base URL), **Models** (aliases, refs, tag chips, removal, and
-for Kilo Code a catalog import), and **API key** or **Connection** (set or
-replace the sealed upstream key, connect a Kilo Code account, remove a custom
+for Kilo Code a catalog import), and **Connection** (list, add, and remove
+credentials with their health, connect a Kilo Code account, remove a custom
 provider). The tab lives in the URL as `?tab=`, so a reload or a shared link
 opens the same tab. Custom providers are created empty and grow models one at a
 time; Kilo Code is seeded empty for every account. Built-in settings come from
 code and are read-only, and a built-in cannot be removed. `PUT /api/providers/:id`
-replaces name, slug, kind, and base URL for a custom provider, and leaves the
-credential unchanged when `apiKey` is empty. Changing a custom slug stops refs
-built from the old slug from resolving.
+replaces name, slug, kind, and base URL for a custom provider and leaves the
+credentials alone. Changing a custom slug stops refs built from the old slug from
+resolving.
 
 The **Tags** page creates a tag from a slug and edits its chain: reorder a model
 with the arrow buttons, remove it, or pick another from the add list. Every edit

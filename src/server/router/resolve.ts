@@ -13,7 +13,16 @@ export type ResolvedAttempt = {
   readonly kind: ProviderKind;
   readonly baseUrl: string;
   readonly credentialId: string | null;
+  readonly credentialLabel: string;
   readonly sealedKey: string;
+  readonly modelId: string;
+  readonly providerName: string;
+  readonly providerFailures: number;
+  readonly providerFlaggedUntil: Date | null;
+  readonly modelFailures: number;
+  readonly modelFlaggedUntil: Date | null;
+  readonly credentialFailures: number;
+  readonly credentialFlaggedUntil: Date | null;
 };
 
 export type ResolvedPlan = {
@@ -33,7 +42,16 @@ type AttemptRow = {
   readonly kind: ProviderKind;
   readonly baseUrl: string;
   readonly credentialId: string | null;
+  readonly credentialLabel: string | null;
   readonly sealedKey: string | null;
+  readonly modelId: string;
+  readonly providerName: string;
+  readonly providerFailures: number;
+  readonly providerFlaggedUntil: Date | null;
+  readonly modelFailures: number;
+  readonly modelFlaggedUntil: Date | null;
+  readonly credentialFailures: number | null;
+  readonly credentialFlaggedUntil: Date | null;
 };
 
 const attemptColumns = {
@@ -45,12 +63,26 @@ const attemptColumns = {
   kind: providers.kind,
   baseUrl: providers.baseUrl,
   credentialId: providerCredentials.id,
+  credentialLabel: providerCredentials.label,
   sealedKey: providerCredentials.credential,
+  modelId: providerModels.id,
+  providerName: providers.name,
+  providerFailures: providers.failures,
+  providerFlaggedUntil: providers.flaggedUntil,
+  modelFailures: providerModels.failures,
+  modelFlaggedUntil: providerModels.flaggedUntil,
+  credentialFailures: providerCredentials.failures,
+  credentialFlaggedUntil: providerCredentials.flaggedUntil,
 };
 
 /** A provider with no credential row still answers, with an empty key. */
 function attemptsOf(rows: readonly AttemptRow[]): readonly ResolvedAttempt[] {
-  return rows.map((row) => ({ ...row, sealedKey: row.sealedKey ?? "" }));
+  return rows.map((row) => ({
+    ...row,
+    credentialLabel: row.credentialLabel ?? "",
+    sealedKey: row.sealedKey ?? "",
+    credentialFailures: row.credentialFailures ?? 0,
+  }));
 }
 
 export async function resolvePlan(

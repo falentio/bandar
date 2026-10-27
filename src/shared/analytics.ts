@@ -58,6 +58,7 @@ export const ProviderUsageSchema = v.object({
 export const RequestEventSchema = v.object({
   id: v.string(),
   model: v.string(),
+  reference: v.nullable(v.string()),
   providerKind: v.string(),
   apiKeyId: v.nullable(v.string()),
   status: v.string(),

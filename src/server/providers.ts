@@ -24,9 +24,12 @@ import type { Sealer } from "./seal";
 export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
 
 export class ProviderRuleError extends Error {
-  constructor(message: string) {
+  readonly code: "built_in" | "validation";
+
+  constructor(message: string, code: "built_in" | "validation" = "built_in") {
     super(message);
     this.name = "ProviderRuleError";
+    this.code = code;
   }
 }
 
@@ -37,19 +40,6 @@ type ProviderPatch = {
   baseUrl: string;
   authMode?: ProviderAuthMode;
   apiKey?: string;
-};
-
-export type ResolvedTarget = {
-  readonly modelId: string;
-  readonly alias: string;
-  readonly upstreamModel: string;
-  readonly inputPricePerMtok: number | null;
-  readonly outputPricePerMtok: number | null;
-  readonly providerId: string;
-  readonly providerName: string;
-  readonly kind: ProviderKind;
-  readonly baseUrl: string;
-  readonly credential: Credential;
 };
 
 export async function listProviders(deps: ProviderDeps, userId: string): Promise<ProviderList> {
@@ -202,7 +192,7 @@ export async function updateProvider(
 
   if (input.slug !== undefined) {
     if (RESERVED_PROVIDER_SLUGS.has(input.slug)) {
-      throw new ProviderRuleError(`${input.slug} is a reserved slug`);
+      throw new ProviderRuleError(`${input.slug} is a reserved slug`, "validation");
     }
 
     patch.slug = input.slug;
@@ -389,55 +379,6 @@ export async function removeProvider(
   return removed.length > 0;
 }
 
-export async function resolveTarget(
-  deps: ProviderDeps,
-  userId: string,
-  alias: string,
-): Promise<ResolvedTarget | null> {
-  const rows = await deps.db
-    .select({
-      modelId: providerModels.id,
-      alias: providerModels.alias,
-      upstreamModel: providerModels.upstreamModel,
-      inputPricePerMtok: providerModels.inputPricePerMtok,
-      outputPricePerMtok: providerModels.outputPricePerMtok,
-      providerId: providers.id,
-      providerName: providers.name,
-      kind: providers.kind,
-      baseUrl: providers.baseUrl,
-      apiKey: providers.apiKey,
-    })
-    .from(providerModels)
-    .innerJoin(providers, eq(providers.id, providerModels.providerId))
-    .where(
-      and(
-        eq(providerModels.userId, userId),
-        eq(providerModels.alias, alias),
-        eq(providerModels.enabled, true),
-      ),
-    )
-    .limit(1);
-
-  const row = rows[0];
-
-  if (row === undefined) return null;
-
-  const { apiKey, ...rest } = row;
-
-  return { ...rest, credential: await readCredential(deps, apiKey) };
-}
-
-export async function listModelAliases(
-  deps: ProviderDeps,
-  userId: string,
-): Promise<readonly { readonly alias: string; readonly createdAt: Date }[]> {
-  return deps.db
-    .select({ alias: providerModels.alias, createdAt: providerModels.createdAt })
-    .from(providerModels)
-    .where(and(eq(providerModels.userId, userId), eq(providerModels.enabled, true)))
-    .orderBy(asc(providerModels.alias));
-}
-
 export async function readCredential(deps: ProviderDeps, sealed: string): Promise<Credential> {
   if (sealed === "") return { authMode: "api-key", apiKey: "" };
 
@@ -474,7 +415,7 @@ async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promi
 
     const definition = BUILT_IN_PROVIDERS[kind];
     const name = availableName(definition.name, names);
-    const slug = availableSlug(definition.slug, slugs);
+    const slug = availableSlug(definition.slug, withoutSlug(slugs, definition.slug));
 
     names.add(name);
     slugs.add(slug);
@@ -534,8 +475,8 @@ async function takenSlugs(deps: ProviderDeps, userId: string): Promise<Set<strin
   return taken;
 }
 
-export async function assignProviderSlugs(deps: ProviderDeps): Promise<number> {
-  const rows = await deps.db
+export async function assignProviderSlugs(db: Db): Promise<number> {
+  const rows = await db
     .select({
       id: providers.id,
       userId: providers.userId,
@@ -565,9 +506,10 @@ export async function assignProviderSlugs(deps: ProviderDeps): Promise<number> {
     const pending = userRows
       .filter((row) => row.slug === "")
       .sort((left, right) => {
-        const rank = left.origin === right.origin ? 0 : left.origin === "builtin" ? -1 : 1;
+        const leftRank = left.origin === "builtin" ? 0 : 1;
+        const rightRank = right.origin === "builtin" ? 0 : 1;
 
-        if (rank !== 0) return rank;
+        if (leftRank !== rightRank) return leftRank - rightRank;
 
         const created = left.createdAt.getTime() - right.createdAt.getTime();
 
@@ -576,10 +518,10 @@ export async function assignProviderSlugs(deps: ProviderDeps): Promise<number> {
 
     if (pending.length === 0) continue;
 
-    deps.db.transaction((tx) => {
+    db.transaction((tx) => {
       for (const row of pending) {
-        const base = builtInSlugOf(row.kind) ?? slugify(row.name);
-        const slug = availableSlug(base, taken);
+        const builtIn = builtInSlugOf(row.kind);
+        const slug = availableSlug(builtIn ?? slugify(row.name), withoutSlug(taken, builtIn));
 
         tx.update(providers).set({ slug }).where(eq(providers.id, row.id)).run();
         taken.add(slug);
@@ -595,6 +537,15 @@ function builtInSlugOf(kind: ProviderKind): string | null {
   const builtIn = BUILT_IN_PROVIDER_KINDS.find((candidate) => candidate === kind);
 
   return builtIn === undefined ? null : BUILT_IN_PROVIDERS[builtIn].slug;
+}
+
+// A built-in owns its definition slug; only custom providers are locked out of it.
+function withoutSlug(taken: ReadonlySet<string>, slug: string | null): Set<string> {
+  const copy = new Set(taken);
+
+  if (slug !== null) copy.delete(slug);
+
+  return copy;
 }
 
 export async function saveOAuthCredential(

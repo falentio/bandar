@@ -1,12 +1,14 @@
 import type { DuckDb } from "../duck/client";
-import { resolveTarget, type ProviderDeps, type ResolvedTarget } from "../providers";
+import { readCredential, type ProviderDeps } from "../providers";
 import { adapterFor } from "./adapters";
 import { recordRequest, type RequestEventInput, type RequestOutcome } from "./record";
+import { resolvePlan, type ResolvedCandidate, type ResolvedPlan } from "./resolve";
 import {
   UpstreamError,
   type CanonicalRequest,
   type CanonicalUsage,
   type ProviderTarget,
+  type UpstreamErrorKind,
 } from "./types";
 import { completionResponse, openAiError, usageBody } from "./wire";
 
@@ -18,7 +20,7 @@ export type ChatDeps = {
 export type ChatInput = {
   readonly userId: string;
   readonly apiKeyId: string;
-  readonly alias: string;
+  readonly ref: string;
   readonly request: CanonicalRequest;
   readonly stream: boolean;
   readonly signal: AbortSignal;
@@ -34,6 +36,7 @@ type EventBase = {
   streamed: boolean;
   inputPricePerMtok: number | null;
   outputPricePerMtok: number | null;
+  reference: string;
   startedAt: Date;
 };
 
@@ -47,44 +50,56 @@ type Outcome = {
   durationMs: number;
 };
 
-export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Response> {
-  const resolved = await resolveTarget(deps.providers, input.userId, input.alias);
+const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
+  "auth",
+  "rate_limit",
+  "unavailable",
+  "protocol",
+  "network",
+]);
 
-  if (resolved === null) {
-    return openAiError(404, `model ${input.alias} is not configured`, "model_not_found");
+export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Response> {
+  const plan = await resolvePlan(deps.providers, input.userId, input.ref);
+
+  if (plan.candidates.length === 0) {
+    return plan.tag === null
+      ? openAiError(404, `model ${input.ref} is not configured`, "model_not_found")
+      : openAiError(404, `tag ${plan.tag} has no enabled models`, "model_not_found");
   }
 
-  const target: ProviderTarget = {
-    providerId: resolved.providerId,
-    kind: resolved.kind,
-    baseUrl: resolved.baseUrl,
-    credential: resolved.credential,
-    upstreamModel: resolved.upstreamModel,
-  };
-
   const startedAt = new Date();
-
-  const base: EventBase = {
-    userId: input.userId,
-    apiKeyId: input.apiKeyId,
-    providerId: resolved.providerId,
-    providerKind: resolved.kind,
-    model: resolved.alias,
-    upstreamModel: resolved.upstreamModel,
-    streamed: input.stream,
-    inputPricePerMtok: resolved.inputPricePerMtok,
-    outputPricePerMtok: resolved.outputPricePerMtok,
-    startedAt,
-  };
-
   const id = `chatcmpl-${crypto.randomUUID()}`;
   const created = Math.floor(startedAt.getTime() / 1000);
-  const adapter = adapterFor(resolved.kind);
   const start = performance.now();
 
-  if (!input.stream) {
+  if (!input.stream) return complete(deps, input, plan, id, created);
+
+  return streamResponse(deps, { input, plan, id, created, start });
+}
+
+async function complete(
+  deps: ChatDeps,
+  input: ChatInput,
+  plan: ResolvedPlan,
+  id: string,
+  created: number,
+): Promise<Response> {
+  let failure: UpstreamError | null = null;
+
+  for (const [index, candidate] of plan.candidates.entries()) {
+    const startedAt = new Date();
+    const started = performance.now();
+    const base = eventBase(input, plan.ref, candidate, startedAt);
+    const last = index === plan.candidates.length - 1;
+
     try {
-      const result = await adapter.chat({ target, request: input.request, signal: input.signal });
+      const target = await targetOf(deps.providers, candidate);
+
+      const result = await adapterFor(candidate.kind).chat({
+        target,
+        request: input.request,
+        signal: input.signal,
+      });
 
       recordSafe(deps, base, {
         status: "success",
@@ -93,75 +108,64 @@ export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Respons
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,
         ttftMs: null,
-        durationMs: performance.now() - start,
+        durationMs: performance.now() - started,
       });
 
-      return completionResponse({ id, created, model: input.alias, result });
+      return completionResponse({ id, created, model: plan.ref, result });
     } catch (error) {
-      const failure =
+      const failed =
         error instanceof Error
           ? failureOf(error)
           : new UpstreamError("unexpected upstream failure", "network");
 
       const aborted = input.signal.aborted;
 
+      failure = failed;
+
       recordSafe(deps, base, {
         status: aborted ? "aborted" : "error",
-        httpStatus: failure.status,
-        errorKind: aborted ? "aborted" : failure.kind,
+        httpStatus: failed.status,
+        errorKind: aborted ? "aborted" : failed.kind,
         inputTokens: null,
         outputTokens: null,
         ttftMs: null,
-        durationMs: performance.now() - start,
+        durationMs: performance.now() - started,
       });
 
-      return openAiError(
-        aborted ? 400 : statusFor(failure),
-        aborted ? "request aborted" : failure.message,
-        aborted ? "aborted" : failure.kind,
-        "upstream_error",
-      );
+      if (aborted || last || !RETRYABLE.has(failed.kind)) {
+        return openAiError(
+          aborted ? 400 : statusFor(failed),
+          aborted ? "request aborted" : failed.message,
+          aborted ? "aborted" : failed.kind,
+          "upstream_error",
+        );
+      }
     }
   }
 
-  return streamResponse(deps, {
-    target,
-    resolved,
-    base,
-    request: input.request,
-    signal: input.signal,
-    id,
-    created,
-    start,
-  });
+  const failed = failure ?? new UpstreamError("no upstream answered", "unavailable");
+
+  return openAiError(statusFor(failed), failed.message, failed.kind, "upstream_error");
 }
 
 type StreamInput = {
-  target: ProviderTarget;
-  resolved: ResolvedTarget;
-  base: EventBase;
-  request: CanonicalRequest;
-  signal: AbortSignal;
-  id: string;
-  created: number;
-  start: number;
+  readonly input: ChatInput;
+  readonly plan: ResolvedPlan;
+  readonly id: string;
+  readonly created: number;
+  readonly start: number;
 };
 
-function streamResponse(deps: ChatDeps, input: StreamInput): Response {
+function streamResponse(deps: ChatDeps, context: StreamInput): Response {
+  const { input, plan } = context;
   const abort = new AbortController();
   const onAbort = () => abort.abort();
   input.signal.addEventListener("abort", onAbort, { once: true });
 
   let cancelled = false;
   let ttftMs: number | null = null;
-  let usage: CanonicalUsage = { inputTokens: null, outputTokens: null };
-  let finishReason: string | null = null;
-  let status: RequestOutcome = "error";
-  let errorKind: string | null = null;
-  let httpStatus: number | null = null;
 
   const encoder = new TextEncoder();
-  const adapter = adapterFor(input.target.kind);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -169,117 +173,153 @@ function streamResponse(deps: ChatDeps, input: StreamInput): Response {
         if (!cancelled) controller.enqueue(encoder.encode(payload));
       };
 
-      const delta = (content: Record<string, string>, finish: string | null) => {
-        send(
-          `data: ${JSON.stringify({
-            id: input.id,
-            object: "chat.completion.chunk",
-            created: input.created,
-            model: input.base.model,
-            choices: [{ index: 0, delta: content, finish_reason: finish }],
-          })}\n\n`,
-        );
+      const close = () => {
+        if (!cancelled) controller.close();
       };
 
-      let roleSent = false;
+      const fail = (message: string, code: string) => {
+        send(`data: ${JSON.stringify({ error: { message, type: "upstream_error", code } })}\n\n`);
+        send("data: [DONE]\n\n");
+        close();
+      };
 
-      try {
-        for await (const event of adapter.stream({
-          target: input.target,
-          request: input.request,
-          signal: abort.signal,
-        })) {
-          switch (event.type) {
-            case "text": {
-              if (event.text === "") break;
+      for (const [index, candidate] of plan.candidates.entries()) {
+        const startedAt = new Date();
+        const started = performance.now();
+        const base = eventBase(input, plan.ref, candidate, startedAt);
+        const last = index === plan.candidates.length - 1;
 
-              if (ttftMs === null) ttftMs = performance.now() - input.start;
+        let chunksSent = 0;
+        let roleSent = false;
+        let usage: CanonicalUsage = { inputTokens: null, outputTokens: null };
+        let finishReason: string | null = null;
 
-              if (!roleSent) {
-                delta({ role: "assistant" }, null);
-                roleSent = true;
-              }
+        const enqueue = (payload: string) => {
+          if (cancelled) return;
 
-              delta({ content: event.text }, null);
-              break;
-            }
+          controller.enqueue(encoder.encode(payload));
+          chunksSent += 1;
+        };
 
-            case "usage": {
-              usage = event.usage;
-              break;
-            }
-
-            case "finish": {
-              finishReason = event.reason;
-              break;
-            }
-
-            default: {
-              const _exhaustive: never = event;
-
-              return _exhaustive;
-            }
-          }
-        }
-
-        if (!roleSent) delta({ role: "assistant" }, null);
-
-        delta({}, finishReason);
-
-        const usageChunk = usageBody(usage);
-
-        if (usageChunk !== null) {
-          send(
+        const delta = (content: Record<string, string>, finish: string | null) => {
+          enqueue(
             `data: ${JSON.stringify({
-              id: input.id,
+              id: context.id,
               object: "chat.completion.chunk",
-              created: input.created,
-              model: input.base.model,
-              choices: [],
-              usage: usageChunk,
+              created: context.created,
+              model: plan.ref,
+              choices: [{ index: 0, delta: content, finish_reason: finish }],
             })}\n\n`,
           );
+        };
+
+        try {
+          const target = await targetOf(deps.providers, candidate);
+
+          for await (const event of adapterFor(candidate.kind).stream({
+            target,
+            request: input.request,
+            signal: abort.signal,
+          })) {
+            switch (event.type) {
+              case "text": {
+                if (event.text === "") break;
+
+                if (ttftMs === null) ttftMs = performance.now() - context.start;
+
+                if (!roleSent) {
+                  delta({ role: "assistant" }, null);
+                  roleSent = true;
+                }
+
+                delta({ content: event.text }, null);
+                break;
+              }
+
+              case "usage": {
+                usage = event.usage;
+                break;
+              }
+
+              case "finish": {
+                finishReason = event.reason;
+                break;
+              }
+
+              default: {
+                const _exhaustive: never = event;
+
+                return _exhaustive;
+              }
+            }
+          }
+
+          if (!roleSent) delta({ role: "assistant" }, null);
+
+          delta({}, finishReason);
+
+          const usageChunk = usageBody(usage);
+
+          if (usageChunk !== null) {
+            enqueue(
+              `data: ${JSON.stringify({
+                id: context.id,
+                object: "chat.completion.chunk",
+                created: context.created,
+                model: plan.ref,
+                choices: [],
+                usage: usageChunk,
+              })}\n\n`,
+            );
+          }
+
+          recordSafe(deps, base, {
+            status: "success",
+            httpStatus: 200,
+            errorKind: null,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            ttftMs,
+            durationMs: performance.now() - started,
+          });
+
+          send("data: [DONE]\n\n");
+          close();
+
+          return;
+        } catch (error) {
+          const failed =
+            error instanceof Error
+              ? failureOf(error)
+              : new UpstreamError("unexpected upstream failure", "network");
+
+          const aborted = abort.signal.aborted;
+
+          recordSafe(deps, base, {
+            status: aborted ? "aborted" : "error",
+            httpStatus: failed.status,
+            errorKind: aborted ? "aborted" : failed.kind,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            ttftMs: null,
+            durationMs: performance.now() - started,
+          });
+
+          if (aborted) {
+            fail("request aborted", "aborted");
+
+            return;
+          }
+
+          if (chunksSent > 0 || last || !RETRYABLE.has(failed.kind)) {
+            fail(failed.message, failed.kind);
+
+            return;
+          }
         }
-
-        send("data: [DONE]\n\n");
-        status = "success";
-      } catch (error) {
-        const failure =
-          error instanceof Error
-            ? failureOf(error)
-            : new UpstreamError("unexpected upstream failure", "network");
-
-        const aborted = abort.signal.aborted;
-
-        status = aborted ? "aborted" : "error";
-        errorKind = aborted ? "aborted" : failure.kind;
-        httpStatus = failure.status;
-
-        send(
-          `data: ${JSON.stringify({
-            error: {
-              message: aborted ? "request aborted" : failure.message,
-              type: "upstream_error",
-              code: errorKind,
-            },
-          })}\n\n`,
-        );
-        send("data: [DONE]\n\n");
-      } finally {
-        input.signal.removeEventListener("abort", onAbort);
-
-        if (!cancelled) controller.close();
-
-        recordSafe(deps, input.base, {
-          status,
-          httpStatus,
-          errorKind,
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          ttftMs,
-          durationMs: performance.now() - input.start,
-        });
       }
+
+      fail("no upstream answered", "unavailable");
     },
     cancel() {
       cancelled = true;
@@ -294,6 +334,40 @@ function streamResponse(deps: ChatDeps, input: StreamInput): Response {
       connection: "keep-alive",
     },
   });
+}
+
+async function targetOf(
+  providers: ProviderDeps,
+  candidate: ResolvedCandidate,
+): Promise<ProviderTarget> {
+  return {
+    providerId: candidate.providerId,
+    kind: candidate.kind,
+    baseUrl: candidate.baseUrl,
+    credential: await readCredential(providers, candidate.sealedKey),
+    upstreamModel: candidate.upstreamModel,
+  };
+}
+
+function eventBase(
+  input: ChatInput,
+  reference: string,
+  candidate: ResolvedCandidate,
+  startedAt: Date,
+): EventBase {
+  return {
+    userId: input.userId,
+    apiKeyId: input.apiKeyId,
+    providerId: candidate.providerId,
+    providerKind: candidate.kind,
+    model: candidate.alias,
+    upstreamModel: candidate.upstreamModel,
+    streamed: input.stream,
+    inputPricePerMtok: candidate.inputPricePerMtok,
+    outputPricePerMtok: candidate.outputPricePerMtok,
+    reference,
+    startedAt,
+  };
 }
 
 function recordSafe(deps: ChatDeps, base: EventBase, outcome: Outcome): void {

@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatWhen } from "../format";
 import { useCooldowns } from "../use-cooldowns";
+import { isCoolingDown } from "./health-badge";
 
 export function ErrorsPanel() {
   const cooldowns = useCooldowns(100);
@@ -74,12 +75,12 @@ export function ErrorsPanel() {
                       <td className="py-2 pr-3 whitespace-nowrap">
                         <span
                           className={
-                            isCooling(event.flaggedUntil)
+                            isCoolingDown(event.flaggedUntil)
                               ? "font-medium text-destructive"
                               : "text-muted-foreground"
                           }
                         >
-                          {isCooling(event.flaggedUntil) ? "cooling down" : "expired"}
+                          {isCoolingDown(event.flaggedUntil) ? "cooling down" : "expired"}
                         </span>
                         <span className="mt-0.5 block text-xs text-muted-foreground">
                           {formatWhen(event.flaggedUntil)}
@@ -96,10 +97,6 @@ export function ErrorsPanel() {
       </Card>
     </div>
   );
-}
-
-function isCooling(flaggedUntil: string): boolean {
-  return new Date(flaggedUntil).getTime() > Date.now();
 }
 
 function formatCooldown(ms: number): string {

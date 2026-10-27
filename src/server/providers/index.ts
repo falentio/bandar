@@ -66,6 +66,8 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       label: providerCredentials.label,
       authMode: providerCredentials.authMode,
       priority: providerCredentials.priority,
+      failures: providerCredentials.failures,
+      flaggedUntil: providerCredentials.flaggedUntil,
       createdAt: providerCredentials.createdAt,
     })
     .from(providerCredentials)
@@ -83,6 +85,8 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       label: row.label,
       authMode: row.authMode,
       priority: row.priority,
+      failures: row.failures,
+      flaggedUntil: row.flaggedUntil?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
     });
     credentials.set(row.providerId, list);
@@ -105,6 +109,8 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       shadowed: enabledAliases.has(ref),
       inputPricePerMtok: row.inputPricePerMtok,
       outputPricePerMtok: row.outputPricePerMtok,
+      failures: row.failures,
+      flaggedUntil: row.flaggedUntil?.toISOString() ?? null,
     });
     grouped.set(row.providerId, list);
   }
@@ -137,6 +143,8 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       hasCatalog: definitionFor(row.kind).catalog !== undefined,
       credentials: credentials.get(row.id) ?? [],
       models: grouped.get(row.id) ?? [],
+      failures: row.failures,
+      flaggedUntil: row.flaggedUntil?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
     })),
   };

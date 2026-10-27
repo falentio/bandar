@@ -99,6 +99,8 @@ async function complete(
         signal: input.signal,
       });
 
+      const response = completionResponse({ id, created, model: plan.ref, result });
+
       recordSafe(deps, base, {
         status: "success",
         httpStatus: 200,
@@ -109,7 +111,7 @@ async function complete(
         durationMs: performance.now() - started,
       });
 
-      return completionResponse({ id, created, model: plan.ref, result });
+      return response;
     } catch (error) {
       const failed =
         error instanceof Error
@@ -271,6 +273,9 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             );
           }
 
+          send("data: [DONE]\n\n");
+          close();
+
           recordSafe(deps, base, {
             status: "success",
             httpStatus: 200,
@@ -280,9 +285,6 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             ttftMs,
             durationMs: performance.now() - started,
           });
-
-          send("data: [DONE]\n\n");
-          close();
 
           return;
         } catch (error) {

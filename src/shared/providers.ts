@@ -66,6 +66,7 @@ export const ProviderSchema = v.object({
   kind: ProviderKindSchema,
   origin: ProviderOriginSchema,
   baseUrl: v.string(),
+  authModes: v.array(ProviderAuthModeSchema),
   credentials: v.array(ProviderCredentialSchema),
   models: v.array(ProviderModelSchema),
   createdAt: v.string(),
@@ -105,11 +106,17 @@ export const ProviderInputSchema = v.object({
   slug: v.optional(SlugSchema),
 });
 
+export const MAX_API_KEY_LENGTH = 500;
+
+export const MAX_BULK_CREDENTIALS = 100;
+
+const ApiKeySchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_API_KEY_LENGTH));
+
 export const ProviderCreateInputSchema = v.object({
   name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(60)),
   kind: GenericProviderKindSchema,
   baseUrl: v.pipe(v.string(), v.trim(), v.url()),
-  apiKey: v.optional(v.pipe(v.string(), v.maxLength(500)), ""),
+  apiKey: v.optional(v.pipe(v.string(), v.maxLength(MAX_API_KEY_LENGTH)), ""),
 });
 
 export const ProviderParamsSchema = v.object({ id: v.string() });
@@ -121,7 +128,16 @@ export const ProviderCredentialParamsSchema = v.object({
 
 export const ProviderCredentialInputSchema = v.object({
   label: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(60))),
-  apiKey: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(500)),
+  apiKey: ApiKeySchema,
+});
+
+export const ProviderCredentialBulkInputSchema = v.object({
+  apiKeys: v.pipe(
+    v.array(ApiKeySchema),
+    v.minLength(1),
+    v.maxLength(MAX_BULK_CREDENTIALS),
+    v.check((apiKeys) => new Set(apiKeys).size === apiKeys.length, "list each API key once"),
+  ),
 });
 
 export const ProviderCredentialOrderInputSchema = v.object({
@@ -159,6 +175,7 @@ export const providerPaths = {
   oauthStart: (id: string) => `/api/providers/${id}/oauth/start`,
   oauthPoll: (id: string) => `/api/providers/${id}/oauth/poll`,
   credentials: (id: string) => `/api/providers/${id}/credentials`,
+  credentialsBulk: (id: string) => `/api/providers/${id}/credentials/bulk`,
   credentialOrder: (id: string) => `/api/providers/${id}/credentials/order`,
   credential: (id: string, credentialId: string) =>
     `/api/providers/${id}/credentials/${credentialId}`,
@@ -193,6 +210,8 @@ export type Provider = v.InferOutput<typeof ProviderSchema>;
 export type ProviderCredential = v.InferOutput<typeof ProviderCredentialSchema>;
 
 export type ProviderCredentialInput = v.InferOutput<typeof ProviderCredentialInputSchema>;
+
+export type ProviderCredentialBulkInput = v.InferOutput<typeof ProviderCredentialBulkInputSchema>;
 
 export type ProviderList = v.InferOutput<typeof ProviderListSchema>;
 

@@ -5,6 +5,7 @@ import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import {
   ProviderCreateInputSchema,
+  ProviderCredentialBulkInputSchema,
   ProviderCredentialInputSchema,
   ProviderCredentialOrderInputSchema,
   ProviderCredentialParamsSchema,
@@ -25,6 +26,7 @@ import type { MigrationResult } from "./db/migrate";
 import type { DuckDb } from "./duck/client";
 import {
   addProviderCredential,
+  addProviderCredentials,
   removeProviderCredential,
   reorderProviderCredentials,
   addOAuthCredential,
@@ -297,6 +299,23 @@ export function createApi(deps: ApiDeps) {
       // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
       const input = parseInput(ProviderCredentialInputSchema, body as ParseableInput);
       const result = await addProviderCredential(deps.providers, caller.userId, id, input);
+
+      if (result.kind !== "ok") return providerFailure(id);
+
+      set.status = 201;
+
+      return result.provider;
+    })
+    .post("/providers/:id/credentials/bulk", async ({ body, params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(ProviderParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(ProviderCredentialBulkInputSchema, body as ParseableInput);
+
+      const result = await addProviderCredentials(deps.providers, caller.userId, id, input.apiKeys);
 
       if (result.kind !== "ok") return providerFailure(id);
 

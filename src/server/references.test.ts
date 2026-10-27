@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import * as v from "valibot";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { ChatCompletionRequestSchema } from "../shared/chat";
@@ -15,7 +15,7 @@ import {
 import { user } from "./db/auth-schema";
 import { openDatabase, type DatabaseHandle } from "./db/client";
 import { applyMigrations, type Migration } from "./db/migrate";
-import { providerModels, providers, tagModels, tags } from "./db/schema";
+import { providerCredentials, providerModels, providers, tagModels, tags } from "./db/schema";
 import {
   addProviderModel,
   assignProviderSlugs,
@@ -30,6 +30,7 @@ import {
 } from "./providers";
 import {
   addProviderCredential,
+  addProviderCredentials,
   removeProviderCredential,
   reorderProviderCredentials,
 } from "./credentials";
@@ -648,6 +649,88 @@ describe("provider credentials", () => {
       [ids[0], 1],
       [ids[2], 2],
     ]);
+  });
+
+  test("a bulk add appends every key with continuing ranks", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Bulk",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "first-key",
+    });
+
+    const added = await addProviderCredentials(deps, "user-1", provider.id, [
+      "one",
+      "two",
+      "three",
+    ]);
+
+    if (added.kind !== "ok") throw new Error("the bulk add failed: " + added.kind);
+
+    expect(added.provider.credentials.map((credential) => credential.priority)).toEqual([
+      1, 2, 3, 4,
+    ]);
+
+    const stored = handle.db
+      .select({
+        credential: providerCredentials.credential,
+        priority: providerCredentials.priority,
+      })
+      .from(providerCredentials)
+      .where(eq(providerCredentials.providerId, provider.id))
+      .orderBy(asc(providerCredentials.priority))
+      .all();
+
+    const opened = await Promise.all(stored.map((row) => readCredential(deps, row.credential)));
+
+    expect(opened).toEqual([
+      { authMode: "api-key", apiKey: "first-key" },
+      { authMode: "api-key", apiKey: "one" },
+      { authMode: "api-key", apiKey: "two" },
+      { authMode: "api-key", apiKey: "three" },
+    ]);
+  });
+
+  test("a bulk add to an unknown provider or account is missing_provider", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    handle.db.insert(user).values({ id: "user-2", name: "Other", email: "user-2@test" }).run();
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Absent",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    expect((await addProviderCredentials(deps, "user-1", "absent", ["one"])).kind).toBe(
+      "missing_provider",
+    );
+    expect((await addProviderCredentials(deps, "user-2", provider.id, ["one"])).kind).toBe(
+      "missing_provider",
+    );
+  });
+
+  test("a provider value reports the auth modes its kind accepts", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const list = await listProviders(deps, "user-1");
+    const builtIn = list.providers.find((provider) => provider.kind === "kilocode");
+
+    const custom = await createProvider(deps, "user-1", {
+      name: "Modes",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    expect(builtIn?.authModes).toEqual(["api-key", "oauth"]);
+    expect(custom.authModes).toEqual(["api-key"]);
   });
 
   test("migration 0008 moves a stored key into the first credential", () => {

@@ -166,6 +166,7 @@ try {
     assert.equal(builtIn.name, "Kilo Code");
     assert.equal(builtIn.slug, "kilo");
     assert.equal(builtIn.baseUrl, `${kilocodeOrigin}/api/openrouter`);
+    assert.deepEqual(builtIn.authModes, ["api-key", "oauth"]);
     assert.deepEqual(builtIn.credentials, []);
     assert.deepEqual(builtIn.models, []);
 
@@ -924,6 +925,55 @@ try {
     assert.deepEqual(rows.map((request) => request.status).sort(), ["error", "success"]);
     assert.equal(rows.find((request) => request.status === "error")?.errorKind, "auth");
   });
+
+  await check(
+    "POST /api/providers/:id/credentials/bulk appends every key in one write",
+    async () => {
+      const provider = await postJson(
+        providerPaths.list,
+        {
+          name: "Bulk",
+          kind: "openai",
+          baseUrl: `${upstreamOrigin}/openai`,
+          apiKey: "bulk-first",
+        },
+        ProviderSchema,
+        201,
+      );
+
+      const added = await postJson(
+        providerPaths.credentialsBulk(provider.id),
+        { apiKeys: ["bulk-one", "bulk-two", "bulk-three"] },
+        ProviderSchema,
+        201,
+      );
+
+      assert.deepEqual(
+        added.credentials.map((credential) => [credential.priority, credential.authMode]),
+        [
+          [1, "api-key"],
+          [2, "api-key"],
+          [3, "api-key"],
+          [4, "api-key"],
+        ],
+      );
+      assert.equal(Object.hasOwn(added.credentials[0] ?? {}, "apiKey"), false);
+
+      const empty = await post(providerPaths.credentialsBulk(provider.id), { apiKeys: [] });
+
+      const repeated = await post(providerPaths.credentialsBulk(provider.id), {
+        apiKeys: ["same", "same"],
+      });
+
+      const absent = await post(providerPaths.credentialsBulk("absent-provider"), {
+        apiKeys: ["bulk-one"],
+      });
+
+      assert.equal(empty.status, 422);
+      assert.equal(repeated.status, 422);
+      assert.equal(absent.status, 404);
+    },
+  );
 
   await check("reordering and removing credentials rewrites the chain", async () => {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);

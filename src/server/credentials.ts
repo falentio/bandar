@@ -29,7 +29,28 @@ export async function addProviderCredential(
 
   const sealed = await sealApiKey(deps, input.apiKey);
 
-  appendCredential(deps, providerId, { label: input.label ?? "", sealed, authMode: "api-key" });
+  appendCredentials(deps, providerId, [{ label: input.label ?? "", sealed, authMode: "api-key" }]);
+
+  return reload(deps, userId, providerId);
+}
+
+export async function addProviderCredentials(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  apiKeys: readonly string[],
+): Promise<CredentialWriteResult> {
+  if ((await readProvider(deps, userId, providerId)) === null) return { kind: "missing_provider" };
+
+  const entries = await Promise.all(
+    apiKeys.map(async (apiKey): Promise<AppendedCredential> => ({
+      label: "",
+      sealed: await sealApiKey(deps, apiKey),
+      authMode: "api-key",
+    })),
+  );
+
+  appendCredentials(deps, providerId, entries);
 
   return reload(deps, userId, providerId);
 }
@@ -106,7 +127,7 @@ export async function addOAuthCredential(
 
   const sealed = await deps.sealer.seal(JSON.stringify(credential));
 
-  appendCredential(deps, providerId, { label: "", sealed, authMode: credential.authMode });
+  appendCredentials(deps, providerId, [{ label: "", sealed, authMode: credential.authMode }]);
 
   return readProvider(deps, userId, providerId);
 }
@@ -138,10 +159,10 @@ function writeRanks(
   }
 }
 
-function appendCredential(
+function appendCredentials(
   deps: ProviderDeps,
   providerId: string,
-  credential: AppendedCredential,
+  entries: readonly AppendedCredential[],
 ): void {
   deps.db.transaction((tx) => {
     const highest = tx
@@ -152,16 +173,21 @@ function appendCredential(
       .limit(1)
       .all()[0];
 
+    const base = highest?.priority ?? 0;
+    const now = new Date();
+
     tx.insert(providerCredentials)
-      .values({
-        id: crypto.randomUUID(),
-        providerId,
-        label: credential.label,
-        credential: credential.sealed,
-        authMode: credential.authMode,
-        priority: (highest?.priority ?? 0) + 1,
-        createdAt: new Date(),
-      })
+      .values(
+        entries.map((entry, index) => ({
+          id: crypto.randomUUID(),
+          providerId,
+          label: entry.label,
+          credential: entry.sealed,
+          authMode: entry.authMode,
+          priority: base + index + 1,
+          createdAt: now,
+        })),
+      )
       .run();
   });
 }

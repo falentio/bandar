@@ -4,6 +4,7 @@ import { bearerAdapter } from "../openai/compatible";
 import type { BuiltInProviderDefinition } from "../types";
 import { fetchNousCatalog } from "./catalog";
 import { nousConnector } from "./oauth";
+import { nousRenewal } from "./renewal";
 
 const settings = BUILT_IN_PROVIDERS.nous;
 
@@ -19,4 +20,5 @@ export const nous: BuiltInProviderDefinition<"nous"> = {
   adapter: bearerAdapter("nous", "nous portal"),
   oauth: nousConnector,
   catalog: fetchNousCatalog,
+  renew: nousRenewal,
 };

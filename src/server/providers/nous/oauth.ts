@@ -34,7 +34,7 @@ const TERMINAL = new Set(["expired_token", "access_denied"]);
 export const nousConnector: OAuthConnector = {
   async start(signal: AbortSignal): Promise<DeviceLogin> {
     const response = await postForm({
-      url: portal("api/oauth/device/code"),
+      url: portalUrl("api/oauth/device/code"),
       headers: {},
       form: { client_id: CLIENT_ID, scope: SCOPE },
       signal,
@@ -63,7 +63,7 @@ export const nousConnector: OAuthConnector = {
 
   async poll(code: string, signal: AbortSignal): Promise<DevicePollResult> {
     const response = await postForm({
-      url: portal("api/oauth/token"),
+      url: portalUrl("api/oauth/token"),
       headers: {},
       form: { grant_type: DEVICE_GRANT, client_id: CLIENT_ID, device_code: code },
       signal,
@@ -96,7 +96,7 @@ export const nousConnector: OAuthConnector = {
   },
 };
 
-function portal(path: string): string {
+export function portalUrl(path: string): string {
   return joinUrl(originUrl("BANDAR_NOUS_PORTAL", PORTAL), path);
 }
 

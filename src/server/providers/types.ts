@@ -4,7 +4,7 @@ import type {
   ProviderAuthMode,
   ProviderKind,
 } from "../../shared/providers";
-import type { Credential } from "../credential";
+import type { Credential, OAuthCredential } from "../credential";
 
 export type CanonicalMessage = {
   readonly role: "system" | "user" | "assistant";
@@ -106,6 +106,18 @@ export interface OAuthConnector {
   poll(code: string, signal: AbortSignal): Promise<DevicePollResult>;
 }
 
+export type CredentialRenewal = {
+  readonly providerId: string;
+  readonly credential: OAuthCredential;
+  readonly signal: AbortSignal;
+};
+
+/** Rotates an expiring OAuth credential before the request that needs it. */
+export interface CredentialRenewer {
+  due(credential: OAuthCredential, now: number): boolean;
+  renew(input: CredentialRenewal): Promise<Credential>;
+}
+
 export type BuiltInProviderSettings = {
   readonly name: string;
   readonly slug: string;
@@ -117,6 +129,7 @@ export type DefinitionCapabilities<K extends ProviderKind> = {
   readonly authModes: readonly ProviderAuthMode[];
   readonly oauth?: OAuthConnector;
   readonly catalog?: ProviderCatalog;
+  readonly renew?: CredentialRenewer;
 };
 
 export type GenericProviderDefinition<K extends GenericProviderKind = GenericProviderKind> =

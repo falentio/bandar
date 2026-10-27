@@ -99,6 +99,15 @@ const upstream = startUpstream();
 const upstreamOrigin = `http://127.0.0.1:${upstream.port}`;
 const kilocode = startKilocode();
 const kilocodeOrigin = `http://127.0.0.1:${kilocode.port}`;
+
+type NousState = {
+  deviceStarts: number;
+  polls: number;
+  refreshToken: string;
+  presented: string[];
+};
+
+const nousState: NousState = { deviceStarts: 0, polls: 0, refreshToken: "rt-1", presented: [] };
 const builtIns = startBuiltIns();
 const builtInsOrigin = `http://127.0.0.1:${builtIns.port}`;
 
@@ -944,6 +953,85 @@ try {
     assert.equal(body.choices[0]?.message.content, "Hello from Nous Portal");
     assert.equal(body.usage?.prompt_tokens, 6);
     assert.equal(body.usage?.completion_tokens, 5);
+  });
+
+  await check("two concurrent chats share one Nous renewal", async () => {
+    const before = nousState.presented.length;
+
+    const responses = await Promise.all([
+      chatRequest("nous-text-large", false),
+      chatRequest("nous-text-large", false),
+    ]);
+
+    assert.deepEqual(
+      responses.map((response) => response.status),
+      [200, 200],
+    );
+    assert.equal(nousState.presented.length, before + 1);
+  });
+
+  await check("a renewed Nous token is rotated and persisted", async () => {
+    const before = nousState.presented.length;
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 200);
+    assert.equal(nousState.presented.length, before + 1);
+    assert.equal(
+      new Set(nousState.presented).size,
+      nousState.presented.length,
+      "the gateway presented a refresh token the portal had already spent",
+    );
+  });
+
+  await check("a spent Nous refresh token is an auth failure", async () => {
+    const spent = await fetch(new URL("/portal/api/oauth/token", builtInsOrigin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-nous-refresh-token": "rt-1",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: "hermes-cli",
+      }).toString(),
+    });
+
+    assert.equal(spent.status, 400);
+    assert.equal(
+      v.parse(v.object({ error: v.string() }), await spent.json()).error,
+      "invalid_grant",
+    );
+
+    nousState.refreshToken = "rt-elsewhere";
+
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 502);
+    assert.equal((await openAiError(response)).code, "auth");
+  });
+
+  await check("a Nous credential with no refresh token is an auth failure", async () => {
+    const id = nousProvider.provider?.id ?? "";
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    for (const credential of detail.provider.credentials) {
+      const removed = await fetch(new URL(providerPaths.credential(id, credential.id), origin), {
+        method: "DELETE",
+        headers: sessionHeaders(),
+      });
+
+      assert.equal(removed.status, 200);
+    }
+
+    await postJson(providerPaths.oauthStart(id), {}, ProviderOAuthStartSchema, 200);
+    const connected = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(connected.state, "connected");
+
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 502);
+    assert.equal((await openAiError(response)).code, "auth");
   });
 
   await check("providers carry derived slugs and model refs", async () => {
@@ -2254,8 +2342,6 @@ function startKilocode() {
 }
 
 function startBuiltIns() {
-  let nousPolls = 0;
-
   return Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -2420,8 +2506,10 @@ function startBuiltIns() {
           return jsonError(400, "bad nous device code request");
         }
 
+        nousState.deviceStarts += 1;
+
         return Response.json({
-          device_code: "nous-device-1",
+          device_code: `nous-device-${String(nousState.deviceStarts)}`,
           user_code: "NOUS-CODE",
           verification_uri: "https://portal.nousresearch.com/manage-subscription",
           verification_uri_complete:
@@ -2437,15 +2525,45 @@ function startBuiltIns() {
         if (form.get("client_id") !== "hermes-cli") return jsonError(400, "bad nous client");
 
         if (form.get("grant_type") === "urn:ietf:params:oauth:grant-type:device_code") {
-          nousPolls += 1;
+          if (form.get("device_code") === "nous-device-2") {
+            return Response.json({
+              access_token: "nous-access-1",
+              token_type: "Bearer",
+              expires_in: 0,
+            });
+          }
 
-          if (nousPolls === 1) {
+          nousState.polls += 1;
+
+          if (nousState.polls === 1) {
             return Response.json({ error: "authorization_pending" }, { status: 400 });
           }
 
           return Response.json({
             access_token: "nous-access-1",
             refresh_token: "rt-1",
+            token_type: "Bearer",
+            expires_in: 0,
+          });
+        }
+
+        if (form.get("grant_type") === "refresh_token") {
+          const presented = request.headers.get("x-nous-refresh-token") ?? "";
+
+          nousState.presented.push(presented);
+
+          if (presented !== nousState.refreshToken) {
+            return Response.json({ error: "invalid_grant" }, { status: 400 });
+          }
+
+          // A slow rotation keeps a concurrent burst inside one renewal slot.
+          await Bun.sleep(400);
+
+          nousState.refreshToken = `rt-${String(nousState.presented.length + 1)}`;
+
+          return Response.json({
+            access_token: `nous-access-${String(nousState.presented.length + 1)}`,
+            refresh_token: nousState.refreshToken,
             token_type: "Bearer",
             expires_in: 0,
           });

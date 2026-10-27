@@ -86,9 +86,10 @@ POST /v1/chat/completions [1]
 A credential is decrypted per attempt, immediately before an upstream call, so
 it is in memory only for the length of that call and a tag never opens keys for
 models it does not try. A due OAuth credential is renewed first: one renewal per
-credential row, shared by every request that reaches it at once, written back
-with a compare-and-swap and, when the portal refuses, reported as `auth` so the
-chain falls through to the next credential. `GET /api/providers` returns each
+credential row in a process, shared by every request that reaches it at once,
+written back with a compare-and-swap. A lost write adopts the stored bundle; a
+refusal with no newer bundle is reported as `auth` so the chain falls through to
+the next credential. `GET /api/providers` returns each
 credential's id, label, auth mode, and priority, never the key or token. A
 device-code login keeps the device code on the server: the browser sees only the
 short user code it types at the provider's portal.
@@ -165,9 +166,12 @@ appends each in order, and, for a provider with a device login, an **OAuth** tab
 - **Nous Portal** takes no API key. Its device login stores the inference token
   with the refresh token and expiry the portal returned, and the gateway renews
   that token 120 seconds before it expires. A renewal is shared by every request
-  holding the same credential row, so a burst of traffic rotates once. A rejected
-  or impossible renewal is an `auth` failure and the chain moves on; a credential
-  saved before renewal existed has no refresh token and expires for good.
+  holding the same credential row, so a burst of traffic rotates once. If a
+  renewal fails after another process wrote a fresh token, the request uses the
+  stored one. A rejected or impossible renewal is an `auth` failure and the chain
+  moves on; a credential saved before renewal existed has no refresh token and
+  expires for good. Reconnecting replaces an expiring connection; a second, live
+  connection joins the chain.
 
 ## Analytics
 
@@ -512,7 +516,14 @@ yet.
   again the next time it reaches the front of the chain.
 - **OAuth refresh stops at Nous Portal.** Kilo Code stores its device token as
   issued; reconnect when it expires. Nous Portal rotates its token on the request
-  path, from one process only.
+  path, from one process only. If the process dies after the portal rotates the
+  token and before the row is written, the stored refresh token is spent; reconnect.
+- **Yeta prices are the default group's.** The import uses the default group's
+  ratios; `group_ratio` for another group is not applied.
+- **A catalog re-import does not reprice.** It adds new upstream models and leaves
+  prices on existing models alone.
+- **A built-in can carry a suffixed slug.** If a custom provider already owns the
+  reserved slug, the built-in keeps `<slug>-2` after the custom row is deleted.
 - **No pricing form.** Set prices through the API or import a provider catalog;
   the overview computes cost only for priced models.
 

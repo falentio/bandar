@@ -176,7 +176,9 @@ in Settings, or removed; they reappear on the next listing if deleted directly.
 Seeding is idempotent per kind. If a custom row already owns a slug that has
 since become reserved, the built-in takes the next free slug from
 `availableSlug` instead of being silently suppressed, and its name falls back the
-same way.
+same way. That fallback is assigned once: deleting the custom row does not
+restore the reserved slug. Built-ins appear in `BUILT_IN_PROVIDER_KINDS` order,
+even when one is seeded later than the rest.
 
 The distinction is about existence, not wire shape. Four built-ins speak the
 OpenAI wire, and their `index.ts` builds the shared adapter and adds only the
@@ -191,15 +193,16 @@ chain would try first:
 ```ts
 export type CatalogRequest = {
   readonly baseUrl: string;
-  readonly credential: Credential | null;
+  readonly credential: () => Promise<Credential | null>;
   readonly signal: AbortSignal;
 };
 
 export type ProviderCatalog = (request: CatalogRequest) => Promise<readonly ModelCatalogEntry[]>;
 ```
 
-The refresh route reads that credential with `readFirstCredential`, so an import
-uses the same key the first chat attempt would. `readModelIds` in
+The refresh route passes a function that calls `readFirstCredential`, so a keyed
+import uses the same key the first chat attempt would. A public catalog never
+calls it, so it never decrypts a saved credential. `readModelIds` in
 `src/server/providers/catalog.ts` is the common keyed catalog: `GET {base}/models`
 with a bearer, and a null credential is an `invalid_request` that the API answers
 as 400 ("add a key before importing the catalog"). A public catalog ignores the
@@ -219,7 +222,8 @@ leaves the models unpriced rather than failing the import:
 Yeta is a New API gateway: one ratio unit is $0.002 per 1K tokens, so a ratio is
 worth $2 per million and the output price is the input price times
 `completion_ratio`. `quota_type = 1` means per-call pricing, so those models get
-null prices; `group_ratio` is not applied. The public pricing URL defaults to
+null prices. Prices are the default group's; a key in another group pays that
+group's `group_ratio`, which the import does not apply. The public pricing URL defaults to
 `https://console.river.ai/api/public/pricing` and is overridden with
 `BANDAR_RIVER_PRICING_URL`; when that document cannot be read, River falls back
 to its keyed `/models` list with null prices. Nous Portal keeps only models whose
@@ -353,8 +357,10 @@ for Nous Portal, whose definition lists only `oauth` and whose credential routes
 reject a key with `unsupported_mode`. A built-in provider's row is seeded before
 login, so the Connection tab works on the first visit.
 
-Nous Portal's login posts `client_id=hermes-cli` and `scope=inference:invoke`
-to `/api/oauth/device/code` and polls `/api/oauth/token` with the device grant.
+The connector returns the portal's poll interval with the code, and the dashboard
+polls at that interval. Nous Portal's login posts `client_id=hermes-cli` and
+`scope=inference:invoke` to `/api/oauth/device/code` and polls
+`/api/oauth/token` with the device grant.
 A 400 `authorization_pending` or `slow_down` is a pending poll; `expired_token`
 or `access_denied` is an `invalid_request`. The token response supplies the
 access token, the rotating refresh token, and `expires_in`, which become the
@@ -370,7 +376,6 @@ A definition may carry a `CredentialRenewer` beside its connector:
 
 ```ts
 export type CredentialRenewal = {
-  readonly providerId: string;
   readonly credential: OAuthCredential;
   readonly signal: AbortSignal;
 };
@@ -396,7 +401,9 @@ credential row. Otherwise it renews once per row:
    writes it with a compare-and-swap:
    `UPDATE provider_credentials SET credential = ?, auth_mode = 'oauth' WHERE id = ? AND credential = ?`.
    A lost race falls back to the stored row; a deleted row is an `auth` error.
-4. A failed renewal throws `UpstreamError(..., "auth")`. The gateway records the
+4. If `renew` throws, it re-reads the row once. When the sealed value moved,
+   another process already renewed, so the request continues with the stored
+   credential. Otherwise the error is an `auth` failure: the gateway records the
    attempt and falls through to the next credential rather than sending a token
    the provider has already rejected.
 

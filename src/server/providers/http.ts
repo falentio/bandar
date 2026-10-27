@@ -170,7 +170,9 @@ function kindForStatus(status: number): UpstreamErrorKind {
 
   if (status === 429) return "rate_limit";
 
-  if (status === 400 || status === 404 || status === 422) return "invalid_request";
+  if (status === 404) return "not_found";
+
+  if (status === 400 || status === 422) return "invalid_request";
 
   if (status >= 500) return "unavailable";
 

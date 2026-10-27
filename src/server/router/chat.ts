@@ -402,6 +402,8 @@ function statusFor(error: UpstreamError): number {
       return 429;
     case "invalid_request":
       return 400;
+    case "not_found":
+      return 404;
     case "auth":
     case "unavailable":
     case "protocol":

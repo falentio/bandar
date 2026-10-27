@@ -59,6 +59,7 @@ export type UpstreamErrorKind =
   | "auth"
   | "rate_limit"
   | "invalid_request"
+  | "not_found"
   | "unavailable"
   | "protocol"
   | "network";

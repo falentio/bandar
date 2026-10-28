@@ -10,7 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test";
-import { DEFAULT_API_PORT } from "../../shared/topology";
 import { parseArgs } from "./args";
 import type { Env } from "./command";
 import { createCli } from "./registry";
@@ -167,6 +166,12 @@ WantedBy=multi-user.target
 `);
   });
 
+  test("a unit without a named port leaves BANDAR_PORT to config.json", () => {
+    const unit = renderUnit({ ...userOptions(), port: undefined });
+
+    expect(unit).not.toContain("BANDAR_PORT");
+  });
+
   test("a path with a space is quoted", () => {
     const unit = renderUnit({ ...userOptions(), dataDir: "/srv/bandar data" });
 
@@ -249,7 +254,7 @@ describe("planService", () => {
     expect(plan.dataDir).toBe(join(root, ".local", "share", "bandar"));
     expect(plan.databasePath).toBe(join(plan.dataDir, "bandar.db"));
     expect(plan.duckdbPath).toBe(join(plan.dataDir, "bandar.duckdb"));
-    expect(plan.port).toBe(DEFAULT_API_PORT);
+    expect(plan.port).toBeUndefined();
     expect(plan.systemctl).toEqual(["--user"]);
   });
 
@@ -297,6 +302,15 @@ describe("planService", () => {
 
     expect(plan.port).toBe(8080);
     expect(plan.binary).toBe("/usr/local/bin/bandar");
+  });
+
+  test("BANDAR_PORT in the environment pins the port", () => {
+    expect(planOf({}, { BANDAR_PORT: "8081" }).port).toBe(8081);
+  });
+
+  test("neither --port nor BANDAR_PORT names a port", () => {
+    expect(planOf().port).toBeUndefined();
+    expect(planOf({}, { BANDAR_PORT: "" }).port).toBeUndefined();
   });
 
   test("a relative --data-dir resolves against the working directory", () => {
@@ -379,6 +393,18 @@ describe("installService", () => {
     expect(unit).toContain(`WorkingDirectory=${data}`);
     expect(unit).toContain(`Environment=BANDAR_HOME=${data}`);
     expect(unit).toContain("Environment=BANDAR_PORT=8080");
+  });
+
+  test("BANDAR_PORT in the environment pins the port in the written unit", async () => {
+    await invoke("install-service", [], { env: envOf({ BANDAR_PORT: "8081" }) });
+
+    expect(readFileSync(unitPath(), "utf8")).toContain("Environment=BANDAR_PORT=8081");
+  });
+
+  test("an install that names no port leaves the line out, so config.json keeps the last word", async () => {
+    await invoke("install-service");
+
+    expect(readFileSync(unitPath(), "utf8")).not.toContain("BANDAR_PORT");
   });
 
   test("BANDAR_CONFIG_DIR moves the env file", async () => {

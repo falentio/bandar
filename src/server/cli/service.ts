@@ -28,7 +28,6 @@ const ENV_FILE_MODE = 0o600;
 const MIN_PORT = 0;
 const MAX_PORT = 65535;
 const PREFIX = "bandar: ";
-const CONFIG_ONLY_SECRET = "install-service reads the config for its paths";
 
 // A value systemd or a shell reads back verbatim: no quoting, no expansions.
 const BARE_VALUE = /^[A-Za-z0-9_%@+=:,./\\-]+$/u;
@@ -42,7 +41,7 @@ export type UnitOptions = {
   readonly dataDir: string;
   readonly databasePath: string;
   readonly duckdbPath: string;
-  readonly port: number;
+  readonly port?: number;
   readonly envFile: string;
   readonly user: string;
 };
@@ -100,6 +99,12 @@ export function renderUnit(options: UnitOptions): string {
       ? [`User=${unitValue(options.user)}`, `StateDirectory=${STATE_DIRECTORY}`]
       : [];
 
+  // A pinned port would outrank config.json forever, so the line appears only when one was named.
+  const pinnedPort =
+    options.port === undefined
+      ? []
+      : [`Environment=${unitValue(`BANDAR_PORT=${String(options.port)}`)}`];
+
   return [
     "[Unit]",
     "Description=bandar, a self-hosted LLM gateway",
@@ -112,7 +117,7 @@ export function renderUnit(options: UnitOptions): string {
     `ExecStart=${unitValue(options.binary)} serve`,
     `WorkingDirectory=${unitValue(options.dataDir)}`,
     `Environment=${unitValue(`BANDAR_HOME=${options.dataDir}`)}`,
-    `Environment=${unitValue(`BANDAR_PORT=${String(options.port)}`)}`,
+    ...pinnedPort,
     // Last, so a value in the env file overrides the one baked in here.
     `EnvironmentFile=-${unitValue(options.envFile)}`,
     "Restart=on-failure",
@@ -197,9 +202,7 @@ export function parseServiceArgs(argv: readonly string[], allowPurge: boolean): 
 }
 
 export function planService(input: ServiceInput): ServicePlan {
-  // The plan needs paths, not a session secret: the placeholder keeps parseConfig from warning
-  // about a secret that no unit file would ever hold.
-  const config = parseConfig({ BANDAR_AUTH_SECRET: CONFIG_ONLY_SECRET, ...input.env });
+  const config = parseConfig(input.env);
   const { scope } = input.flags;
   const dataDir = resolve(input.flags.dataDir ?? defaultDataDir(scope, input.env, input.home));
   const binary = resolve(input.flags.binary ?? input.execPath);
@@ -211,7 +214,7 @@ export function planService(input: ServiceInput): ServicePlan {
     dataDir,
     databasePath: join(dataDir, DATABASE_FILE),
     duckdbPath: join(dataDir, DUCKDB_FILE),
-    port: input.flags.port ?? config.port,
+    port: input.flags.port ?? namedPort(input.env),
     user: operatorUser(input.env, input.currentUser),
     envFile: join(config.configDir, ENV_FILE_NAME),
     unitDir,
@@ -445,6 +448,14 @@ function writeEnvFile(path: string, secret: string): boolean {
   setMode(path, ENV_FILE_MODE);
 
   return true;
+}
+
+// parseConfig has already rejected a BANDAR_PORT that is not a whole port in range, so this reads
+// the value back instead of parsing it again.
+function namedPort(env: Env): number | undefined {
+  const written = (env.BANDAR_PORT ?? "").trim();
+
+  return written === "" ? undefined : Number(written);
 }
 
 function defaultDataDir(scope: Scope, env: Env, home: string): string {

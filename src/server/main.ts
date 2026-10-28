@@ -1,6 +1,9 @@
 import { createApp } from "./app";
 import { createClientBundle } from "./assets";
 import { createAuth } from "./auth";
+import { parseArgs } from "./cli/args";
+import type { Env } from "./cli/command";
+import { createCli, renderUsage } from "./cli/registry";
 import { parseConfig } from "./config";
 import { openDatabase } from "./db/client";
 import { applyMigrations } from "./db/migrate";
@@ -10,10 +13,34 @@ import { applyDuckMigrations } from "./duck/migrate";
 import { duckMigrations } from "./generated/duck-migrations";
 import { clientFiles } from "./generated/client-assets";
 import { migrations } from "./generated/migrations";
+import { version } from "./generated/version";
 import { assignProviderSlugs } from "./providers/seeding";
 import { createSealer } from "./seal";
 
-export async function main(env: Record<string, string | undefined>): Promise<void> {
+export async function main(env: Env, argv: readonly string[]): Promise<number> {
+  const cli = createCli(startServer);
+  const invocation = parseArgs(argv, cli);
+
+  switch (invocation.kind) {
+    case "help":
+      console.log(renderUsage(cli));
+
+      return 0;
+    case "version":
+      console.log(version);
+
+      return 0;
+    case "invalid":
+      console.error(`bandar: ${invocation.message}`);
+      console.error(renderUsage(cli));
+
+      return 2;
+    case "command":
+      return invocation.command.run(env);
+  }
+}
+
+async function startServer(env: Env): Promise<void> {
   const config = parseConfig(env);
 
   const { sqlite, db } = openDatabase(config.databasePath);
@@ -41,4 +68,4 @@ export async function main(env: Record<string, string | undefined>): Promise<voi
   );
 }
 
-await main(Bun.env);
+process.exitCode = await main(Bun.env, Bun.argv.slice(2));

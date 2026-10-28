@@ -33,6 +33,8 @@ import {
   ProviderSchema,
   providerPaths,
   type Provider,
+  type ProviderModel,
+  type ProviderModelEditInput,
 } from "../src/shared/providers";
 import { CHARS_PER_TOKEN } from "../src/server/router/anthropic-wire";
 import { TagListSchema, tagPaths } from "../src/shared/tags";
@@ -2376,12 +2378,7 @@ try {
 
     overrideModelId = added.models.find((model) => model.alias === "override-fast")?.id ?? "";
 
-    const moved = await putJson(
-      providerPaths.model(id, overrideModelId),
-      { compat: "responses" },
-      ProviderSchema,
-      200,
-    );
+    const moved = await putModelEdit(id, overrideModelId, { compat: "responses" });
 
     const model = moved.models.find((row) => row.id === overrideModelId);
 
@@ -2408,12 +2405,7 @@ try {
     assert.equal(body.choices[0]?.message.content, "Hello from OpenAI Responses");
     assert.deepEqual(body.usage, { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 });
 
-    const cleared = await putJson(
-      providerPaths.model(id, overrideModelId),
-      { compat: null },
-      ProviderSchema,
-      200,
-    );
+    const cleared = await putModelEdit(id, overrideModelId, { compat: null });
 
     assert.equal(cleared.models.find((row) => row.id === overrideModelId)?.compat, null);
 
@@ -2429,7 +2421,10 @@ try {
   await check("a compat the provider kind does not declare is a 422", async () => {
     const id = openaiProvider.provider?.id ?? "";
 
-    const response = await put(providerPaths.model(id, overrideModelId), { compat: "genai" });
+    const response = await put(
+      providerPaths.model(id, overrideModelId),
+      modelEdit(await currentModel(id, overrideModelId), { compat: "genai" }),
+    );
 
     assert.equal(response.status, 422);
     assert.equal((await errorBody(response)).code, "validation");
@@ -2438,7 +2433,13 @@ try {
   await check("PUT a model's compat on a missing model is a 404", async () => {
     const id = openaiProvider.provider?.id ?? "";
 
-    const response = await put(providerPaths.model(id, "missing-model"), { compat: "chat" });
+    const response = await put(
+      providerPaths.model(id, "missing-model"),
+      modelEdit(await currentModel(id, overrideModelId), {
+        alias: "missing-model-alias",
+        compat: "chat",
+      }),
+    );
 
     assert.equal(response.status, 404);
   });
@@ -2461,12 +2462,7 @@ try {
       "Hello from OpenAI",
     );
 
-    const healed = await putJson(
-      providerPaths.model(id, overrideModelId),
-      { compat: null },
-      ProviderSchema,
-      200,
-    );
+    const healed = await putModelEdit(id, overrideModelId, { compat: null });
 
     assert.equal(healed.models.find((row) => row.id === overrideModelId)?.compat, null);
   });
@@ -2483,7 +2479,7 @@ try {
 
     const brokenId = added.models.find((model) => model.alias === "openai-broken")?.id ?? "";
 
-    await putJson(providerPaths.model(id, brokenId), { compat: "responses" }, ProviderSchema, 200);
+    await putModelEdit(id, brokenId, { compat: "responses" });
 
     const response = await chatRequest("openai-broken", false);
 
@@ -2507,7 +2503,7 @@ try {
 
     const brokenId = added.models.find((model) => model.alias === "openai-stream-broken")?.id ?? "";
 
-    await putJson(providerPaths.model(id, brokenId), { compat: "responses" }, ProviderSchema, 200);
+    await putModelEdit(id, brokenId, { compat: "responses" });
 
     const response = await chatRequest("openai-stream-broken", true);
 
@@ -2862,6 +2858,39 @@ async function putJson<T>(
   }
 
   return v.parse(schema, await response.json());
+}
+
+async function currentModel(providerId: string, modelId: string): Promise<ProviderModel> {
+  const { provider } = await getJson(providerPaths.detail(providerId), ProviderDetailSchema, 200);
+  const model = provider.models.find((row) => row.id === modelId);
+
+  if (model === undefined) throw new Error(`model ${modelId} is on no provider`);
+
+  return model;
+}
+
+function modelEdit(model: ProviderModel, change: Partial<ProviderModelEditInput>): Json {
+  return {
+    alias: model.alias,
+    compat: model.compat,
+    inputPricePerMtok: model.inputPricePerMtok,
+    cacheInputPricePerMtok: model.cacheInputPricePerMtok,
+    outputPricePerMtok: model.outputPricePerMtok,
+    ...change,
+  };
+}
+
+async function putModelEdit(
+  providerId: string,
+  modelId: string,
+  change: Partial<ProviderModelEditInput>,
+): Promise<Provider> {
+  return putJson(
+    providerPaths.model(providerId, modelId),
+    modelEdit(await currentModel(providerId, modelId), change),
+    ProviderSchema,
+    200,
+  );
 }
 
 function messageRequest(model: string, stream: boolean, system?: Json): Json {

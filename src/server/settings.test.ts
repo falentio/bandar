@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vite-plus/test";
-import { readSettings, settingsPath, settingsSchemaPath } from "./settings";
+import { loadSettings, settingsPath, settingsSchemaPath } from "./settings";
 import { settingsSchema } from "./settings-schema";
 
 const home = "/home/andrew/.bandar";
@@ -8,10 +8,10 @@ const path = settingsPath(home);
 
 const readerOf = (text: string) => () => text;
 
-const settingsFrom = (read: (path: string) => string): ReturnType<typeof readSettings> =>
-  readSettings(home, { read, write: () => {} });
+const settingsFrom = (read: (path: string) => string): ReturnType<typeof loadSettings> =>
+  loadSettings(home, { read, write: () => {} });
 
-const reasonOf = (result: ReturnType<typeof readSettings>): string => {
+const reasonOf = (result: ReturnType<typeof loadSettings>): string => {
   if (result.kind !== "invalid") throw new Error(`expected invalid, got ${result.kind}`);
 
   return result.reason;
@@ -176,7 +176,7 @@ describe("the schema beside the file", () => {
   const writesOf = (text: string): (readonly [string, string])[] => {
     const writes: (readonly [string, string])[] = [];
 
-    readSettings(home, {
+    loadSettings(home, {
       read: () => text,
       write: (target, body) => {
         writes.push([target, body]);
@@ -217,7 +217,7 @@ describe("the schema beside the file", () => {
   test("a missing file writes the schema and nothing else", () => {
     const writes: (readonly [string, string])[] = [];
 
-    const result = readSettings(home, {
+    const result = loadSettings(home, {
       read: missingFile,
       write: (target, body) => {
         writes.push([target, body]);
@@ -229,7 +229,7 @@ describe("the schema beside the file", () => {
   });
 
   test("an unwritable directory still reads the settings", () => {
-    const result = readSettings(home, {
+    const result = loadSettings(home, {
       read: readerOf('{"server":{"port":4000}}'),
       write: () => {
         throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });

@@ -13,7 +13,7 @@ const SOURCE_LABEL: Record<ConfigSource, string> = {
 export function register(commands: Commands): void {
   commands.add({
     name: "config",
-    summary: "print the settings file and the config it resolves",
+    summary: "write the schema beside the settings, then print the config it resolves",
     run: config,
   });
 }

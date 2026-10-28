@@ -14,7 +14,7 @@ import {
 import {
   HttpUrlSchema,
   OriginSchema,
-  readSettings,
+  loadSettings,
   type Settings,
   type SettingsIo,
 } from "./settings";
@@ -298,8 +298,9 @@ export function parseConfig(
 
 /**
  * Reads the settings file and the environment into one config, plus the path it read and where
- * each server value came from. A file that cannot be read or parsed fails the boot, because a typo
- * there would otherwise start the server on a default.
+ * each server value came from. The read writes: config.schema.json lands beside the settings, and a
+ * file without a $schema key is pointed at it. A file that cannot be read or parsed fails the boot,
+ * because a typo there would otherwise start the server on a default.
  */
 export function loadConfigReport(
   env: Record<string, string | undefined>,
@@ -308,7 +309,7 @@ export function loadConfigReport(
 ): ConfigReport {
   const home = resolveHome(env, mode);
   const environment = parseEnv(env);
-  const report = readSettings(home, io);
+  const report = loadSettings(home, io);
 
   if (report.kind === "invalid")
     throw new ConfigError([`${report.path}: ${report.reason}`], "invalid configuration");

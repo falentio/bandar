@@ -90,12 +90,12 @@ const isMissingFile = (error: unknown): error is Error =>
   error instanceof Error && "code" in error && error.code === "ENOENT";
 
 /**
- * Reads the settings through a caller-supplied io, so the caller owns the filesystem and a test can
+ * Loads the settings through a caller-supplied io, so the caller owns the filesystem and a test can
  * hand over a string. A missing file is the normal state: every setting has a default. Every result
- * names the file, so a caller reports the path it actually opened. The schema is written beside the
- * file on every read, and a file without a $schema key is pointed at it.
+ * names the file, so a caller reports the path it actually opened. Loading writes: the schema lands
+ * beside the file, and a file without a $schema key is pointed at it.
  */
-export function readSettings(home: string, io: SettingsIo): SettingsRead {
+export function loadSettings(home: string, io: SettingsIo): SettingsRead {
   const path = settingsPath(home);
 
   tryWrite(io, settingsSchemaPath(home), SETTINGS_SCHEMA_TEXT);

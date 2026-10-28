@@ -27,11 +27,13 @@ stderr: which files it wrote, and which ones it kept.
 | ------------ | -------------------------------------------------------------------- |
 | `--scope`    | `user`                                                               |
 | `--data-dir` | `~/.local/share/bandar` for user scope, `/var/lib/bandar` for system |
-| `--port`     | `BANDAR_PORT`, else 3000                                             |
+| `--port`     | none: the unit pins no port, and `serve` reads `config.json`         |
 | `--binary`   | the executable running the command                                   |
 
-Defaults for the port and the data directory come from the same parser `bandar serve` reads, so a
-`BANDAR_PORT` or `BANDAR_HOME` in the shell lands in the unit.
+The data directory comes from `--data-dir`, else `XDG_DATA_HOME` or `~/.local/share/bandar` for
+user scope and `/var/lib/bandar` for system scope. The unit pins a port only when `--port` names
+one, so a port in `config.json` is picked up on the next start. A `BANDAR_PORT` in the shell is not
+written into the unit; `serve` reads it at start, where it still wins over the file.
 
 ## What the unit holds
 
@@ -47,7 +49,6 @@ Type=simple
 ExecStart=/home/andrew/.local/bin/bandar serve
 WorkingDirectory=/home/andrew/.local/share/bandar
 Environment=BANDAR_HOME=/home/andrew/.local/share/bandar
-Environment=BANDAR_PORT=3000
 EnvironmentFile=-/home/andrew/.config/bandar/bandar.env
 Restart=on-failure
 RestartSec=5
@@ -58,6 +59,8 @@ WantedBy=default.target
 
 The unit points the binary at its data directory through `BANDAR_HOME`, so the databases land there
 whatever directory systemd happens to start in, and `--data-dir` moves both files with the unit.
+`config.json` sits in that same directory: the service reads `<data dir>/config.json`, and the
+install prints the path it will read.
 
 The install creates every directory the unit names: the unit directory, the data directory, and
 the config directory that holds the env file. `WorkingDirectory=` is not optional to systemd — a

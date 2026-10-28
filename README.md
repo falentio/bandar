@@ -140,3 +140,40 @@ rm -rf ~/.config/bandar ~/.bandar ~/.bandar_dev
 Read [`docs/install.md`](./docs/install.md) for the installer in full, [`docs/update.md`](./docs/update.md)
 for updates, and [`docs/service.md`](./docs/service.md) for the service unit. To point a
 coding CLI at the gateway, read [`docs/cli-tools.md`](./docs/cli-tools.md).
+
+## Configuration
+
+`bandar` reads `config.json` from `BANDAR_HOME` on every start. A missing file means
+the defaults. An installed binary reads `~/.bandar/config.json` and a source checkout
+reads `~/.bandar_dev/config.json`. A service unit moves `BANDAR_HOME` to its data
+directory, so the service reads `<data dir>/config.json`:
+`~/.local/share/bandar/config.json` for a user unit and `/var/lib/bandar/config.json`
+for a system one.
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000
+  }
+}
+```
+
+| key           | value                      | default   |
+| ------------- | -------------------------- | --------- |
+| `server.host` | a non-empty string         | `0.0.0.0` |
+| `server.port` | an integer from 0 to 65535 | `3000`    |
+
+Both keys are optional, and so is the `server` section. The file is strict: an unknown
+key, a root that is not a JSON object, an empty host, a port that is not a whole number
+in range, and a file that is not JSON all fail the boot, and the message names the file
+and the field. A typo never falls back to a default.
+
+An environment variable wins over the file, and the file wins over the default. A blank
+environment variable counts as unset. The dev proxy in `vite.config.ts` takes the API port
+from `BANDAR_PORT` rather than the file, so set that variable too when you change
+`server.port` and run `bun run dev`.
+
+`bandar` reads the file on every start, so a restart applies an edit. A service unit
+outranks the file only when `bandar install-service` was given `--port`. Read
+[`docs/service.md`](./docs/service.md) for the unit.

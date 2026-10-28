@@ -49,4 +49,35 @@ describe("config", () => {
       expect(attempt).toThrow("BANDAR_CONFIG_DIR: must be an absolute path");
     }
   });
+  test("BANDAR_HOME defaults the databases under the home directory", () => {
+    const config = parseConfig({});
+
+    expect(config.databasePath).toBe(join(homedir(), ".bandar", "bandar.db"));
+    expect(config.duckdbPath).toBe(join(homedir(), ".bandar", "bandar.duckdb"));
+  });
+
+  test("BANDAR_HOME moves both databases", () => {
+    const config = parseConfig({ BANDAR_HOME: "/srv/bandar" });
+
+    expect(config.databasePath).toBe("/srv/bandar/bandar.db");
+    expect(config.duckdbPath).toBe("/srv/bandar/bandar.duckdb");
+  });
+
+  test("a relative BANDAR_DB lands inside BANDAR_HOME, an absolute one is kept", () => {
+    expect(parseConfig({ BANDAR_HOME: "/srv/bandar", BANDAR_DB: "other.db" }).databasePath).toBe(
+      "/srv/bandar/other.db",
+    );
+    expect(parseConfig({ BANDAR_HOME: "/srv/bandar", BANDAR_DB: "/data/x.db" }).databasePath).toBe(
+      "/data/x.db",
+    );
+  });
+
+  test("a blank or relative BANDAR_HOME fails at boot", () => {
+    for (const value of ["", "srv/bandar", ".bandar"]) {
+      const attempt = () => parseConfig({ BANDAR_HOME: value });
+
+      expect(attempt).toThrow(ConfigError);
+      expect(attempt).toThrow("BANDAR_HOME: must be an absolute path");
+    }
+  });
 });

@@ -57,10 +57,9 @@ RestartSec=5
 WantedBy=default.target
 ```
 
-bandar creates its SQLite and DuckDB files beside its working directory, so the working directory
-and both database paths are written out in full instead of left to whichever directory systemd
-happens to start in. A `BANDAR_DB` or `BANDAR_DUCKDB` that is already absolute is kept as it is;
-a relative one is placed under the data directory.
+The unit names both database paths in full instead of leaving them to whichever directory systemd
+happens to start in. A `BANDAR_DB` or `BANDAR_DUCKDB` keeps only its file name: the unit puts that
+name under the data directory, so `--data-dir` moves both files with the unit.
 
 The install creates every directory the unit names: the unit directory, the data directory, and
 the config directory that holds the env file. `WorkingDirectory=` is not optional to systemd — a

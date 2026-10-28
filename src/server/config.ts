@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_API_PORT, DEFAULT_WEB_PORT } from "../shared/topology";
 
@@ -34,6 +34,8 @@ const ProviderUrlSchema = v.pipe(v.string(), v.trim(), v.url());
 
 const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "bandar");
 
+const DEFAULT_HOME_DIR = join(homedir(), ".bandar");
+
 // v.optional validates its default against the input type, so the port default is the string form.
 const ConfigSchema = v.object({
   BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1)), "0.0.0.0"),
@@ -48,8 +50,9 @@ const ConfigSchema = v.object({
     ),
     String(DEFAULT_API_PORT),
   ),
-  BANDAR_DB: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1)), "./bandar.db"),
-  BANDAR_DUCKDB: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1)), "./bandar.duckdb"),
+  BANDAR_HOME: v.pipe(v.string(), v.trim(), v.check(isAbsolute, "must be an absolute path")),
+  BANDAR_DB: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
+  BANDAR_DUCKDB: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   BANDAR_CONFIG_DIR: v.optional(
     v.pipe(v.string(), v.trim(), v.check(isAbsolute, "must be an absolute path")),
     DEFAULT_CONFIG_DIR,
@@ -74,13 +77,20 @@ const ConfigSchema = v.object({
 });
 
 export function parseConfig(env: Record<string, string | undefined>): Config {
-  // A blank value means "unset" for every variable but BANDAR_CONFIG_DIR: install.sh writes its
-  // manifest under the directory it was given, so a blank one has to fail, not fall back.
+  // A blank value means "unset" for every variable but the two directories: install.sh writes its
+  // manifest under the config directory it was given, and a blank home would move the databases to
+  // the working directory, so a blank one has to fail, not fall back.
   const given = Object.fromEntries(
     Object.entries(env).filter(
-      ([name, value]) => value !== undefined && (value !== "" || name === "BANDAR_CONFIG_DIR"),
+      ([name, value]) =>
+        value !== undefined &&
+        (value !== "" || name === "BANDAR_CONFIG_DIR" || name === "BANDAR_HOME"),
     ),
   );
+
+  // Filled in here rather than as a schema default: v.optional checks its default against the
+  // input type, so a default that went through trim and check would fail on the leading space.
+  given.BANDAR_HOME ??= DEFAULT_HOME_DIR;
 
   const parsed = v.safeParse(ConfigSchema, given);
 
@@ -105,8 +115,8 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   return {
     host: values.BANDAR_HOST,
     port: values.BANDAR_PORT,
-    databasePath: values.BANDAR_DB,
-    duckdbPath: values.BANDAR_DUCKDB,
+    databasePath: resolve(values.BANDAR_HOME, values.BANDAR_DB ?? "bandar.db"),
+    duckdbPath: resolve(values.BANDAR_HOME, values.BANDAR_DUCKDB ?? "bandar.duckdb"),
     configDir: values.BANDAR_CONFIG_DIR,
     authUrl: values.BANDAR_AUTH_URL ?? `http://localhost:${values.BANDAR_PORT}`,
     authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),

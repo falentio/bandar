@@ -44,6 +44,7 @@ const oneLine = (text: string): string => text.replace(/\s+/gu, " ").trim();
 export function renderReport(report: ConfigReport): readonly string[] {
   const rows: readonly (readonly [string, string])[] = [
     ["settings", `${report.settingsPath} (${report.settingsFound ? "found" : "missing"})`],
+    ["mode", report.mode],
     ["server.host", `${report.config.host} (${SOURCE_LABEL[report.sources.host]})`],
     ["server.port", `${String(report.config.port)} (${SOURCE_LABEL[report.sources.port]})`],
     ["server.authUrl", `${report.config.authUrl} (${SOURCE_LABEL[report.sources.authUrl]})`],

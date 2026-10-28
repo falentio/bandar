@@ -197,6 +197,7 @@ Run `bandar config` to print the file it read and where each value came from:
 
 ```text
 settings        /home/andrew/.bandar/config.json (found)
+mode            development
 server.host     0.0.0.0 (default)
 server.port     4100 (config.json)
 server.authUrl  https://llm.example.com (config.json)

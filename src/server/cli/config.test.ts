@@ -84,7 +84,11 @@ describe("the config command", () => {
 
     expect(code).toBe(0);
     expect(stderr).toEqual([]);
-    expect(stdout).toHaveLength(5);
+    expect(stdout).toHaveLength(6);
+
+    const printed = lineOf(stdout, "mode").replace(/^mode\s+/u, "");
+
+    expect(["development", "production"]).toContain(printed);
 
     const settings = lineOf(stdout, "settings");
 
@@ -104,7 +108,13 @@ describe("the config command", () => {
     const origins = lineOf(stdout, "trustedOrigins");
 
     expect(origins).toContain(`http://localhost:${String(DEFAULT_API_PORT)}`);
-    expect(origins).toContain(`http://127.0.0.1:${String(DEFAULT_WEB_PORT)}`);
+    expect(origins).toContain(`http://127.0.0.1:${String(DEFAULT_API_PORT)}`);
+    expect(origins.includes(`http://localhost:${String(DEFAULT_WEB_PORT)}`)).toBe(
+      printed === "development",
+    );
+    expect(origins.includes(`http://127.0.0.1:${String(DEFAULT_WEB_PORT)}`)).toBe(
+      printed === "development",
+    );
     expect(origins.endsWith("(default)")).toBe(true);
   });
 

@@ -9,7 +9,10 @@ import {
   type CliToolId,
   type CliToolStatus,
 } from "@/shared/cli-tools";
+import { modelChoices } from "../model-options";
 import { useApiKeys } from "../use-api-keys";
+import { useProviders } from "../use-providers";
+import { useTags } from "../use-tags";
 
 const STATUS_LABEL: Record<CliToolStatus["status"], string> = {
   ready: "Ready",
@@ -51,11 +54,20 @@ export function KeyAndModelCard({
   children: (input: CliRenderInput) => ReactNode;
 }) {
   const apiKeys = useApiKeys();
+  const providers = useProviders();
+  const tags = useTags();
   const [pastedKey, setPastedKey] = useState("");
   const [model, setModel] = useState("");
 
   const key = apiKeys.created ?? pastedKey;
   const input = renderInput(origin, model, key);
+  const choices = modelChoices(providers.providers, tags.tags);
+
+  const empty =
+    providers.status === "ready" &&
+    tags.status === "ready" &&
+    choices.tags.length === 0 &&
+    choices.providers.length === 0;
 
   return (
     <>
@@ -63,8 +75,8 @@ export function KeyAndModelCard({
         <CardHeader>
           <CardTitle>Key and model</CardTitle>
           <CardDescription>
-            Create a key for this tool, or paste one you already have. The model ref is an alias, a
-            provider ref, or a tag ref that bandar resolves.
+            Create a key for this tool, or paste one you already have. Pick a tag or a model. Its
+            ref goes into the config.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -80,16 +92,50 @@ export function KeyAndModelCard({
                 placeholder="bandar_..."
               />
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-muted-foreground">Model ref</span>
-              <Input
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="sonnet"
-              />
-            </label>
+            <div className="flex flex-col gap-1">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">Model ref</span>
+                <select
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  disabled={providers.pending || tags.pending}
+                  className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm transition-colors duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <option value="">Select a model</option>
+                  {choices.tags.length === 0 ? null : (
+                    <optgroup label="Tags">
+                      {choices.tags.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {choices.providers.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
+              {empty ? (
+                <p className="text-xs text-muted-foreground">
+                  No models yet.{" "}
+                  <Link to="/providers" className="underline underline-offset-4">
+                    Add a provider
+                  </Link>{" "}
+                  or{" "}
+                  <Link to="/tags" className="underline underline-offset-4">
+                    build a tag
+                  </Link>{" "}
+                  first.
+                </p>
+              ) : null}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">

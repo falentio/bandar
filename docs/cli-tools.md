@@ -32,6 +32,8 @@ Every tool below needs the ref bandar resolves, not the vendor model name. Three
 
 Claude Code asks for `claude-sonnet-4-6` unless you set `ANTHROPIC_MODEL`. That name will not resolve unless a model carries it as an alias, so set the variable.
 
+On each setup page the model ref is a picker. It lists tags first, then each provider's models.
+
 ## Secret rules
 
 These hold for every tool on the page. The snippets enforce the first one and a test checks it.

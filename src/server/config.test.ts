@@ -58,6 +58,14 @@ describe("config", () => {
     expect(config.port).toBeGreaterThan(0);
   });
 
+  test("a non-http BANDAR_AUTH_URL fails at boot", () => {
+    const attempt = () => parseConfig({ BANDAR_AUTH_URL: "javascript:alert(1)" });
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("BANDAR_AUTH_URL");
+    expect(attempt).toThrow("must be an http or https URL");
+  });
+
   test("BANDAR_CONFIG_DIR defaults under the home directory", () => {
     expect(parseConfig({}).configDir).toBe(join(homedir(), ".config", "bandar"));
   });

@@ -85,6 +85,17 @@ describe("settings", () => {
     }
   });
 
+  test("an auth URL must be http or https", () => {
+    for (const authUrl of ["javascript:alert(1)", "ftp://llm.example.com", "file:///srv/auth"]) {
+      const reason = reasonOf(
+        readSettings(home, readerOf(`{"server":{"authUrl":${JSON.stringify(authUrl)}}}`)),
+      );
+
+      expect(reason).toContain("server.authUrl");
+      expect(reason).toContain("must be an http or https URL");
+    }
+  });
+
   test("a trusted origin stores as its URL origin", () => {
     expect(
       readSettings(home, readerOf('{"server":{"trustedOrigins":["https://X.COM/"]}}')),

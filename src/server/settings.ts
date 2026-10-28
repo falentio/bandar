@@ -8,10 +8,23 @@ const SETTINGS_FILE = "config.json";
 // of naming the typo. This runs before strictObject, which only sees the keys it copies.
 const notAnArray = v.custom((value) => !Array.isArray(value), "must hold an object");
 
-const UrlSchema = v.pipe(v.string(), v.trim(), v.url());
+const isWebUrl = (value: string): boolean => {
+  if (!URL.canParse(value)) return false;
 
-// v.url records its issue and still runs the next action, so this check must not throw on a value
-// v.url already rejected.
+  const { protocol } = new URL(value);
+
+  return protocol === "http:" || protocol === "https:";
+};
+
+// An auth URL carries a path, so it stops here. v.url records its issue and still runs the next
+// action, so a check after it must not throw on a value v.url already rejected.
+export const HttpUrlSchema = v.pipe(
+  v.string(),
+  v.trim(),
+  v.url(),
+  v.check(isWebUrl, "must be an http or https URL"),
+);
+
 const isOrigin = (value: string): boolean => {
   if (!URL.canParse(value)) return false;
 
@@ -27,9 +40,10 @@ const isOrigin = (value: string): boolean => {
 };
 
 // A browser compares an origin by scheme, host, and port, so the stored form is the URL's own
-// origin: HTTPS://X.COM/ becomes https://x.com.
-const OriginSchema = v.pipe(
-  UrlSchema,
+// origin: HTTPS://X.COM/ becomes https://x.com. The environment reads its list through this schema
+// too, so a trailing slash cannot reach the browser check.
+export const OriginSchema = v.pipe(
+  HttpUrlSchema,
   v.check(isOrigin, "must be an origin such as https://llm.example.com, with no path"),
   v.transform((value) => new URL(value).origin),
 );
@@ -39,7 +53,7 @@ const ServerSettingsSchema = v.pipe(
   v.strictObject({
     host: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
     port: v.optional(v.pipe(v.number(), v.integer(), v.minValue(MIN_PORT), v.maxValue(MAX_PORT))),
-    authUrl: v.optional(UrlSchema),
+    authUrl: v.optional(HttpUrlSchema),
     trustedOrigins: v.optional(
       v.pipe(v.array(OriginSchema), v.minLength(1, "needs at least one origin")),
     ),

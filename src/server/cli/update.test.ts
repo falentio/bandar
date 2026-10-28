@@ -14,16 +14,19 @@ import { afterAll, describe, expect, test } from "vite-plus/test";
 import { Commands } from "./command";
 import { detectInstall } from "./install-source";
 import {
-  apiBase,
   assetHostAllowed,
   compareVersions,
   githubToken,
-  latestReleaseUrl,
+  latestTagUrl,
   parseChecksum,
   parseUpdateFlags,
   register,
+  releaseApiUrl,
+  releaseAssetUrl,
   releaseNames,
+  releaseWebUrl,
   runUpdate,
+  versionFromTagLocation,
   type HttpSend,
   type UpdateRun,
 } from "./update";
@@ -54,7 +57,11 @@ const sha256 = (bytes: Uint8Array): string => {
   return hasher.digest("hex");
 };
 
-const token = "stub-token";
+const TOKEN = "stub-token";
+
+const WEB = "https://web.test/falentio/bandar";
+const API_FEED = "https://api.test/releases/latest";
+const TAG_PAGE = latestTagUrl(WEB);
 
 const fileReader =
   (files: ReadonlyMap<string, string>) =>
@@ -93,23 +100,55 @@ const fixtureOf = (source: string | null): Fixture => {
 
   if (source !== null) writeFileSync(join(configDir, "install.json"), manifestText(source, target));
 
-  return {
-    directory,
-    configDir,
-    target,
-    env: { BANDAR_CONFIG_DIR: configDir, BANDAR_GITHUB_TOKEN: token },
-  };
+  return { directory, configDir, target, env: { BANDAR_CONFIG_DIR: configDir } };
 };
 
 type ServeOptions = {
   readonly version: string;
   readonly bytes: Uint8Array;
   readonly checksum?: string;
-  readonly status?: number;
+  readonly tagStatus?: number;
+  readonly location?: string | null;
+  readonly assetStatus?: number;
   readonly assets?: readonly { readonly name: string; readonly url: string }[];
 };
 
-const releaseOf = (options: ServeOptions, platform: string): string => {
+const tagLocation = (version: string): string =>
+  `https://web.test/falentio/bandar/releases/tag/v${version}`;
+
+/** The anonymous flow: a redirect from the release page, then two asset downloads. */
+const publicServing = (options: ServeOptions, platform = "linux"): HttpSend => {
+  const names = releaseNames(options.version, platform, "x64");
+
+  return async (url) => {
+    if (url === TAG_PAGE) {
+      const status = options.tagStatus ?? 302;
+
+      if (status !== 302) return { status, body: new Uint8Array() };
+
+      return {
+        status,
+        body: new Uint8Array(),
+        location: options.location === undefined ? tagLocation(options.version) : options.location,
+      };
+    }
+
+    if (names === null) return { status: 404, body: new Uint8Array() };
+
+    if (url === releaseAssetUrl(WEB, options.version, names.asset))
+      return { status: options.assetStatus ?? 200, body: options.bytes };
+
+    if (url === releaseAssetUrl(WEB, options.version, names.checksum)) {
+      const digest = options.checksum ?? sha256(options.bytes);
+
+      return { status: 200, body: encode(`${digest}  ${names.asset}\n`) };
+    }
+
+    return { status: 404, body: new Uint8Array() };
+  };
+};
+
+const apiRelease = (options: ServeOptions, platform: string): string => {
   const names = releaseNames(options.version, platform, "x64");
 
   if (names === null) throw new Error("the fixture platform has no asset");
@@ -123,7 +162,36 @@ const releaseOf = (options: ServeOptions, platform: string): string => {
   });
 };
 
-type Request = { readonly url: string; readonly accept: string | undefined };
+/** The private-fork flow: one JSON feed carrying the asset urls that need the token. */
+const apiServing = (options: ServeOptions, platform = "linux"): HttpSend => {
+  const names = releaseNames(options.version, platform, "x64");
+
+  return async (url) => {
+    if (url === API_FEED)
+      return { status: options.tagStatus ?? 200, body: encode(apiRelease(options, platform)) };
+
+    if (names !== null && url === `https://api.test/assets/${names.asset}`)
+      return { status: options.assetStatus ?? 200, body: options.bytes };
+
+    if (names !== null && url === `https://api.test/assets/${names.checksum}`) {
+      const digest = options.checksum ?? sha256(options.bytes);
+
+      return { status: 200, body: encode(`${digest}  ${names.asset}\n`) };
+    }
+
+    return { status: 404, body: new Uint8Array() };
+  };
+};
+
+const PUBLIC_ENV = { BANDAR_RELEASE_WEB_URL: WEB };
+const API_ENV = { BANDAR_RELEASE_API_URL: API_FEED, BANDAR_GITHUB_TOKEN: TOKEN };
+
+type Request = {
+  readonly url: string;
+  readonly accept: string | undefined;
+  readonly authorization: string | undefined;
+  readonly redirect: "follow" | "manual";
+};
 
 type Recorded = {
   readonly run: UpdateRun;
@@ -147,10 +215,10 @@ const runOf = (fixture: Fixture, options: RunOptions): Recorded => {
   const requests: Request[] = [];
   const send: HttpSend = options.send ?? (async () => ({ status: 404, body: new Uint8Array() }));
 
-  const recording: HttpSend = async (url, headers) => {
-    requests.push({ url, accept: headers.Accept });
+  const recording: HttpSend = async (url, headers, redirect = "follow") => {
+    requests.push({ url, accept: headers.Accept, authorization: headers.Authorization, redirect });
 
-    return send(url, headers);
+    return send(url, headers, redirect);
   };
 
   return {
@@ -171,32 +239,11 @@ const runOf = (fixture: Fixture, options: RunOptions): Recorded => {
   };
 };
 
-const serving = (options: ServeOptions, platform = "linux"): HttpSend => {
-  const names = releaseNames(options.version, platform, "x64");
-
-  return async (url) => {
-    if (url === latestReleaseUrl("https://api.test")) {
-      return { status: options.status ?? 200, body: encode(releaseOf(options, platform)) };
-    }
-
-    if (names !== null && url === `https://api.test/assets/${names.asset}`) {
-      return { status: 200, body: options.bytes };
-    }
-
-    if (names !== null && url === `https://api.test/assets/${names.checksum}`) {
-      const digest = options.checksum ?? sha256(options.bytes);
-
-      return { status: 200, body: encode(`${digest}  ${names.asset}\n`) };
-    }
-
-    return { status: 404, body: new Uint8Array() };
-  };
-};
-
-const API_ENV = { BANDAR_UPDATE_URL: "https://api.test" };
-
 const tempFilesIn = (directory: string): readonly string[] =>
   readdirSync(directory).filter((entry) => entry.endsWith(".tmp"));
+
+const authorizations = (requests: readonly Request[]): readonly (string | undefined)[] =>
+  requests.map((request) => request.authorization);
 
 describe("install source", () => {
   test("a missing install.json is an unknown source", () => {
@@ -329,22 +376,61 @@ describe("versions and assets", () => {
     expect(githubToken({ BANDAR_GITHUB_TOKEN: "  ", GITHUB_TOKEN: "third" })).toBe("third");
   });
 
-  test("BANDAR_UPDATE_URL replaces the API base", () => {
-    expect(apiBase({})).toBe("https://api.github.com");
-    expect(apiBase({ BANDAR_UPDATE_URL: "" })).toBe("https://api.github.com");
-    expect(latestReleaseUrl("http://127.0.0.1:8080")).toBe(
-      "http://127.0.0.1:8080/repos/falentio/bandar/releases/latest",
+  test("the public download reads github.com unless an override names another origin", () => {
+    expect(releaseWebUrl({})).toBe("https://github.com/falentio/bandar");
+    expect(releaseWebUrl({ BANDAR_RELEASE_WEB_URL: "" })).toBe(
+      "https://github.com/falentio/bandar",
     );
-    expect(latestReleaseUrl("http://127.0.0.1:8080/")).toBe(
-      "http://127.0.0.1:8080/repos/falentio/bandar/releases/latest",
+    expect(releaseWebUrl({ BANDAR_RELEASE_WEB_URL: ` http://127.0.0.1:8080/bandar ` })).toBe(
+      "http://127.0.0.1:8080/bandar",
     );
+    expect(latestTagUrl("http://127.0.0.1:8080/bandar")).toBe(
+      "http://127.0.0.1:8080/bandar/releases/latest",
+    );
+    expect(latestTagUrl("http://127.0.0.1:8080/bandar/")).toBe(
+      "http://127.0.0.1:8080/bandar/releases/latest",
+    );
+    expect(
+      releaseAssetUrl("http://127.0.0.1:8080/bandar/", "0.2.0", "bandar-0.2.0-linux-x64"),
+    ).toBe("http://127.0.0.1:8080/bandar/releases/download/v0.2.0/bandar-0.2.0-linux-x64");
   });
 
-  test("an asset url must stay on a trusted host or the configured base", () => {
+  test("only BANDAR_RELEASE_API_URL opts into the API feed", () => {
+    expect(releaseApiUrl({})).toBeNull();
+    expect(releaseApiUrl({ BANDAR_RELEASE_API_URL: "" })).toBeNull();
+    expect(releaseApiUrl({ BANDAR_RELEASE_API_URL: "  " })).toBeNull();
+    expect(releaseApiUrl({ BANDAR_RELEASE_API_URL: API_FEED })).toBe(API_FEED);
+  });
+
+  test("the latest tag comes from the redirect Location", () => {
+    const requested = latestTagUrl(WEB);
+
+    expect(versionFromTagLocation(tagLocation("0.2.0"), requested)).toBe("0.2.0");
+    expect(versionFromTagLocation("/falentio/bandar/releases/tag/v0.2.0", requested)).toBe("0.2.0");
+    expect(
+      versionFromTagLocation("https://github.com/falentio/bandar/releases/tag/0.2.0", requested),
+    ).toBe("0.2.0");
+    expect(
+      versionFromTagLocation("https://web.test/falentio/bandar/releases/tag/v0.2.0/", requested),
+    ).toBe("0.2.0");
+    expect(
+      versionFromTagLocation("https://web.test/falentio/bandar/releases", requested),
+    ).toBeNull();
+    expect(
+      versionFromTagLocation("https://web.test/falentio/bandar/releases/tag/nightly", requested),
+    ).toBeNull();
+    expect(versionFromTagLocation("", requested)).toBeNull();
+    expect(versionFromTagLocation(null, requested)).toBeNull();
+    expect(versionFromTagLocation(undefined, requested)).toBeNull();
+  });
+
+  test("the public asset hosts are trusted, and an unknown host is not", () => {
     expect(assetHostAllowed("https://api.github.com/x", "https://api.github.com")).toBe(true);
     expect(assetHostAllowed("https://github.com/x", "https://api.github.com")).toBe(true);
-    expect(assetHostAllowed("https://api.test/assets/x", "https://api.test")).toBe(true);
-    expect(assetHostAllowed("https://evil.test/x", "https://api.test")).toBe(false);
+    expect(assetHostAllowed("https://release-assets.githubusercontent.com/x", API_FEED)).toBe(true);
+    expect(assetHostAllowed("https://objects.githubusercontent.com/x", API_FEED)).toBe(true);
+    expect(assetHostAllowed("https://api.test/assets/x", API_FEED)).toBe(true);
+    expect(assetHostAllowed("https://evil.test/x", API_FEED)).toBe(false);
     expect(assetHostAllowed("https://api.github.com.evil.test/x", "https://api.github.com")).toBe(
       false,
     );
@@ -358,37 +444,73 @@ describe("versions and assets", () => {
 });
 
 describe("update --check", () => {
-  test("an older installed version is update-available", async () => {
+  test("the anonymous flow reports an available update without a token", async () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      env: PUBLIC_ENV,
       argv: ["--check"],
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(0);
     expect(recorded.lines).toEqual(["installed 0.1.0", "latest 0.2.0", "update-available"]);
+    expect(recorded.errors).toEqual([]);
+    expect(authorizations(recorded.requests)).toEqual([undefined]);
+    expect(recorded.requests[0]?.redirect).toBe("manual");
   });
 
   test("the same version is up-to-date", async () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      env: PUBLIC_ENV,
       argv: ["--check"],
-      send: serving({ version: "0.1.0", bytes: encode("new") }),
+      send: publicServing({ version: "0.1.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(0);
     expect(recorded.lines).toEqual(["installed 0.1.0", "latest 0.1.0", "up-to-date"]);
   });
 
-  test("an unreachable feed reports unknown and exits 1", async () => {
+  test("a release page that does not redirect exits 1", async () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      env: PUBLIC_ENV,
+      argv: ["--check"],
+      send: publicServing({ version: "0.2.0", bytes: encode("new"), tagStatus: 500 }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
+    expect(recorded.errors).toEqual([
+      "bandar: the release page answered HTTP 500, not a redirect to the latest tag",
+    ]);
+  });
+
+  test("a redirect that is not a version tag exits 1", async () => {
+    const fixture = fixtureOf(null);
+
+    const recorded = runOf(fixture, {
+      env: PUBLIC_ENV,
+      argv: ["--check"],
+      send: publicServing({
+        version: "0.2.0",
+        bytes: encode("new"),
+        location: "https://web.test/falentio/bandar/releases",
+      }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.errors[0]).toContain("which is not a version tag");
+  });
+
+  test("an unreachable release page reports unknown and exits 1", async () => {
+    const fixture = fixtureOf(null);
+
+    const recorded = runOf(fixture, {
+      env: PUBLIC_ENV,
       argv: ["--check"],
       send: async () => {
         throw new Error("connect ECONNREFUSED");
@@ -402,23 +524,58 @@ describe("update --check", () => {
     ]);
   });
 
-  test("a feed that answers HTTP 500 exits 1", async () => {
+  test("a repository with no release reports unknown and exits 0", async () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      env: PUBLIC_ENV,
       argv: ["--check"],
-      send: async () => ({ status: 500, body: new Uint8Array() }),
+      send: async () => ({ status: 404, body: new Uint8Array() }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
+  });
+
+  test("the API override without a token names the variable and sends nothing", async () => {
+    const fixture = fixtureOf(null);
+
+    const recorded = runOf(fixture, {
+      env: {
+        BANDAR_CONFIG_DIR: fixture.configDir,
+        BANDAR_RELEASE_API_URL: API_FEED,
+        BANDAR_GITHUB_TOKEN: undefined,
+        GH_TOKEN: undefined,
+        GITHUB_TOKEN: undefined,
+      },
+      argv: ["--check"],
+      send: apiServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
     expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
     expect(recorded.errors).toEqual([
-      "bandar: could not read the release feed: the release feed answered HTTP 500",
+      "bandar: BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN",
     ]);
+    expect(recorded.requests).toEqual([]);
   });
 
-  test("a malformed release body exits 1", async () => {
+  test("the API override with a token reports the feed version", async () => {
+    const fixture = fixtureOf(null);
+
+    const recorded = runOf(fixture, {
+      env: API_ENV,
+      argv: ["--check"],
+      send: apiServing({ version: "0.2.0", bytes: encode("new") }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(recorded.lines).toEqual(["installed 0.1.0", "latest 0.2.0", "update-available"]);
+    expect(authorizations(recorded.requests)).toEqual([`Bearer ${TOKEN}`]);
+    expect(recorded.requests[0]?.url).toBe(API_FEED);
+  });
+
+  test("a malformed API body exits 1", async () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
@@ -429,62 +586,54 @@ describe("update --check", () => {
 
     expect(await runUpdate(recorded.run)).toBe(1);
     expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
-    expect(recorded.errors[0]).toContain("could not read the release feed");
+    expect(recorded.errors[0]).toContain("the release feed sent an unexpected body");
   });
 
-  test("a repository with no release reports unknown and exits 0", async () => {
+  test("an API feed that answers HTTP 500 exits 1", async () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
       env: API_ENV,
       argv: ["--check"],
-      send: async () => ({ status: 404, body: new Uint8Array() }),
-    });
-
-    expect(await runUpdate(recorded.run)).toBe(0);
-    expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
-  });
-
-  test("a missing token names the variable and exits 1 without a request", async () => {
-    const fixture = fixtureOf(null);
-
-    const recorded = runOf(fixture, {
-      env: {
-        BANDAR_CONFIG_DIR: fixture.configDir,
-        BANDAR_GITHUB_TOKEN: undefined,
-        GH_TOKEN: undefined,
-        GITHUB_TOKEN: undefined,
-      },
-      argv: ["--check"],
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      send: async () => ({ status: 500, body: new Uint8Array() }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
-    expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
-    expect(recorded.errors).toEqual([
-      "bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN",
-    ]);
-    expect(recorded.requests).toEqual([]);
+    expect(recorded.errors).toEqual(["bandar: the release feed answered HTTP 500"]);
   });
 });
 
 describe("bandar update", () => {
-  test("an install-script copy is replaced with the verified release", async () => {
+  test("an anonymous install-script copy is replaced with the verified release", async () => {
     const fixture = fixtureOf("install-script");
     const bytes = encode("new binary payload");
-    const recorded = runOf(fixture, { env: API_ENV, send: serving({ version: "0.2.0", bytes }) });
+
+    const recorded = runOf(fixture, {
+      env: PUBLIC_ENV,
+      send: publicServing({ version: "0.2.0", bytes }),
+    });
 
     expect(await runUpdate(recorded.run)).toBe(0);
     expect(recorded.lines).toEqual([`bandar 0.2.0 installed at ${fixture.target}`]);
     expect(decode(readFileSync(fixture.target))).toBe("new binary payload");
     expect(statSync(fixture.target).mode & 0o777).toBe(0o755);
     expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
+    expect(authorizations(recorded.requests)).toEqual([undefined, undefined, undefined]);
+    expect(recorded.requests.map((request) => request.url)).toEqual([
+      TAG_PAGE,
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64"),
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.sha256"),
+    ]);
   });
 
   test("a manual copy may be replaced too", async () => {
     const fixture = fixtureOf("manual");
     const bytes = encode("new binary payload");
-    const recorded = runOf(fixture, { env: API_ENV, send: serving({ version: "0.2.0", bytes }) });
+
+    const recorded = runOf(fixture, {
+      env: PUBLIC_ENV,
+      send: publicServing({ version: "0.2.0", bytes }),
+    });
 
     expect(await runUpdate(recorded.run)).toBe(0);
     expect(decode(readFileSync(fixture.target))).toBe("new binary payload");
@@ -494,8 +643,8 @@ describe("bandar update", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      env: PUBLIC_ENV,
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
@@ -511,9 +660,9 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      env: PUBLIC_ENV,
       canWrite: false,
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
@@ -528,8 +677,8 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
-      send: serving({
+      env: PUBLIC_ENV,
+      send: publicServing({
         version: "0.2.0",
         bytes: encode("new binary payload"),
         checksum: "0".repeat(64),
@@ -540,6 +689,20 @@ describe("bandar update", () => {
     expect(recorded.errors[0]).toContain("checksum mismatch");
     expect(decode(readFileSync(fixture.target))).toBe("old binary");
     expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
+  });
+
+  test("a missing checksum sibling refuses the update", async () => {
+    const fixture = fixtureOf("install-script");
+
+    const recorded = runOf(fixture, {
+      env: PUBLIC_ENV,
+      send: publicServing({ version: "0.2.0", bytes: encode("new"), assetStatus: 404 }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.errors[0]).toContain("could not download bandar-0.2.0-linux-x64");
+    expect(recorded.errors[0]).toContain("HTTP 404");
+    expect(decode(readFileSync(fixture.target))).toBe("old binary");
   });
 
   test("a failed rename on Windows names the locked executable", async () => {
@@ -553,9 +716,9 @@ describe("bandar update", () => {
     );
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      env: PUBLIC_ENV,
       platform: "win32",
-      send: serving({ version: "0.2.0", bytes: encode("new") }, "win32"),
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }, "win32"),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
@@ -575,8 +738,8 @@ describe("bandar update", () => {
     );
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      env: PUBLIC_ENV,
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
@@ -584,29 +747,27 @@ describe("bandar update", () => {
     expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
   });
 
-  test("the same version is a no-op with no download", async () => {
+  test("the same version is a no-op that never fetches an asset", async () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
-      send: serving({ version: "0.1.0", bytes: encode("new") }),
+      env: PUBLIC_ENV,
+      send: publicServing({ version: "0.1.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(0);
     expect(recorded.lines).toEqual(["bandar 0.1.0 is up to date"]);
     expect(decode(readFileSync(fixture.target))).toBe("old binary");
-    expect(recorded.requests.map((request) => request.url)).toEqual([
-      latestReleaseUrl("https://api.test"),
-    ]);
+    expect(recorded.requests.map((request) => request.url)).toEqual([TAG_PAGE]);
   });
 
   test("a newer installed version is left alone", async () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      env: PUBLIC_ENV,
       installed: "0.3.0",
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(0);
@@ -616,25 +777,16 @@ describe("bandar update", () => {
     expect(decode(readFileSync(fixture.target))).toBe("old binary");
   });
 
-  test("a missing token stops before any request", async () => {
+  test("a repository with no release yet fails with that reason", async () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: {
-        BANDAR_CONFIG_DIR: fixture.configDir,
-        BANDAR_GITHUB_TOKEN: undefined,
-        GH_TOKEN: undefined,
-        GITHUB_TOKEN: undefined,
-      },
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      env: PUBLIC_ENV,
+      send: async () => ({ status: 404, body: new Uint8Array() }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
-    expect(recorded.errors).toEqual([
-      "bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN",
-    ]);
-    expect(recorded.requests).toEqual([]);
-    expect(decode(readFileSync(fixture.target))).toBe("old binary");
+    expect(recorded.errors).toEqual(["bandar: falentio/bandar has no published release yet"]);
   });
 
   test("an unusable config directory is refused with one line", async () => {
@@ -642,7 +794,7 @@ describe("bandar update", () => {
 
     const recorded = runOf(fixture, {
       env: { BANDAR_CONFIG_DIR: "relative/config" },
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
@@ -651,25 +803,13 @@ describe("bandar update", () => {
     expect(recorded.requests).toEqual([]);
   });
 
-  test("a repository with no release yet fails with that reason", async () => {
-    const fixture = fixtureOf("install-script");
-
-    const recorded = runOf(fixture, {
-      env: API_ENV,
-      send: async () => ({ status: 404, body: new Uint8Array() }),
-    });
-
-    expect(await runUpdate(recorded.run)).toBe(1);
-    expect(recorded.errors).toEqual(["bandar: falentio/bandar has no published release yet"]);
-  });
-
   test("an unsupported platform is refused by name", async () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      env: PUBLIC_ENV,
       platform: "darwin",
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
@@ -678,12 +818,40 @@ describe("bandar update", () => {
     ]);
   });
 
-  test("a release without the matching asset is refused", async () => {
+  test("the API override replaces the binary with the token on one host only", async () => {
+    const fixture = fixtureOf("install-script");
+    const bytes = encode("private fork payload");
+
+    const recorded = runOf(fixture, {
+      env: API_ENV,
+      send: apiServing({ version: "0.2.0", bytes }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(decode(readFileSync(fixture.target))).toBe("private fork payload");
+    expect(recorded.requests.map((request) => request.url)).toEqual([
+      API_FEED,
+      "https://api.test/assets/bandar-0.2.0-linux-x64",
+      "https://api.test/assets/bandar-0.2.0-linux-x64.sha256",
+    ]);
+    expect(recorded.requests.map((request) => request.accept)).toEqual([
+      "application/vnd.github+json",
+      "application/octet-stream",
+      "application/octet-stream",
+    ]);
+    expect(authorizations(recorded.requests)).toEqual([
+      `Bearer ${TOKEN}`,
+      `Bearer ${TOKEN}`,
+      `Bearer ${TOKEN}`,
+    ]);
+  });
+
+  test("the API override refuses a release without the matching asset", async () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
       env: API_ENV,
-      send: serving({
+      send: apiServing({
         version: "0.2.0",
         bytes: encode("new"),
         assets: [{ name: "bandar-0.2.0-darwin-x64", url: "https://api.test/assets/other" }],
@@ -691,28 +859,12 @@ describe("bandar update", () => {
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
-    expect(recorded.errors[0]).toContain("has no bandar-0.2.0-linux-x64");
-  });
-
-  test("the asset request asks for the octet stream", async () => {
-    const fixture = fixtureOf("install-script");
-
-    const recorded = runOf(fixture, {
-      env: API_ENV,
-      send: serving({ version: "0.2.0", bytes: encode("new") }),
-    });
-
-    await runUpdate(recorded.run);
-
-    expect(recorded.requests.map((request) => request.accept)).toEqual([
-      "application/vnd.github+json",
-      "application/octet-stream",
-      "application/octet-stream",
-    ]);
+    expect(recorded.errors[0]).toContain("publishes no bandar-0.2.0-linux-x64 asset");
+    expect(decode(readFileSync(fixture.target))).toBe("old binary");
   });
 });
 
-test("a foreign asset host is refused before any request", async () => {
+test("a foreign asset host is refused before any request, so the token stays put", async () => {
   const fixture = fixtureOf("install-script");
   const names = releaseNames("0.2.0", "linux", "x64");
 
@@ -721,7 +873,7 @@ test("a foreign asset host is refused before any request", async () => {
   const recorded = runOf(fixture, {
     env: API_ENV,
     send: async (url) => {
-      if (url === latestReleaseUrl("https://api.test"))
+      if (url === API_FEED)
         return {
           status: 200,
           body: encode(
@@ -741,9 +893,7 @@ test("a foreign asset host is refused before any request", async () => {
 
   expect(await runUpdate(recorded.run)).toBe(1);
   expect(recorded.errors[0]).toContain("evil.test is not an allowed asset host");
-  expect(recorded.requests.map((request) => request.url)).toEqual([
-    latestReleaseUrl("https://api.test"),
-  ]);
+  expect(recorded.requests.map((request) => request.url)).toEqual([API_FEED]);
   expect(decode(readFileSync(fixture.target))).toBe("old binary");
 });
 

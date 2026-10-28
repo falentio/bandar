@@ -13,23 +13,24 @@ die() {
 
 usage() {
   cat <<'EOF'
-Install a released bandar binary.
+Install a released bandar binary. The repository is public, so no token is needed.
 
-  curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | BANDAR_GITHUB_TOKEN=... sh
+  curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | sh
 
 Environment:
   BANDAR_VERSION           Version to install, such as 0.1.0. Default: the latest release.
   BANDAR_INSTALL_DIR       Directory that receives the binary. Default: /usr/local/bin
   BANDAR_SCOPE             user or system: also register the service. Default: unset, no service step.
-  BANDAR_CONFIG_DIR        Directory that receives install.json. Default: ~/.config/bandar
+  BANDAR_CONFIG_DIR        Directory that receives install.json. Default: ~/.config/bandar.
+                           Must be an absolute path.
   BANDAR_SERVICE_TIMEOUT   Seconds the service step may run. Default: 30
-  BANDAR_GITHUB_TOKEN      GitHub token for the private repository. GH_TOKEN and GITHUB_TOKEN
-                           are read too, in that order.
-  BANDAR_RELEASE_BASE_URL  Directory that holds the assets and their .sha256 siblings, for a
-                           mirror or a test server. Include the version. Overrides every other
-                           download route and needs no token.
-  BANDAR_RELEASE_API_URL   Latest-release JSON. The tags endpoint is derived from it.
-                           Default: the GitHub API for this repository.
+  BANDAR_RELEASE_WEB_URL   Origin that serves the release page and the downloads, for a mirror
+                           or a test server. Default: https://github.com/falentio/bandar
+  BANDAR_RELEASE_API_URL   Latest-release JSON of a private fork. Set it, plus a token, to install
+                           from a private repository instead of the public release.
+  BANDAR_GITHUB_TOKEN      Optional token for the private fork selected by BANDAR_RELEASE_API_URL.
+                           GH_TOKEN and GITHUB_TOKEN are read too, in that order. A public
+                           download never reads a token.
 
 Docs: docs/install.md
 EOF
@@ -76,12 +77,26 @@ case $scope in
   *) die "BANDAR_SCOPE must be user or system, got '$scope'" ;;
 esac
 
-if [ -z "${BANDAR_CONFIG_DIR:-}" ] && [ -z "${HOME:-}" ]; then
-  die "HOME is unset; set BANDAR_CONFIG_DIR to the directory that holds install.json"
+# The same rule the server applies at boot: a config directory has to be absolute, because the
+# manifest it holds is what "bandar update" resolves the installed binary through.
+if [ -n "${BANDAR_CONFIG_DIR+given}" ]; then
+  config_dir=$(printf '%s' "${BANDAR_CONFIG_DIR}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  if [ -z "$config_dir" ]; then
+    die "BANDAR_CONFIG_DIR must be an absolute path, got a blank value"
+  fi
+  case $config_dir in
+    /*) ;;
+    [A-Za-z]:\\* | [A-Za-z]:/*) ;;
+    *) die "BANDAR_CONFIG_DIR must be an absolute path, got '$config_dir'" ;;
+  esac
+else
+  if [ -z "${HOME:-}" ]; then
+    die "HOME is unset; set BANDAR_CONFIG_DIR to the directory that holds install.json"
+  fi
+  config_dir=$HOME/.config/bandar
 fi
 
 install_dir=${BANDAR_INSTALL_DIR:-/usr/local/bin}
-config_dir=${BANDAR_CONFIG_DIR:-${HOME:-/root}/.config/bandar}
 
 if command -v sha256sum >/dev/null 2>&1; then
   hasher=sha256sum
@@ -153,8 +168,8 @@ sudo_hint() {
     hint="$hint BANDAR_SCOPE=\"$scope\""
   fi
 
-  if [ -n "$token" ]; then
-    hint="$hint BANDAR_GITHUB_TOKEN=\\\"...\\\""
+  if [ -n "$api" ]; then
+    hint="$hint BANDAR_RELEASE_API_URL=\"$api\" BANDAR_GITHUB_TOKEN=\"...\""
   fi
 
   if run_in_place; then
@@ -164,9 +179,16 @@ sudo_hint() {
   fi
 }
 
+# A token is only ever read for the private fork that BANDAR_RELEASE_API_URL names.
 token=${BANDAR_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}
-api=${BANDAR_RELEASE_API_URL:-https://api.github.com/repos/$REPO/releases/latest}
-base_override=${BANDAR_RELEASE_BASE_URL:-}
+api=${BANDAR_RELEASE_API_URL:-}
+web=${BANDAR_RELEASE_WEB_URL:-https://github.com/$REPO}
+web=${web%/}
+latest_release_page=$web/releases/latest
+
+if [ -n "$api" ] && [ -z "$token" ]; then
+  die "BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN"
+fi
 
 if [ ! -d "$install_dir" ]; then
   mkdir -p "$install_dir" 2>/dev/null || true
@@ -192,10 +214,6 @@ trap 'exit 143' TERM
 
 fetch_err=$tmp/fetch.err
 
-private_repo() {
-  die "$REPO is private, so a GitHub token is required: set BANDAR_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN"
-}
-
 http_not_found() {
   grep -q ' 404' "$fetch_err" 2>/dev/null
 }
@@ -214,8 +232,8 @@ plain_or_die() {
   if download_plain "$1" "$2"; then
     return 0
   fi
-  if [ -z "$token" ] && http_not_found; then
-    private_repo
+  if http_not_found; then
+    die "cannot download $1: no such asset. A private fork installs with BANDAR_RELEASE_API_URL and a GitHub token; a mirror sets BANDAR_RELEASE_WEB_URL"
   fi
   die "cannot download $1"
 }
@@ -254,12 +272,39 @@ download_authed() {
   fi
 }
 
-fetch_metadata() {
-  if [ -n "$token" ]; then
-    download_authed "$1" "$2" application/vnd.github+json
-  else
-    download_plain "$1" "$2"
+# Prints the Location header of a redirect without following it, so the latest tag costs one page
+# request instead of an API call: no rate limit, no credential.
+fetch_location() {
+  if command -v curl >/dev/null 2>&1; then
+    : >"$tmp/headers"
+    curl -sS -o /dev/null -D "$tmp/headers" "$1" 2>"$fetch_err" || return 1
+    sed -n 's/^[Ll]ocation:[[:space:]]*//p' "$tmp/headers" | tr -d '\r' | tail -n 1
+    return 0
   fi
+
+  if command -v wget >/dev/null 2>&1; then
+    : >"$tmp/headers"
+    # -S prints the response headers to stderr, and 0 redirects keeps wget from following them.
+    wget -q -S -O /dev/null --max-redirect=0 "$1" 2>"$tmp/headers" || true
+    sed -n 's/^[[:space:]]*[Ll]ocation:[[:space:]]*//p' "$tmp/headers" | tr -d '\r' | tail -n 1
+    return 0
+  fi
+
+  die "neither curl nor wget is installed"
+}
+
+version_from_location() {
+  tag=$(printf '%s' "$1" | sed -n 's#.*/releases/tag/\([^/?#]*\).*#\1#p')
+
+  [ -n "$tag" ] || return 1
+
+  printf '%s' "${tag#v}"
+}
+
+check_version() {
+  case $1 in
+    '' | */* | *' '*) die "the latest release page did not redirect to a version tag: $latest_release_page" ;;
+  esac
 }
 
 asset_url_of() {
@@ -288,14 +333,22 @@ if [ -n "${BANDAR_VERSION:-}" ]; then
   case $version in
     '' | */* | *' '*) die "BANDAR_VERSION must look like 0.1.0, got '$BANDAR_VERSION'" ;;
   esac
-elif fetch_metadata "$api" "$tmp/latest.json"; then
+elif [ -n "$api" ]; then
+  download_authed "$api" "$tmp/latest.json" application/vnd.github+json ||
+    die "cannot read the latest release from $api"
+
   tag=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n 1)
   [ -n "$tag" ] || die "no tag_name in the response from $api"
   version=${tag#v}
-elif [ -z "$token" ] && http_not_found; then
-  private_repo
 else
-  die "cannot read the latest release from $api"
+  location=$(fetch_location "$latest_release_page") ||
+    die "cannot read the latest release page: $latest_release_page"
+
+  version=$(version_from_location "$location") || {
+    check_version
+    die "cannot read the latest release from $latest_release_page"
+  }
+  check_version "$version"
 fi
 
 asset=bandar-$version-$os-$arch
@@ -306,12 +359,7 @@ if [ "$os" = windows ]; then
 fi
 asset_sha=$asset.sha256
 
-if [ -n "$base_override" ]; then
-  base=${base_override%/}
-  printf 'bandar: downloading %s/%s\n' "$base" "$asset"
-  plain_or_die "$base/$asset" "$tmp/$asset"
-  plain_or_die "$base/$asset_sha" "$tmp/$asset_sha"
-elif [ -n "$token" ]; then
+if [ -n "$api" ]; then
   case $api in
     */latest) tags_url=${api%/latest}/tags/v$version ;;
     *) tags_url=${api%/}/tags/v$version ;;
@@ -330,7 +378,7 @@ elif [ -n "$token" ]; then
   download_authed "$asset_url" "$tmp/$asset" || die "cannot download the $asset asset from the API"
   download_authed "$sha_url" "$tmp/$asset_sha" || die "cannot download the $asset_sha asset from the API"
 else
-  base=https://github.com/$REPO/releases/download/v$version
+  base=$web/releases/download/v$version
   printf 'bandar: downloading %s/%s\n' "$base" "$asset"
   plain_or_die "$base/$asset" "$tmp/$asset"
   plain_or_die "$base/$asset_sha" "$tmp/$asset_sha"
@@ -348,33 +396,56 @@ actual=$(sha256_of "$tmp/$asset")
 
 target=$install_dir/$binary
 staged=$install_dir/.$binary.$$
+manifest=$config_dir/install.json
+staged_manifest=$config_dir/.install.json.$$
+previous=$tmp/install.json.previous
+had_manifest=0
 
-cp "$tmp/$asset" "$staged" || die "cannot copy the binary into $install_dir"
-chmod 755 "$staged" || {
-  rm -f "$staged"
-  die "cannot make $staged executable"
-}
-mv -f "$staged" "$target" || {
-  rm -f "$staged"
-  die "cannot move the binary into place at $target"
+restore_manifest() {
+  if [ "$had_manifest" -eq 1 ]; then
+    mv -f "$previous" "$manifest" 2>/dev/null || true
+  else
+    rm -f "$manifest" 2>/dev/null || true
+  fi
 }
 
 mkdir -p "$config_dir" || die "cannot create $config_dir"
 chmod 700 "$config_dir" || die "cannot set mode 700 on $config_dir"
 
+if [ -f "$manifest" ]; then
+  cp "$manifest" "$previous" || die "cannot read $manifest"
+  had_manifest=1
+fi
+
 json_escape() {
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\"/g'
 }
 
-manifest=$config_dir/install.json
-staged_manifest=$manifest.$$
-
+# The manifest lands before the binary. A manifest that cannot be written must leave no new binary,
+# because a binary with no manifest is one "bandar update" can never replace; the reverse order
+# fails the other way, and the manifest is restored if the binary step fails.
 printf '{"source":"install-script","version":"%s","path":"%s"}\n' \
   "$version" "$(json_escape "$target")" >"$staged_manifest" ||
   die "cannot write $staged_manifest"
 mv -f "$staged_manifest" "$manifest" || {
   rm -f "$staged_manifest"
   die "cannot write $manifest"
+}
+
+cp "$tmp/$asset" "$staged" || {
+  rm -f "$staged"
+  restore_manifest
+  die "cannot copy the binary into $install_dir"
+}
+chmod 755 "$staged" || {
+  rm -f "$staged"
+  restore_manifest
+  die "cannot make $staged executable"
+}
+mv -f "$staged" "$target" || {
+  rm -f "$staged"
+  restore_manifest
+  die "cannot move the binary into place at $target"
 }
 
 if [ -z "$scope" ]; then

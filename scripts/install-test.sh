@@ -45,10 +45,15 @@ import { appendFileSync } from "node:fs";
 const root = process.argv[2] ?? "";
 const portFile = process.argv[3] ?? "";
 const logFile = process.argv[4] ?? "";
-const assetName = process.argv[5] ?? "";
-const assetSha = process.argv[6] ?? "";
-const token = process.argv[7] ?? "";
-const version = process.argv[8] ?? "";
+const token = process.argv[5] ?? "";
+const osArch = process.argv[6] ?? "";
+const extension = osArch.startsWith("windows") ? ".exe" : "";
+
+const latest = async (): Promise<string> =>
+  (await Bun.file(root + "/latest").text()).trim();
+
+const assetName = (version: string): string =>
+  "bandar-" + version + "-" + osArch + extension;
 
 const server = Bun.serve({
   hostname: "127.0.0.1",
@@ -60,49 +65,54 @@ const server = Bun.serve({
     const accept = request.headers.get("accept") ?? "";
     appendFileSync(logFile, url.pathname + url.search + " auth=" + auth + " accept=" + accept + "\n");
 
-    if (url.pathname.startsWith("/releases/tags/")) {
+    if (url.pathname === "/releases/latest" && !accept.includes("vnd.github")) {
+      const version = await latest();
+      return new Response(null, {
+        status: 302,
+        headers: { location: origin + "/releases/tag/v" + version },
+      });
+    }
+
+    if (url.pathname === "/releases/latest" || url.pathname.startsWith("/releases/tags/")) {
       if (auth !== "Bearer " + token) return new Response("unauthorized\n", { status: 401 });
+      const version =
+        url.pathname === "/releases/latest"
+          ? await latest()
+          : url.pathname.slice("/releases/tags/v".length);
+      const asset = assetName(version);
       return Response.json({
-        url: origin + "/releases/1",
         tag_name: "v" + version,
         assets: [
-          {
-            url: origin + "/api/assets/683929513",
-            id: 683929513,
-            node_id: "MDM6QXNzZXQ2ODM5Mjk1MTM=",
-            name: assetName,
-            label: null,
-            uploader: { login: "stub", id: 1, url: origin + "/users/stub" },
-          },
-          {
-            url: origin + "/api/assets/683929514",
-            id: 683929514,
-            node_id: "MDM6QXNzZXQ2ODM5Mjk1MTQ=",
-            name: assetSha,
-            label: null,
-            uploader: { login: "stub", id: 1, url: origin + "/users/stub" },
-          },
+          { url: origin + "/api/assets/v" + version + "/binary", name: asset },
+          { url: origin + "/api/assets/v" + version + "/checksum", name: asset + ".sha256" },
         ],
       });
     }
 
     if (url.pathname.startsWith("/api/assets/")) {
       if (auth !== "Bearer " + token) return new Response("unauthorized\n", { status: 401 });
-      const name = url.pathname.endsWith("683929514") ? assetSha : assetName;
-      const file = Bun.file(root + "/download/v" + version + "/" + name);
+      const parts = url.pathname.split("/");
+      const version = (parts[3] ?? "").replace(/^v/, "");
+      const kind = parts[4] === "checksum" ? "checksum" : "binary";
+      const name = assetName(version) + (kind === "checksum" ? ".sha256" : "");
+      const file = Bun.file(root + "/rel/v" + version + "/" + name);
       if (!(await file.exists())) return new Response("not found\n", { status: 404 });
       return new Response(file);
     }
 
-    const file = Bun.file(root + decodeURIComponent(url.pathname));
-    if (!(await file.exists())) return new Response("not found\n", { status: 404 });
-    return new Response(file);
+    if (url.pathname.startsWith("/releases/download/")) {
+      const file = Bun.file(root + "/rel" + decodeURIComponent(url.pathname.replace("/releases/download", "")));
+      if (!(await file.exists())) return new Response("not found\n", { status: 404 });
+      return new Response(file);
+    }
+
+    return new Response("not found\n", { status: 404 });
   },
 });
 await Bun.write(portFile, String(server.port));
 TSSERVER
 
-bun "$WORK/server.ts" "$STUB" "$PORT_FILE" "$REQUEST_LOG" "$asset" "$asset_sha" "$STUB_TOKEN" "$VERSION" \
+bun "$WORK/server.ts" "$STUB" "$PORT_FILE" "$REQUEST_LOG" "$STUB_TOKEN" "$os-$arch" \
   >"$WORK/server.log" 2>&1 &
 server_pid=$!
 
@@ -157,11 +167,12 @@ publish() {
   publish_version=$1
   publish_body=$2
   publish_asset=bandar-$publish_version-$os-$arch$exe
-  publish_dir=$STUB/download/v$publish_version
+  publish_dir=$STUB/rel/v$publish_version
 
   mkdir -p "$publish_dir"
   cp "$publish_body" "$publish_dir/$publish_asset"
   ( cd "$publish_dir" && sha256_of "$publish_asset" >"$publish_asset.sha256" )
+  printf '%s\n' "$publish_version" >"$STUB/latest"
   printf '%s\n' "$publish_asset"
 }
 
@@ -201,39 +212,23 @@ publish 9.9.8 "$WORK/no-command.sh" >/dev/null
 publish 9.9.7 "$WORK/hangs.sh" >/dev/null
 publish 9.9.6 "$WORK/serves.sh" >/dev/null
 printf '0000000000000000000000000000000000000000000000000000000000000000  %s\n' \
-  "bandar-9.9.6-$os-$arch$exe" >"$STUB/download/v9.9.6/bandar-9.9.6-$os-$arch$exe.sha256"
-
-mkdir -p "$STUB/releases"
-printf '{\n  "tag_name": "v%s",\n  "assets": [\n    {"name": "%s"},\n    {"name": "%s.sha256"}\n  ]\n}\n' \
-  "$VERSION" "$asset" "$asset" >"$STUB/releases/latest"
+  "bandar-9.9.6-$os-$arch$exe" >"$STUB/rel/v9.9.6/bandar-9.9.6-$os-$arch$exe.sha256"
+printf '%s\n' "$VERSION" >"$STUB/latest"
 
 RUN_STATUS=0
 RUN_OUTPUT=
 
+# The anonymous path: no token, and the web override points every request at the stub.
 run_install() {
   case_dir=$1
   shift
 
   RUN_STATUS=0
   RUN_OUTPUT=$(env BANDAR_VERSION= BANDAR_SCOPE= BANDAR_SERVICE_TIMEOUT= \
-    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= \
+    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= BANDAR_RELEASE_API_URL= \
     TMPDIR="$case_dir/tmp" BANDAR_INSTALL_DIR="$case_dir/bin" \
     BANDAR_CONFIG_DIR="$case_dir/config" \
-    BANDAR_RELEASE_BASE_URL="$base/download/v${PINNED:-$VERSION}" \
-    BANDAR_RELEASE_API_URL="$base/releases/latest" \
-    "$@" sh "$INSTALLER" 2>&1) || RUN_STATUS=$?
-}
-
-run_install_api() {
-  case_dir=$1
-  shift
-
-  RUN_STATUS=0
-  RUN_OUTPUT=$(env BANDAR_VERSION= BANDAR_SCOPE= BANDAR_SERVICE_TIMEOUT= \
-    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= \
-    TMPDIR="$case_dir/tmp" BANDAR_INSTALL_DIR="$case_dir/bin" \
-    BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_BASE_URL= \
-    BANDAR_RELEASE_API_URL="$base/releases/latest" \
+    BANDAR_RELEASE_WEB_URL="$base" \
     "$@" sh "$INSTALLER" 2>&1) || RUN_STATUS=$?
 }
 
@@ -245,12 +240,25 @@ run_piped() {
   # The pipe is the invocation under test: "curl | sh" has no script path.
   # shellcheck disable=SC2002
   RUN_OUTPUT=$(cat "$INSTALLER" | env BANDAR_VERSION= BANDAR_SCOPE= BANDAR_SERVICE_TIMEOUT= \
-    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= \
+    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= BANDAR_RELEASE_API_URL= \
     TMPDIR="$case_dir/tmp" BANDAR_INSTALL_DIR="$case_dir/bin" \
     BANDAR_CONFIG_DIR="$case_dir/config" \
-    BANDAR_RELEASE_BASE_URL="$base/download/v${PINNED:-$VERSION}" \
-    BANDAR_RELEASE_API_URL="$base/releases/latest" \
+    BANDAR_RELEASE_WEB_URL="$base" \
     "$@" sh 2>&1) || RUN_STATUS=$?
+}
+
+# The private-fork path: the API feed is selected, so a token is required and sent.
+run_api() {
+  case_dir=$1
+  shift
+
+  RUN_STATUS=0
+  RUN_OUTPUT=$(env BANDAR_VERSION= BANDAR_SCOPE= BANDAR_SERVICE_TIMEOUT= \
+    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= \
+    TMPDIR="$case_dir/tmp" BANDAR_INSTALL_DIR="$case_dir/bin" \
+    BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_WEB_URL="$base" \
+    BANDAR_RELEASE_API_URL="$base/releases/latest" \
+    "$@" sh "$INSTALLER" 2>&1) || RUN_STATUS=$?
 }
 
 expect_status() {
@@ -320,9 +328,14 @@ expect_empty_dir() {
   fi
 }
 
+request_field() {
+  sed -n "s/.* $1=\([^ ]*\).*/\1/p" "$REQUEST_LOG"
+}
+
+printf 'case: anonymous latest install (piped)\n'
 case_dir=$WORK/latest
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-PINNED=
+: >"$REQUEST_LOG"
 run_piped "$case_dir"
 expect_status "latest: exits 0" 0
 expect_installed "latest: installs the binary" "$case_dir/bin/$binary"
@@ -330,19 +343,36 @@ expect_manifest "latest: records source, version, and path" "$case_dir/config/in
   "$VERSION" "$case_dir/bin/$binary"
 expect_mode "latest: config dir is mode 700" "$case_dir/config" 700
 expect_empty_dir "latest: removes its temp dir" "$case_dir/tmp"
+if grep -q '^/releases/latest ' "$REQUEST_LOG"; then
+  pass "latest: reads the release page for the tag"
+else
+  fail "latest: reads the release page for the tag" "$(cat "$REQUEST_LOG")"
+fi
+if grep -q "^/releases/download/v$VERSION/bandar-$VERSION-$os-$arch$exe " "$REQUEST_LOG"; then
+  pass "latest: downloads the public asset path"
+else
+  fail "latest: downloads the public asset path" "$(cat "$REQUEST_LOG")"
+fi
+if [ -z "$(request_field auth | grep -v '^$' | head -n 1)" ]; then
+  pass "latest: sends no Authorization header"
+else
+  fail "latest: sends no Authorization header" "$(grep -v 'auth= ' "$REQUEST_LOG")"
+fi
+expect_absent "latest: never mentions a token" "token"
 
+printf '\ncase: pinned public version (direct executable)\n'
 case_dir=$WORK/pinned
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-PINNED=$VERSION
 run_install "$case_dir" BANDAR_VERSION="$VERSION"
 expect_status "pinned: direct executable exits 0" 0
 expect_installed "pinned: installs the binary" "$case_dir/bin/$binary"
 expect_manifest "pinned: records the pinned version" "$case_dir/config/install.json" \
   "$VERSION" "$case_dir/bin/$binary"
 
+printf '\ncase: service handoff\n'
 case_dir=$WORK/service
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-PINNED=$VERSION
+publish "$VERSION" "$WORK/service.sh" >/dev/null
 run_install "$case_dir" BANDAR_SCOPE=user BANDAR_STUB_LOG="$case_dir/service.log"
 expect_status "service: exits 0" 0
 expect_installed "service: installs the binary" "$case_dir/bin/$binary"
@@ -354,19 +384,21 @@ else
 fi
 expect_contains "service: reports the registration" "service registered"
 
+printf '\ncase: a binary without install-service\n'
 case_dir=$WORK/no-command
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-PINNED=9.9.8
-run_install "$case_dir" BANDAR_VERSION=9.9.8 BANDAR_SCOPE=system
+publish 9.9.8 "$WORK/no-command.sh" >/dev/null
+run_install "$case_dir" BANDAR_SCOPE=system
 expect_status "no install-service: still exits 0" 0
 expect_installed "no install-service: installs the binary" "$case_dir/bin/$binary"
 expect_contains "no install-service: reports the skip" "skipped the service step"
 
+printf '\ncase: a hanging install-service\n'
 case_dir=$WORK/hangs
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-PINNED=9.9.7
+publish 9.9.7 "$WORK/hangs.sh" >/dev/null
 started=$(date +%s)
-run_install "$case_dir" BANDAR_VERSION=9.9.7 BANDAR_SCOPE=user BANDAR_SERVICE_TIMEOUT=2
+run_install "$case_dir" BANDAR_SCOPE=user BANDAR_SERVICE_TIMEOUT=2
 elapsed=$(($(date +%s) - started))
 expect_status "hanging install-service: still exits 0" 0
 expect_contains "hanging install-service: reports the skip" "skipped the service step"
@@ -376,10 +408,11 @@ else
   fail "hanging install-service: stops after the timeout" "took $elapsed s"
 fi
 
+printf '\ncase: private fork override\n'
 case_dir=$WORK/token
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
 : >"$REQUEST_LOG"
-run_install_api "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
+run_api "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
 expect_status "token: exits 0" 0
 expect_installed "token: installs the binary" "$case_dir/bin/$binary"
 expect_manifest "token: records source, version, and path" "$case_dir/config/install.json" \
@@ -416,14 +449,32 @@ else
   pass "token: is never written next to the install"
 fi
 
+printf '\ncase: private fork override resolving the latest version\n'
+printf '%s\n' "$VERSION" >"$STUB/latest"
 case_dir=$WORK/token-latest
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-run_install_api "$case_dir" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
+run_api "$case_dir" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
 expect_status "token latest: exits 0" 0
 expect_installed "token latest: installs the binary" "$case_dir/bin/$binary"
 expect_manifest "token latest: records the resolved version" "$case_dir/config/install.json" \
   "$VERSION" "$case_dir/bin/$binary"
 
+printf '\ncase: the API override without a token\n'
+case_dir=$WORK/api-no-token
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+: >"$REQUEST_LOG"
+run_api "$case_dir" BANDAR_VERSION="$VERSION"
+expect_status "api without a token: exits 1" 1
+expect_contains "api without a token: names the variable and the token variable" \
+  "BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN"
+expect_missing "api without a token: installs nothing" "$case_dir/bin/$binary"
+if [ -s "$REQUEST_LOG" ]; then
+  fail "api without a token: sends no request" "$(cat "$REQUEST_LOG")"
+else
+  pass "api without a token: sends no request"
+fi
+
+printf '\ncase: the token stays out of argv\n'
 real_curl=$(command -v curl || true)
 if [ -n "$real_curl" ]; then
   mkdir -p "$WORK/shim"
@@ -437,7 +488,7 @@ SHIM
   case_dir=$WORK/token-argv
   mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
   : >"$WORK/curl-argv.log"
-  run_install_api "$case_dir" PATH="$WORK/shim:$PATH" \
+  run_api "$case_dir" PATH="$WORK/shim:$PATH" \
     BANDAR_VERSION="$VERSION" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
   expect_status "token argv: exits 0 through a curl shim" 0
   if grep -q -- '-K ' "$WORK/curl-argv.log"; then
@@ -451,47 +502,42 @@ SHIM
   fi
 fi
 
+printf '\ncase: GH_TOKEN and GITHUB_TOKEN\n'
 case_dir=$WORK/token-gh
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-run_install_api "$case_dir" BANDAR_VERSION="$VERSION" GH_TOKEN="$STUB_TOKEN"
+run_api "$case_dir" BANDAR_VERSION="$VERSION" GH_TOKEN="$STUB_TOKEN"
 expect_status "GH_TOKEN: exits 0" 0
 expect_installed "GH_TOKEN: installs the binary" "$case_dir/bin/$binary"
 
 case_dir=$WORK/token-github
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-run_install_api "$case_dir" BANDAR_VERSION="$VERSION" GITHUB_TOKEN="$STUB_TOKEN"
+run_api "$case_dir" BANDAR_VERSION="$VERSION" GITHUB_TOKEN="$STUB_TOKEN"
 expect_status "GITHUB_TOKEN: exits 0" 0
 expect_installed "GITHUB_TOKEN: installs the binary" "$case_dir/bin/$binary"
 
 case_dir=$WORK/token-precedence
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-run_install_api "$case_dir" BANDAR_VERSION="$VERSION" \
+run_api "$case_dir" BANDAR_VERSION="$VERSION" \
   BANDAR_GITHUB_TOKEN=wrong-token GH_TOKEN="$STUB_TOKEN"
 expect_status "BANDAR_GITHUB_TOKEN wins over GH_TOKEN" 1
 expect_missing "precedence: installs nothing with the rejected token" "$case_dir/bin/$binary"
 expect_absent "precedence: keeps the rejected token out of the output" "wrong-token"
 
-if grep -q 'auth=Bearer  accept=' "$REQUEST_LOG" 2>/dev/null; then
-  fail "token: never sends an empty Authorization header" "$(grep 'auth=Bearer  accept=' "$REQUEST_LOG")"
-else
-  pass "token: never sends an empty Authorization header"
-fi
-
-case_dir=$WORK/private
+printf '\ncase: a missing public asset\n'
+case_dir=$WORK/missing
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-PINNED=$VERSION
-run_install "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_RELEASE_BASE_URL="$base/private/v$VERSION"
-expect_status "no token: exits 1 on a 404" 1
-expect_contains "no token: names the private repository and the token variables" \
-  "falentio/bandar is private, so a GitHub token is required: set BANDAR_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN"
-expect_absent "no token: does not fall through to a checksum error" "checksum"
-expect_missing "no token: installs nothing" "$case_dir/bin/$binary"
-printf '\ninstall.sh output without a token on a 404:\n'
+run_install "$case_dir" BANDAR_VERSION=9.9.5
+expect_status "missing asset: exits 1 on a 404" 1
+expect_contains "missing asset: names the asset" "releases/download/v9.9.5/bandar-9.9.5-$os-$arch$exe"
+expect_contains "missing asset: names the private-fork override" "BANDAR_RELEASE_API_URL"
+expect_absent "missing asset: does not fall through to a checksum error" "checksum"
+expect_missing "missing asset: installs nothing" "$case_dir/bin/$binary"
+printf '\ninstall.sh output for a missing asset:\n'
 printf '%s\n' "$RUN_OUTPUT" | sed 's/^/  /'
 
+printf '\ncase: a bad checksum\n'
 case_dir=$WORK/bad-checksum
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
-PINNED=9.9.6
 run_install "$case_dir" BANDAR_VERSION=9.9.6
 expect_status "bad checksum: exits 1" 1
 expect_missing "bad checksum: installs nothing" "$case_dir/bin/$binary"
@@ -500,10 +546,79 @@ expect_empty_dir "bad checksum: removes its temp dir" "$case_dir/tmp"
 printf '\ninstall.sh output on a bad checksum:\n'
 printf '%s\n' "$RUN_OUTPUT" | sed 's/^/  /'
 
+printf '\ncase: a relative config directory\n'
+case_dir=$WORK/relative-config
+mkdir -p "$case_dir/bin" "$case_dir/tmp"
+run_install "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_CONFIG_DIR=relative/config
+expect_status "relative config dir: exits 1" 1
+expect_contains "relative config dir: names the absolute-path rule" \
+  "BANDAR_CONFIG_DIR must be an absolute path, got 'relative/config'"
+expect_missing "relative config dir: installs nothing" "$case_dir/bin/$binary"
+
+printf '\ncase: a blank config directory\n'
+case_dir=$WORK/blank-config
+mkdir -p "$case_dir/bin" "$case_dir/tmp"
+run_install "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_CONFIG_DIR=" "
+expect_status "blank config dir: exits 1" 1
+expect_contains "blank config dir: names the rule" "BANDAR_CONFIG_DIR must be an absolute path"
+expect_missing "blank config dir: installs nothing" "$case_dir/bin/$binary"
+
+printf '\ncase: a config directory at a file path\n'
+case_dir=$WORK/config-is-file
+mkdir -p "$case_dir/bin" "$case_dir/tmp"
+printf 'not a directory\n' >"$case_dir/config"
+run_install "$case_dir" BANDAR_VERSION="$VERSION"
+expect_status "unwritable config dir: exits 1" 1
+expect_missing "unwritable config dir: installs no binary" "$case_dir/bin/$binary"
+
+printf '\ncase: the manifest cannot be written\n'
+case_dir=$WORK/manifest-failure
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp" "$WORK/shim-mv"
+cat >"$WORK/shim-mv/mv" <<'SHIM'
+#!/bin/sh
+for argument in "$@"; do
+  case $argument in
+    */install.json) printf 'mv: refusing to write install.json\n' >&2; exit 1 ;;
+  esac
+done
+exec /bin/mv "$@"
+SHIM
+chmod 755 "$WORK/shim-mv/mv"
+run_install "$case_dir" PATH="$WORK/shim-mv:$PATH" BANDAR_VERSION="$VERSION"
+expect_status "manifest failure: exits 1" 1
+expect_contains "manifest failure: says it cannot write the manifest" "cannot write"
+expect_missing "manifest failure: leaves no binary behind" "$case_dir/bin/$binary"
+expect_missing "manifest failure: leaves no manifest behind" "$case_dir/config/install.json"
+
+printf '\ncase: the binary cannot be moved into place\n'
+case_dir=$WORK/binary-failure
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp" "$WORK/shim-mv2"
+printf '{"source":"manual","version":"0.0.1","path":"/old/bin/bandar"}\n' >"$case_dir/config/install.json"
+cp "$case_dir/config/install.json" "$WORK/binary-failure.expected"
+cat >"$WORK/shim-mv2/mv" <<'SHIM'
+#!/bin/sh
+for argument in "$@"; do
+  case $argument in
+    */bin/bandar) printf 'mv: refusing to replace the binary\n' >&2; exit 1 ;;
+  esac
+done
+exec /bin/mv "$@"
+SHIM
+chmod 755 "$WORK/shim-mv2/mv"
+run_install "$case_dir" PATH="$WORK/shim-mv2:$PATH" BANDAR_VERSION="$VERSION"
+expect_status "binary failure: exits 1" 1
+expect_contains "binary failure: says it cannot move the binary" "cannot move the binary into place"
+expect_missing "binary failure: leaves no binary behind" "$case_dir/bin/$binary"
+if cmp -s "$case_dir/config/install.json" "$WORK/binary-failure.expected"; then
+  pass "binary failure: restores the previous manifest"
+else
+  fail "binary failure: restores the previous manifest" "$(cat "$case_dir/config/install.json")"
+fi
+
+printf '\ncase: an unwritable install directory\n'
 case_dir=$WORK/readonly
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
 chmod 500 "$case_dir/bin"
-PINNED=
 if [ "$(id -u)" -eq 0 ]; then
   printf 'skip readonly target: running as root, who can write anywhere\n'
 else
@@ -515,6 +630,7 @@ else
 fi
 chmod 700 "$case_dir/bin"
 
+printf '\ncase: an unsupported platform\n'
 case_dir=$WORK/unsupported
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp" "$WORK/fakebin"
 cat >"$WORK/fakebin/uname" <<'STUB'
@@ -526,7 +642,6 @@ case $1 in
 esac
 STUB
 chmod 755 "$WORK/fakebin/uname"
-PINNED=
 run_install "$case_dir" PATH="$WORK/fakebin:$PATH"
 expect_status "unsupported os: exits 1" 1
 expect_contains "unsupported os: names the pair" "no release for darwin-x64"

@@ -331,7 +331,7 @@ cp "$CASE_DIR/bandar.duckdb" "$work/logs/happy.duckdb"
 cp "$CASE_DIR/config/install.json" "$work/logs/happy.json"
 stage_release "$newer" 'new binary payload'
 : >"$work/logs/requests.log"
-public happy "BANDAR_DB=$CASE_DIR/bandar.db" "BANDAR_DUCKDB=$CASE_DIR/bandar.duckdb"
+public happy "BANDAR_HOME=$CASE_DIR"
 expect_exit happy 0
 expect_stdout happy "bandar $newer installed at $CASE_DIR/bin/bandar"
 expect_same "$CASE_DIR/bin/bandar" "$work/site/rel/v$newer/bandar-$newer-linux-x64" "happy: the binary is the release asset"

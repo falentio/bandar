@@ -158,8 +158,8 @@ const ResponsesBodySchema = v.strictObject({
 const expectedMigration = lastJournalTag();
 const expectedDuckMigration = lastDuckTag();
 const workDir = mkdtempSync(join(tmpdir(), "bandar-smoke-"));
-const dbPath = join(workDir, "smoke.db");
-const duckPath = join(workDir, "smoke.duckdb");
+const homeDir = join(workDir, "home");
+const dbPath = join(homeDir, "bandar.db");
 const authEmail = `${Date.now()}@smoke.test`;
 const authPassword = "smoke-password-1";
 
@@ -2724,8 +2724,7 @@ async function boot(port = 0, timeoutMs = BOOT_TIMEOUT_MS): Promise<Booted> {
     env: {
       ...Bun.env,
       BANDAR_PORT: String(port),
-      BANDAR_DB: dbPath,
-      BANDAR_DUCKDB: duckPath,
+      BANDAR_HOME: homeDir,
       BANDAR_AUTH_SECRET: AUTH_SECRET,
       BANDAR_KILOCODE_API: kilocodeOrigin,
       BANDAR_KILOCODE_MODELS_URL: `${kilocodeOrigin}/api/gateway/models`,

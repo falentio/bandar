@@ -132,8 +132,7 @@ Wants=network-online.target
 Type=simple
 ExecStart=/opt/bandar/bin/bandar serve
 WorkingDirectory=/home/andrew/.local/share/bandar
-Environment=BANDAR_DB=/home/andrew/.local/share/bandar/bandar.db
-Environment=BANDAR_DUCKDB=/home/andrew/.local/share/bandar/bandar.duckdb
+Environment=BANDAR_HOME=/home/andrew/.local/share/bandar
 Environment=BANDAR_PORT=3000
 EnvironmentFile=-/home/andrew/.config/bandar/bandar.env
 Restart=on-failure
@@ -155,8 +154,7 @@ Wants=network-online.target
 Type=simple
 ExecStart=/opt/bandar/bin/bandar serve
 WorkingDirectory=/var/lib/bandar
-Environment=BANDAR_DB=/var/lib/bandar/bandar.db
-Environment=BANDAR_DUCKDB=/var/lib/bandar/bandar.duckdb
+Environment=BANDAR_HOME=/var/lib/bandar
 Environment=BANDAR_PORT=3000
 EnvironmentFile=-/home/andrew/.config/bandar/bandar.env
 Restart=on-failure
@@ -287,11 +285,11 @@ describe("planService", () => {
     expect(plan.duckdbPath).toBe(join(root, "data", "bandar.duckdb"));
   });
 
-  test("an absolute BANDAR_DB is kept, a relative one follows the data dir", () => {
-    const plan = planOf({}, { BANDAR_DB: join(root, "keep.db"), BANDAR_DUCKDB: "./other.duckdb" });
+  test("BANDAR_DB and BANDAR_DUCKDB leave the unit's paths alone", () => {
+    const plan = planOf({}, { BANDAR_DB: "/srv/keep.db", BANDAR_DUCKDB: "/srv/keep.duckdb" });
 
-    expect(plan.databasePath).toBe(join(root, "keep.db"));
-    expect(plan.duckdbPath).toBe(join(plan.dataDir, "other.duckdb"));
+    expect(plan.databasePath).toBe(join(plan.dataDir, "bandar.db"));
+    expect(plan.duckdbPath).toBe(join(plan.dataDir, "bandar.duckdb"));
   });
 
   test("--port and --binary override the config and the running binary", () => {
@@ -379,8 +377,7 @@ describe("installService", () => {
     expect(code).toBe(0);
     expect(unit).toContain("ExecStart=/usr/local/bin/bandar serve");
     expect(unit).toContain(`WorkingDirectory=${data}`);
-    expect(unit).toContain(`Environment=BANDAR_DB=${join(data, "bandar.db")}`);
-    expect(unit).toContain(`Environment=BANDAR_DUCKDB=${join(data, "bandar.duckdb")}`);
+    expect(unit).toContain(`Environment=BANDAR_HOME=${data}`);
     expect(unit).toContain("Environment=BANDAR_PORT=8080");
   });
 

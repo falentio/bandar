@@ -27,13 +27,15 @@ stderr: which files it wrote, and which ones it kept.
 | ------------ | -------------------------------------------------------------------- |
 | `--scope`    | `user`                                                               |
 | `--data-dir` | `~/.local/share/bandar` for user scope, `/var/lib/bandar` for system |
-| `--port`     | none: the unit pins no port, and `serve` reads `config.json`         |
+| `--port`     | none: the unit pins no port, and `serve` reads `server.port`         |
 | `--binary`   | the executable running the command                                   |
 
 The data directory comes from `--data-dir`, else `XDG_DATA_HOME` or `~/.local/share/bandar` for
 user scope and `/var/lib/bandar` for system scope. The unit pins a port only when `--port` names
 one, so a port in `config.json` is picked up on the next start. A `BANDAR_PORT` in the shell is not
-written into the unit; `serve` reads it at start, where it still wins over the file.
+written into the unit. A pinned `--port` writes `BANDAR_PORT` into the unit, which is the fallback
+tier: a `server.port` in the file still wins over it, so leave that key out of the file when the
+unit should own the port.
 
 ## What the unit holds
 
@@ -81,7 +83,8 @@ file. The config directory is `BANDAR_CONFIG_DIR`, defaulting to `~/.config/band
 The first install writes the file with mode 600 and one generated `BANDAR_AUTH_SECRET`. The unit
 itself stays world-readable at mode 644, so the session secret never goes in it. An existing env
 file is never overwritten: to rotate the secret, edit the file and restart the service. Settings in
-this file are read after the unit's `Environment=` lines, so they win, `BANDAR_PORT` included.
+this file are read after the unit's `Environment=` lines, so they win over those lines.
+`config.json` outranks both, so runtime keys belong there, and the env file keeps the secret.
 
 ## Uninstall
 

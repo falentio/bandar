@@ -1,13 +1,13 @@
 # Connect a coding tool
 
-`/cli-tools` gives five coding CLIs the base URL, a key, and the config file that points them at bandar. You copy the text into place. bandar never writes a file on your machine, because the gateway is usually not on the same host as the editor.
+`/cli-tools` lists the five supported coding CLIs. Each one has a page at `/cli-tools/<tool id>` with the base URL, a key, and the config file that points it at bandar. You copy the text into place. bandar never writes a file on your machine, because the gateway is usually not on the same host as the editor.
 
 Two gateway gaps decide what works today:
 
 - The canonical request carries text only. A client that sends `tools` reaches the model without them, and an Anthropic request that sends a `tool_result` block gets a 422.
 - There is no `/v1/responses` route.
 
-The page reads both facts from `GATEWAY_SURFACE` in `./src/shared/cli-tools.ts` and prints `ready`, `partial`, or `blocked` for each tool. A test in `./src/server/gateway-surface.test.ts` compares that constant with `./src/server/gateway.ts` and `./src/server/providers/types.ts`, and fails when they disagree, so the page cannot drift away from the server.
+The list and the detail page read both facts from `GATEWAY_SURFACE` in `./src/shared/cli-tools.ts` and print `ready`, `partial`, or `blocked` for each tool. A test in `./src/server/gateway-surface.test.ts` compares that constant with `./src/server/gateway.ts` and `./src/server/providers/types.ts`, and fails when they disagree, so the page cannot drift away from the server.
 
 So every tool here connects and answers a prompt. None of them finishes a tool call yet, and Codex fails at the first request because it speaks only the Responses API. The repair list is at the end of this file.
 
@@ -209,7 +209,7 @@ The blockers, in the order they pay off:
 
 ## Adding a tool
 
-Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, the steps, and the snippets. The page picks it up from the list, and `toolStatus` computes the badge, so a new entry never hand-writes a status.
+Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, the steps, and the snippets. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status.
 
 Two rules the tests enforce, so keep them true:
 

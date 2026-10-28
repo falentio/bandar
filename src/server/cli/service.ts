@@ -409,6 +409,15 @@ function unitValue(value: string): string {
   return `"${expanded.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
+function setMode(path: string, mode: number): void {
+  // chmod carries POSIX permission bits only: on Windows it toggles a read-only flag and can fail
+  // on a share, so the modes stay a POSIX concern and a unit that systemd never reads is left as
+  // the platform wrote it.
+  if (process.platform === "win32") return;
+
+  chmodSync(path, mode);
+}
+
 function createDirectories(dir: string): void {
   const missing: string[] = [];
 
@@ -422,7 +431,7 @@ function createDirectories(dir: string): void {
   for (const path of missing) {
     mkdirSync(path, { mode: DIRECTORY_MODE });
     // A umask narrows the mode, and systemd refuses a unit below a directory only root can read.
-    chmodSync(path, DIRECTORY_MODE);
+    setMode(path, DIRECTORY_MODE);
   }
 }
 
@@ -432,7 +441,7 @@ function writeEnvFile(path: string, secret: string): boolean {
   createDirectories(dirname(path));
   // "wx" fails instead of clobbering, so a concurrent install cannot replace a live secret.
   writeFileSync(path, envFileTemplate(secret), { mode: ENV_FILE_MODE, flag: "wx" });
-  chmodSync(path, ENV_FILE_MODE);
+  setMode(path, ENV_FILE_MODE);
 
   return true;
 }

@@ -31,6 +31,11 @@ const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
 const DUCK_DIR = join(import.meta.dir, "../duckdb");
 const AUTH_SECRET = "smoke-secret-0123456789abcdef0123456789abcdef";
 
+// A freshly compiled binary is cold: the first spawn pays for its image load and, on Windows, for
+// a malware scan of the file, so the first boot gets a wider budget than the warm ones.
+const FIRST_BOOT_TIMEOUT_MS = 45_000;
+const BOOT_TIMEOUT_MS = 15_000;
+
 type Json = string | number | boolean | null | readonly Json[] | { readonly [key: string]: Json };
 
 type Journal = { readonly entries: readonly { readonly idx: number; readonly tag: string }[] };
@@ -127,7 +132,7 @@ const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
-const first = await boot(await reservePort());
+const first = await boot(await reservePort(), FIRST_BOOT_TIMEOUT_MS);
 const origin = first.origin;
 const requestOrigin = originHeader(origin);
 
@@ -2065,8 +2070,10 @@ async function check(name: string, run: () => Promise<void>): Promise<void> {
   }
 }
 
-async function boot(port = 0): Promise<Booted> {
+async function boot(port = 0, timeoutMs = BOOT_TIMEOUT_MS): Promise<Booted> {
   if (!existsSync(BINARY)) throw new Error(`${BINARY} is missing; run \`bun run build\` first`);
+
+  const started = Date.now();
 
   const proc = Bun.spawn([BINARY], {
     env: {
@@ -2092,9 +2099,20 @@ async function boot(port = 0): Promise<Booted> {
 
   const decoder = new TextDecoder();
   let log = "";
-  const stderr = Bun.readableStreamToText(proc.stderr).catch(() => "");
+  let stderrLog = "";
 
-  void (async () => {
+  const stderrDrained = (async () => {
+    const reader = proc.stderr.getReader();
+
+    for (;;) {
+      const { value, done } = await reader.read();
+
+      if (done) return;
+      stderrLog += decoder.decode(value, { stream: true });
+    }
+  })().catch(() => {});
+
+  const drained = (async () => {
     const reader = proc.stdout.getReader();
 
     for (;;) {
@@ -2103,22 +2121,38 @@ async function boot(port = 0): Promise<Booted> {
       if (done) return;
       log += decoder.decode(value, { stream: true });
     }
-  })();
+  })().catch(() => {});
 
-  const deadline = Date.now() + 15_000;
+  const deadline = started + timeoutMs;
 
   while (Date.now() < deadline) {
     const found = log.match(/listening on (http:\/\/\S+)/)?.[1];
 
     if (found) return { origin: found, log: () => log, stop: () => stop(proc) };
 
-    if (proc.exitCode !== null)
-      throw new Error(`the binary exited with ${proc.exitCode}\n${await stderr}`);
+    if (proc.exitCode !== null) {
+      await Promise.race([stderrDrained, Bun.sleep(1_000)]);
+
+      throw new Error(`the binary exited with ${proc.exitCode}\n${stderrLog}`);
+    }
+
     await Bun.sleep(25);
   }
 
+  const waited = Date.now() - started;
+
   proc.kill();
-  throw new Error(`the binary never reported a port\n${await stderr}`);
+  // Reading the pipes only after the exit keeps whatever a killed child wrote last: a read that
+  // races the kill reports an empty stderr for a child that did print. A descendant that inherited
+  // the pipes can hold them open, so each read is bounded and the message reports what arrived.
+  await proc.exited;
+  await Promise.race([drained, Bun.sleep(1_000)]);
+  await Promise.race([stderrDrained, Bun.sleep(1_000)]);
+
+  throw new Error(
+    `the binary never reported a port on ${String(port)} after ${String(waited)}ms ` +
+      `(exit ${String(proc.exitCode)})\nstdout:\n${log}\nstderr:\n${stderrLog}`,
+  );
 }
 
 async function stop(proc: Bun.Subprocess): Promise<void> {

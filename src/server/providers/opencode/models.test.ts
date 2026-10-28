@@ -10,12 +10,12 @@ describe("opencode go model table", () => {
     expect(OPENCODE_MODELS.length).toBe(38);
   });
 
-  test("30 rows split across the four wires and 8 carry a gap", () => {
-    expect(count((model) => model.wire === "openai")).toBe(19);
-    expect(count((model) => model.wire === "responses")).toBe(5);
-    expect(count((model) => model.wire === "anthropic")).toBe(5);
-    expect(count((model) => model.wire === "google")).toBe(1);
-    expect(count((model) => model.wire === null && model.gap === "undocumented")).toBe(8);
+  test("30 rows split across the four compats and 8 carry a gap", () => {
+    expect(count((model) => model.compat === "chat")).toBe(19);
+    expect(count((model) => model.compat === "responses")).toBe(5);
+    expect(count((model) => model.compat === "messages")).toBe(5);
+    expect(count((model) => model.compat === "genai")).toBe(1);
+    expect(count((model) => model.compat === null && model.gap === "undocumented")).toBe(8);
   });
 
   test("every responses-only id is callable and unpriced", () => {
@@ -27,7 +27,7 @@ describe("opencode go model table", () => {
       "muse-spark-1.2-contributor",
     ]) {
       expect(opencodeModelOf(id)).toMatchObject({
-        wire: "responses",
+        compat: "responses",
         prices: { inputPricePerMtok: null, outputPricePerMtok: null },
       });
     }
@@ -43,16 +43,16 @@ describe("opencode go model table", () => {
     expect(opencodeModelOf("not-a-go-model")).toBeUndefined();
   });
 
-  test("a sibling suffix does not decide the wire", () => {
-    expect(opencodeModelOf("minimax-m3")?.wire).toBe("anthropic");
-    expect(opencodeModelOf("minimax-m3.1-flash")?.wire).toBe("openai");
-    expect(opencodeModelOf("qwen3.8-max")?.wire).toBe("anthropic");
-    expect(opencodeModelOf("qwen3.7-max")).toMatchObject({ wire: null, gap: "undocumented" });
+  test("a sibling suffix does not decide the compat", () => {
+    expect(opencodeModelOf("minimax-m3")?.compat).toBe("messages");
+    expect(opencodeModelOf("minimax-m3.1-flash")?.compat).toBe("chat");
+    expect(opencodeModelOf("qwen3.8-max")?.compat).toBe("messages");
+    expect(opencodeModelOf("qwen3.7-max")).toMatchObject({ compat: null, gap: "undocumented" });
   });
 
   test("a callable row is priced on both sides or on neither", () => {
     for (const model of OPENCODE_MODELS) {
-      if (model.wire === null) continue;
+      if (model.compat === null) continue;
 
       const input = model.prices.inputPricePerMtok;
       const output = model.prices.outputPricePerMtok;

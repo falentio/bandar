@@ -22,7 +22,12 @@ export const PROVIDER_AUTH_MODES = ["api-key", "oauth"] as const;
 
 export const PROVIDER_ORIGINS = ["builtin", "custom"] as const;
 
+// A compatibility is the wire a model answers on, independent of the kind that reaches it.
+export const COMPATIBILITIES = ["chat", "responses", "messages", "genai"] as const;
+
 export type BuiltInProviderKind = (typeof BUILT_IN_PROVIDER_KINDS)[number];
+
+export type Compat = (typeof COMPATIBILITIES)[number];
 
 export const BUILT_IN_PROVIDERS = {
   kilocode: {

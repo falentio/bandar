@@ -62,7 +62,7 @@ describe("opencode go catalog against the full gateway list", () => {
 
     expect(entries).toHaveLength(30);
     expect(new Set(entries.map((entry) => entry.upstreamModel))).toEqual(
-      new Set(OPENCODE_MODELS.filter((model) => model.wire !== null).map((model) => model.id)),
+      new Set(OPENCODE_MODELS.filter((model) => model.compat !== null).map((model) => model.id)),
     );
   });
 });

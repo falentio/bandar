@@ -88,7 +88,7 @@ and `usage` (`inputTokens`, `outputTokens`, each `number | null`).
 
 The gateway does not read provider JSON. It sees text, usage, finish, or a thrown
 `UpstreamError`. That boundary is the extension point: a new wire format changes
-one provider directory.
+one adapter file and the routes that name it.
 
 ## Ingress
 
@@ -175,7 +175,7 @@ the provider count.
 ## Registry
 
 Each provider is a directory under `src/server/providers/<kind>/`. Its
-`index.ts` exports one definition object that bundles the adapter with every
+`index.ts` exports one definition object that bundles the kind's wires with every
 capability the provider has. `src/server/providers/registry.ts` holds the record:
 
 ```ts
@@ -210,12 +210,27 @@ capabilities only. A built-in also carries the settings its row is seeded with:
 
 ```ts
 type DefinitionCapabilities<K extends ProviderKind> = {
-  readonly adapter: ProviderAdapter<K>;
+  readonly routes: ProviderRoutes<K>;
+  readonly defaultCompat: (upstreamModel: string) => CompatChoice;
   readonly authModes: readonly ProviderAuthMode[];
   readonly oauth?: OAuthConnector;
   readonly catalog?: ProviderCatalog;
   readonly renew?: CredentialRenewer;
 };
+
+type WireRoute<K extends ProviderKind = ProviderKind> = {
+  readonly adapter: ProviderAdapter<K>;
+  /** Joined onto the provider base URL for this (kind, compat) pair. */
+  readonly mount?: string;
+};
+
+type ProviderRoutes<K extends ProviderKind = ProviderKind> = Readonly<
+  Partial<Record<Compat, WireRoute<K>>>
+>;
+
+type CompatChoice =
+  | { readonly compat: Compat }
+  | { readonly compat: null; readonly reason: string };
 
 export type GenericProviderDefinition<K extends GenericProviderKind = GenericProviderKind> =
   DefinitionCapabilities<K> & {
@@ -229,6 +244,23 @@ export type BuiltInProviderDefinition<K extends BuiltInProviderKind = BuiltInPro
     readonly builtIn: BuiltInProviderSettings;
   };
 ```
+
+`Compat` is `chat | responses | messages | genai`, declared in
+`src/shared/providers.ts` and orthogonal to the provider kind: `chat` is OpenAI
+chat completions, `responses` is OpenAI Responses, `messages` is Anthropic
+Messages, and `genai` is Google GenAI. A kind declares one route per wire it can
+speak, and a route without a `mount` has its wire at the end of the base URL.
+`compatsOf(kind)` answers the declared list in the shared order, and it is the
+only list of a kind's compatibilities.
+
+`defaultCompat` is the provider's own rule for one upstream model, and it is
+total: a model the provider cannot route comes back as a `null` compat with the
+reason, not as a missing entry. A kind whose wire never depends on the model
+writes `always("chat")` and its definition stays one line longer than before.
+`registry.test.ts` fails when a declared route's adapter belongs to another kind,
+when a mount is not an absolute path without a trailing slash, when a default
+names a route the kind does not declare, and when a `Compat` value is declared by
+no kind at all.
 
 `authModes` is the credential modes the kind can accept, and it is the only source
 for them: a custom kind declares `["api-key"]`, Kilo Code declares
@@ -425,23 +457,23 @@ which is why it can list models before any key is saved.
 
 ## Multi-wire gateways
 
-OpenCode Go is one kind serving four wires under one bearer. Its table lives in
-`./src/server/providers/opencode/models.ts`; the mount and the adapter for each
-wire live in one `Record<OpenCodeWire, OpenCodeRoute>`, so a wire cannot be added
-without its route:
+OpenCode Go is one kind serving four compatibilities under one bearer. Its table
+lives in `./src/server/providers/opencode/models.ts`; `compat.ts` in the same
+directory holds the mounts and one `Record<Compat, WireRoute<"opencode">>`, so a
+compat cannot be added without its mount and adapter:
 
-| Wire        | Mount               | Adapter            | Auth                                          |
+| Compat      | Mount               | Adapter            | Auth                                          |
 | ----------- | ------------------- | ------------------ | --------------------------------------------- |
-| `openai`    | `/go/openai/v1`     | `chatAdapter`      | `Authorization: Bearer`                       |
+| `chat`      | `/go/openai/v1`     | `chatAdapter`      | `Authorization: Bearer`                       |
 | `responses` | `/go/openai/v1`     | `responsesAdapter` | `Authorization: Bearer`                       |
-| `anthropic` | `/go/anthropic/v1`  | `anthropicAdapter` | `Authorization: Bearer` + `anthropic-version` |
-| `google`    | `/go/google/v1beta` | `googleAdapter`    | `Authorization: Bearer`                       |
+| `messages`  | `/go/anthropic/v1`  | `anthropicAdapter` | `Authorization: Bearer` + `anthropic-version` |
+| `genai`     | `/go/google/v1beta` | `googleAdapter`    | `Authorization: Bearer`                       |
 
-`opencodeAdapter.chat` and `.stream` look the model up in the table, reject an
-unknown or gapped id with `invalid_request` before any request leaves the process,
-clone the target with the wire's mount joined onto its base URL, and delegate.
-There is no `try`/`catch`, so the sub-adapter's `UpstreamError` kind and status
-survive unchanged.
+`opencodeDefaultCompat` looks the model up in the table and answers the row's
+compat. An id the table does not list, or a row that is a gap, comes back as a
+`null` compat with the reason, which the gateway turns into a 400 before any
+request leaves the process. The catalog imports the mounts from the same module,
+so the list and the chat path cannot disagree about where a wire lives.
 
 Two rules keep a multi-wire catalog honest:
 
@@ -481,11 +513,14 @@ not measure time, and non-streaming requests have no TTFT.
    `BUILT_IN_PROVIDER_KINDS`, add its name, slug, and base URL to
    `BUILT_IN_PROVIDERS`, and add its label to `PROVIDER_KIND_LABELS`.
 2. Create `src/server/providers/<kind>/index.ts` with the definition, annotated
-   with its own kind. An OpenAI-compatible kind builds its adapter with
-   `bearerAdapter("<kind>")`; a wire that needs its own headers builds one with
-   `chatAdapter({ kind, label, headers })`. The Messages and GenAI adapters are
-   built the same way, with `anthropicAdapter({ kind, label, headers })` and
-   `googleAdapter({ kind, label, headers })`. Add an `OAuthConnector`, a
+   with its own kind, and declare one route per wire it speaks. An
+   OpenAI-compatible kind builds its chat adapter with `bearerAdapter("<kind>")`,
+   or with `chatAdapter({ kind, label, headers })` when the wire needs its own
+   headers. The other wires take `anthropicAdapter({ kind, label, headers })`,
+   `googleAdapter({ kind, label, headers })`, and
+   `responsesAdapter({ kind, label, headers })`. Add a `mount` for a wire that
+   sits under a path of the base URL, and set `defaultCompat` with `always(...)`
+   unless the choice depends on the model. Add an `OAuthConnector`, a
    `ProviderCatalog`, or a `CredentialRenewer` when the provider has one.
 3. Register the definition in `genericDefinitions` or `builtInDefinitions` in
    `src/server/providers/registry.ts`. Both `satisfies` records report a missing

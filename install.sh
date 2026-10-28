@@ -15,7 +15,7 @@ usage() {
   cat <<'EOF'
 Install a released bandar binary.
 
-  curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | BANDAR_GITHUB_TOKEN=... sh
 
 Environment:
   BANDAR_VERSION           Version to install, such as 0.1.0. Default: the latest release.
@@ -23,9 +23,13 @@ Environment:
   BANDAR_SCOPE             user or system: also register the service. Default: unset, no service step.
   BANDAR_CONFIG_DIR        Directory that receives install.json. Default: ~/.config/bandar
   BANDAR_SERVICE_TIMEOUT   Seconds the service step may run. Default: 30
-  BANDAR_RELEASE_BASE_URL  Directory that holds the release assets. Include the version.
-                           Default: https://github.com/falentio/bandar/releases/download/v<version>
-  BANDAR_RELEASE_API_URL   Latest-release JSON. Default: the GitHub API for this repository.
+  BANDAR_GITHUB_TOKEN      GitHub token for the private repository. GH_TOKEN and GITHUB_TOKEN
+                           are read too, in that order.
+  BANDAR_RELEASE_BASE_URL  Directory that holds the assets and their .sha256 siblings, for a
+                           mirror or a test server. Include the version. Overrides every other
+                           download route and needs no token.
+  BANDAR_RELEASE_API_URL   Latest-release JSON. The tags endpoint is derived from it.
+                           Default: the GitHub API for this repository.
 
 Docs: docs/install.md
 EOF
@@ -95,19 +99,6 @@ sha256_of() {
   fi
 }
 
-fetch() {
-  url=$1
-  dest=$2
-
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "$dest" "$url"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$dest" "$url"
-  else
-    die "neither curl nor wget is installed"
-  fi
-}
-
 run_with_timeout() {
   timeout_seconds=$1
   shift
@@ -162,12 +153,20 @@ sudo_hint() {
     hint="$hint BANDAR_SCOPE=\"$scope\""
   fi
 
+  if [ -n "$token" ]; then
+    hint="$hint BANDAR_GITHUB_TOKEN=\\\"...\\\""
+  fi
+
   if run_in_place; then
     printf '%s sh "%s"' "$hint" "$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
   else
     printf 'curl -fsSL %s | %s sh' "$RAW_INSTALLER" "$hint"
   fi
 }
+
+token=${BANDAR_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}
+api=${BANDAR_RELEASE_API_URL:-https://api.github.com/repos/$REPO/releases/latest}
+base_override=${BANDAR_RELEASE_BASE_URL:-}
 
 if [ ! -d "$install_dir" ]; then
   mkdir -p "$install_dir" 2>/dev/null || true
@@ -191,17 +190,112 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+fetch_err=$tmp/fetch.err
+
+private_repo() {
+  die "$REPO is private, so a GitHub token is required: set BANDAR_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN"
+}
+
+http_not_found() {
+  grep -q ' 404' "$fetch_err" 2>/dev/null
+}
+
+download_plain() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -o "$2" "$1" 2>"$fetch_err"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$2" "$1" 2>"$fetch_err"
+  else
+    die "neither curl nor wget is installed"
+  fi
+}
+
+plain_or_die() {
+  if download_plain "$1" "$2"; then
+    return 0
+  fi
+  if [ -z "$token" ] && http_not_found; then
+    private_repo
+  fi
+  die "cannot download $1"
+}
+
+header_config() {
+  headers=$tmp/headers
+  (
+    umask 077
+    printf 'header = "Authorization: Bearer %s"\n' "${token:?token is required}" >"$headers"
+    printf 'header = "Accept: %s"\n' "$1" >>"$headers"
+  )
+  printf '%s' "$headers"
+}
+
+curl_config=0
+if command -v curl >/dev/null 2>&1; then
+  curl_help=$(curl --help all 2>/dev/null || true)
+  case $curl_help in
+    *--config*) curl_config=1 ;;
+  esac
+fi
+
+download_authed() {
+  accept=${3:-application/octet-stream}
+
+  if command -v curl >/dev/null 2>&1; then
+    if [ "$curl_config" -eq 1 ]; then
+      curl -fsSL -K "$(header_config "$accept")" -o "$2" "$1" 2>"$fetch_err"
+    else
+      curl -fsSL -H "Authorization: Bearer ${token:?}" -H "Accept: $accept" -o "$2" "$1" 2>"$fetch_err"
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    wget --header="Authorization: Bearer ${token:?}" --header="Accept: $accept" -O "$2" "$1" 2>"$fetch_err"
+  else
+    die "neither curl nor wget is installed"
+  fi
+}
+
+fetch_metadata() {
+  if [ -n "$token" ]; then
+    download_authed "$1" "$2" application/vnd.github+json
+  else
+    download_plain "$1" "$2"
+  fi
+}
+
+asset_url_of() {
+  awk -v target="$2" '
+    BEGIN { RS = "}" }
+    {
+      record = $0
+      gsub(/[[:space:]]/, "", record)
+      head = substr(record, 1, index(record, "\"name\":\"" target "\""))
+      url = ""
+      while (match(head, /"url":"[^"]*"/)) {
+        url = substr(head, RSTART, RLENGTH)
+        head = substr(head, RSTART + RLENGTH)
+      }
+      if (url == "") next
+      sub(/^"url":"/, "", url)
+      sub(/"$/, "", url)
+      print url
+      exit
+    }
+  ' "$1"
+}
+
 if [ -n "${BANDAR_VERSION:-}" ]; then
   version=${BANDAR_VERSION#v}
   case $version in
     '' | */* | *' '*) die "BANDAR_VERSION must look like 0.1.0, got '$BANDAR_VERSION'" ;;
   esac
-else
-  api=${BANDAR_RELEASE_API_URL:-https://api.github.com/repos/$REPO/releases/latest}
-  fetch "$api" "$tmp/latest.json" || die "cannot read the latest release from $api"
+elif fetch_metadata "$api" "$tmp/latest.json"; then
   tag=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n 1)
   [ -n "$tag" ] || die "no tag_name in the response from $api"
   version=${tag#v}
+elif [ -z "$token" ] && http_not_found; then
+  private_repo
+else
+  die "cannot read the latest release from $api"
 fi
 
 asset=bandar-$version-$os-$arch
@@ -210,19 +304,42 @@ if [ "$os" = windows ]; then
   asset=$asset.exe
   binary=bandar.exe
 fi
+asset_sha=$asset.sha256
 
-base=${BANDAR_RELEASE_BASE_URL:-https://github.com/$REPO/releases/download/v$version}
-base=${base%/}
+if [ -n "$base_override" ]; then
+  base=${base_override%/}
+  printf 'bandar: downloading %s/%s\n' "$base" "$asset"
+  plain_or_die "$base/$asset" "$tmp/$asset"
+  plain_or_die "$base/$asset_sha" "$tmp/$asset_sha"
+elif [ -n "$token" ]; then
+  case $api in
+    */latest) tags_url=${api%/latest}/tags/v$version ;;
+    *) tags_url=${api%/}/tags/v$version ;;
+  esac
 
-printf 'bandar: downloading %s/%s\n' "$base" "$asset"
+  download_authed "$tags_url" "$tmp/release.json" application/vnd.github+json ||
+    die "cannot read release v$version from $tags_url"
 
-fetch "$base/$asset" "$tmp/$asset" || die "cannot download $base/$asset"
-fetch "$base/$asset.sha256" "$tmp/$asset.sha256" || die "cannot download $base/$asset.sha256"
+  asset_url=$(asset_url_of "$tmp/release.json" "$asset")
+  [ -n "$asset_url" ] || die "release v$version publishes no $asset asset"
 
-expected=$(awk 'NR == 1 { print $1 }' "$tmp/$asset.sha256")
-[ -n "$expected" ] || die "$asset.sha256 is empty"
+  sha_url=$(asset_url_of "$tmp/release.json" "$asset_sha")
+  [ -n "$sha_url" ] || die "release v$version publishes no $asset_sha asset"
+
+  printf 'bandar: downloading %s %s\n' "$version" "$asset"
+  download_authed "$asset_url" "$tmp/$asset" || die "cannot download the $asset asset from the API"
+  download_authed "$sha_url" "$tmp/$asset_sha" || die "cannot download the $asset_sha asset from the API"
+else
+  base=https://github.com/$REPO/releases/download/v$version
+  printf 'bandar: downloading %s/%s\n' "$base" "$asset"
+  plain_or_die "$base/$asset" "$tmp/$asset"
+  plain_or_die "$base/$asset_sha" "$tmp/$asset_sha"
+fi
+
+expected=$(awk 'NR == 1 { print $1 }' "$tmp/$asset_sha")
+[ -n "$expected" ] || die "$asset_sha is empty"
 case $expected in
-  *[!0-9a-fA-F]*) die "$asset.sha256 does not start with a sha256 digest" ;;
+  *[!0-9a-fA-F]*) die "$asset_sha does not start with a sha256 digest" ;;
 esac
 expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
 actual=$(sha256_of "$tmp/$asset")

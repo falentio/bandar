@@ -140,3 +140,86 @@ rm -rf ~/.config/bandar ~/.bandar ~/.bandar_dev
 Read [`docs/install.md`](./docs/install.md) for the installer in full, [`docs/update.md`](./docs/update.md)
 for updates, and [`docs/service.md`](./docs/service.md) for the service unit. To point a
 coding CLI at the gateway, read [`docs/cli-tools.md`](./docs/cli-tools.md).
+
+## Configuration
+
+`bandar` reads `config.json` from `BANDAR_HOME` on every start. A missing file means
+the defaults. An installed binary reads `~/.bandar/config.json` and a source checkout
+reads `~/.bandar_dev/config.json`. A service unit moves `BANDAR_HOME` to its data
+directory, so the service reads `<data dir>/config.json`:
+`~/.local/share/bandar/config.json` for a user unit and `/var/lib/bandar/config.json`
+for a system one.
+
+```json
+{
+  "$schema": "./config.schema.json",
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000,
+    "authUrl": "https://llm.example.com",
+    "trustedOrigins": ["https://llm.example.com"]
+  }
+}
+```
+
+| key                     | value                        | default                   |
+| ----------------------- | ---------------------------- | ------------------------- |
+| `server.host`           | a non-empty string           | `0.0.0.0`                 |
+| `server.port`           | an integer from 0 to 65535   | `3000`                    |
+| `server.authUrl`        | an http or https URL         | `http://localhost:<port>` |
+| `server.trustedOrigins` | a non-empty array of origins | derived, see below        |
+
+Every key is optional, and so is the `server` section. An origin is a URL with no path,
+query, fragment, or credentials, and it stores as the URL's origin, so `https://X.COM/`
+becomes `https://x.com`. The file is strict: an unknown key, a root that is not a JSON
+object, an empty host, a port that is not a whole number in range, an empty
+`server.trustedOrigins`, an origin with a path, a URL that is not http or https, and a
+file that is not JSON all fail the boot, and the message names the file and the field. A
+typo never falls back to a default.
+
+`bandar` writes `config.schema.json` beside the settings on every read, and adds
+`"$schema": "./config.schema.json"` to a `config.json` that lacks the key, so an editor
+completes and checks the file offline. The document is generated from the parser with
+[`@valibot/to-json-schema`](https://www.npmjs.com/package/@valibot/to-json-schema), by the
+binary that wrote it, so its keys, types, and bounds are the ones that boot accepts. The URL
+grammar behind an origin cannot be written in JSON Schema, so an editor accepts a few values
+the server still rejects at boot. A `$schema` you wrote yourself is left alone, and adding
+the key changes nothing else in the file. Neither write is required: a data directory that
+is not writable only costs the editor completion.
+
+The default trusted origins start with the auth URL's own origin. They then follow the
+resolved port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
+`http://<host>:<port>` when `server.host` names an address rather than `0.0.0.0` or
+`::`. Only a development run adds the web dev server at `http://localhost:5173` and
+`http://127.0.0.1:5173`.
+
+A `server.port` of 0 asks the OS for an ephemeral port. The server binds one, but the
+derived auth URL and trusted origins name port 0 and reach nothing, so set
+`server.authUrl` and `server.trustedOrigins` yourself when the port is 0.
+
+An environment variable wins over the file, and the file wins over the default. A blank
+environment variable counts as unset. The dev proxy in `vite.config.ts` takes the API port
+from `BANDAR_PORT` rather than the file, so set that variable too when you change
+`server.port` and run `bun run dev`.
+
+Behind a reverse proxy, set `server.authUrl` to the public URL, such as
+`https://llm.example.com`. Its origin joins the default trusted origins, so sign-in links
+and the browser's origin check agree with that one key, and `server.trustedOrigins` is
+for extra origins only. `authSecret` is not a settings key: the data directory is
+world-readable, while the service env file is mode 600.
+
+Run `bandar config` to write the schema, point the file at it, and print what it
+resolved and where each value came from:
+
+```text
+settings        /home/andrew/.bandar/config.json (found)
+mode            development
+server.host     0.0.0.0 (default)
+server.port     4100 (config.json)
+server.authUrl  https://llm.example.com (config.json)
+trustedOrigins  https://llm.example.com, https://alt.example.com (config.json)
+```
+
+`bandar` reads the file on every start, so a restart applies an edit. A service unit
+outranks the file only when `bandar install-service` was given `--port`. Read
+[`docs/service.md`](./docs/service.md) for the unit.

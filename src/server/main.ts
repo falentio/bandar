@@ -4,7 +4,7 @@ import { createAuth } from "./auth";
 import { parseArgs } from "./cli/args";
 import type { Env } from "./cli/command";
 import { createCli, renderUsage } from "./cli/registry";
-import { parseConfig } from "./config";
+import { loadConfig } from "./config";
 import { openDatabase } from "./db/client";
 import { applyMigrations } from "./db/migrate";
 import { DuckDb } from "./duck/client";
@@ -16,6 +16,7 @@ import { migrations } from "./generated/migrations";
 import { version } from "./generated/version";
 import { assignProviderSlugs } from "./providers/seeding";
 import { createSealer } from "./seal";
+import { settingsIo } from "./settings-io";
 
 export async function main(env: Env, argv: readonly string[]): Promise<number> {
   const cli = createCli(startServer);
@@ -41,7 +42,7 @@ export async function main(env: Env, argv: readonly string[]): Promise<number> {
 }
 
 async function startServer(env: Env): Promise<void> {
-  const config = parseConfig(env);
+  const config = loadConfig(env, settingsIo);
 
   const { sqlite, db } = openDatabase(config.databasePath);
   const migration = applyMigrations(sqlite, migrations);

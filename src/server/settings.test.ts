@@ -195,6 +195,11 @@ describe("the schema beside the file", () => {
     expect(first?.[0]).toBe(settingsSchemaPath(home));
     expect(JSON.parse(first?.[1] ?? "null")).toEqual(settingsSchema);
     expect(rest).toEqual([]);
+    expect(settingsFrom(readerOf('{"$schema":"./config.schema.json"}'))).toEqual({
+      kind: "ok",
+      path,
+      settings: { $schema: "./config.schema.json" },
+    });
   });
 
   test("a file without $schema keeps every byte and gains the key", () => {
@@ -226,11 +231,33 @@ describe("the schema beside the file", () => {
   });
 
   test("a $schema the operator wrote is left alone", () => {
-    expect(rewritesOf('{"$schema":"https://example.com/schema.json"}')).toEqual([]);
+    const text = '{"$schema":"https://example.com/schema.json"}';
+
+    expect(rewritesOf(text)).toEqual([]);
+    expect(settingsFrom(readerOf(text))).toEqual({
+      kind: "ok",
+      path,
+      settings: { $schema: "https://example.com/schema.json" },
+    });
   });
 
   test("a file that already points at the schema is not rewritten", () => {
-    expect(rewritesOf('{"$schema":"./config.schema.json","server":{"port":4000}}')).toEqual([]);
+    const text = '{"$schema":"./config.schema.json","server":{"port":4000}}';
+
+    expect(rewritesOf(text)).toEqual([]);
+    expect(settingsFrom(readerOf(text))).toEqual({
+      kind: "ok",
+      path,
+      settings: { $schema: "./config.schema.json", server: { port: 4000 } },
+    });
+  });
+
+  test("an unknown key beside $schema still fails the boot", () => {
+    const reason = reasonOf(
+      settingsFrom(readerOf('{"$schema":"./config.schema.json","nope":true}')),
+    );
+
+    expect(reason).toMatch(/^nope: Invalid key\b/u);
   });
 
   test("a missing file writes the schema and nothing else", () => {

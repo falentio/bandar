@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
+import { BINARY } from "./binary";
 import {
   AnalyticsSchema,
   RequestListSchema,
@@ -26,7 +27,6 @@ import {
 } from "../src/shared/providers";
 import { TagListSchema, tagPaths } from "../src/shared/tags";
 
-const BINARY = join(import.meta.dir, "../dist/bandar");
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
 const DUCK_DIR = join(import.meta.dir, "../duckdb");
 const AUTH_SECRET = "smoke-secret-0123456789abcdef0123456789abcdef";

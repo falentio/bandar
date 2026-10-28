@@ -343,9 +343,12 @@ bun run dev
 ## Build
 
 ```sh
-bun run build        # dist/bandar, about 181 MB
-BANDAR_AUTH_SECRET=$(openssl rand -hex 32) ./dist/bandar
+bun run build        # dist/bandar, about 181 MB (dist/bandar.exe on Windows)
+BANDAR_AUTH_SECRET=$(openssl rand -hex 32) bun run start
 ```
+
+`bun run start` spawns the binary with the terminal attached and picks
+`dist/bandar.exe` on Windows.
 
 The binary serves the client and API on one port (`BANDAR_PORT`, default 3000)
 and creates `bandar.db` and `bandar.duckdb` beside the working directory. It
@@ -364,6 +367,55 @@ This is why the binary is large: the DuckDB shared library is about 92 MB.
 DuckDB calls are synchronous, so a dashboard query blocks the event loop for its
 duration. The event inserts and the bounded analytics queries take milliseconds;
 a large ad-hoc scan would need a worker.
+
+## Releasing
+
+Tag the commit you want to ship, then push the tag:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+`.github/workflows/release.yml` takes over from there, and `.bun-version` pins
+Bun 1.4.3 for every workflow. `verify` runs `bun run check` and `bun run test`
+on Linux. `build` then builds, smoke-tests, and packages on Linux x64 and
+Windows x64. `publish` attaches the four files to one GitHub release named after
+the tag.
+
+| Asset                                 | Platform    |
+| ------------------------------------- | ----------- |
+| `bandar-0.1.0-linux-x64`              | Linux x64   |
+| `bandar-0.1.0-linux-x64.sha256`       | Linux x64   |
+| `bandar-0.1.0-windows-x64.exe`        | Windows x64 |
+| `bandar-0.1.0-windows-x64.exe.sha256` | Windows x64 |
+
+On Linux, mark the binary executable and check it before the first run:
+
+```sh
+chmod +x bandar-0.1.0-linux-x64
+sha256sum -c bandar-0.1.0-linux-x64.sha256
+```
+
+On Windows, compare the two hashes:
+
+```powershell
+(Get-FileHash bandar-0.1.0-windows-x64.exe).Hash
+Get-Content bandar-0.1.0-windows-x64.exe.sha256
+```
+
+`scripts/release.ts` names the artifact and writes the checksum. To run that
+packaging step by hand against a local build:
+
+```sh
+BANDAR_RELEASE_VERSION=0.1.0 bun scripts/release.ts
+```
+
+A re-run of a failed job republishes with `--clobber`, so a tag converges
+instead of failing on an existing release.
+
+arm64 is not built yet. `scripts/release.ts` already maps `arm64` and exits on
+any other architecture, so a new target only needs a `build` matrix entry.
 
 ## Migrations
 
@@ -385,24 +437,24 @@ semicolons out of string literals in a migration.
 
 ## Commands
 
-| Script                   | What it does                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------- |
-| `bun run dev`            | Fetch DuckDB, `gen`, Vite, and the watched API in parallel.                      |
-| `bun run dev:web`        | Vite alone.                                                                      |
-| `bun run dev:server`     | `gen`, then the API with `bun --watch`.                                          |
-| `bun run gen`            | Embed client assets, SQLite migrations, DuckDB migrations, and the library path. |
-| `bun run build:client`   | `vp build` to `dist/client`.                                                     |
-| `bun run compile`        | `gen --strict` then `bun build --compile` to `dist/bandar`.                      |
-| `bun run build`          | Client build, then compile.                                                      |
-| `bun run start`          | Run `./dist/bandar`.                                                             |
-| `bun run check`          | Format, lint, and type-check.                                                    |
-| `bun run check:fix`      | The same with fixes.                                                             |
-| `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                       |
-| `bun run smoke`          | Boot `dist/bandar` and run 71 end-to-end checks against fake upstreams.          |
-| `bun run verify`         | `check`, `test`, `build`, `smoke`.                                               |
-| `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                    |
-| `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                       |
-| `bun run duck:fetch`     | Copy the platform DuckDB library into `vendor/duckdb/`.                          |
+| Script                   | What it does                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| `bun run dev`            | Fetch DuckDB, `gen`, Vite, and the watched API in parallel.                                |
+| `bun run dev:web`        | Vite alone.                                                                                |
+| `bun run dev:server`     | `gen`, then the API with `bun --watch`.                                                    |
+| `bun run gen`            | Embed client assets, SQLite migrations, DuckDB migrations, and the library path.           |
+| `bun run build:client`   | `vp build` to `dist/client`.                                                               |
+| `bun run compile`        | `gen --strict` then `bun build --compile` to `dist/bandar` (`dist/bandar.exe` on Windows). |
+| `bun run build`          | Client build, then compile.                                                                |
+| `bun run start`          | Run the compiled binary through `scripts/start.ts`.                                        |
+| `bun run check`          | Format, lint, and type-check.                                                              |
+| `bun run check:fix`      | The same with fixes.                                                                       |
+| `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                                 |
+| `bun run smoke`          | Boot the compiled binary and run 71 end-to-end checks against fake upstreams.              |
+| `bun run verify`         | `check`, `test`, `build`, `smoke`.                                                         |
+| `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                              |
+| `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                                 |
+| `bun run duck:fetch`     | Copy the platform DuckDB library into `vendor/duckdb/`.                                    |
 
 The smoke run mints a user, creates one provider per generic wire against local
 fake upstreams, checks the seven seeded built-ins, imports every catalog (one with
@@ -422,6 +474,9 @@ bandar/
 ├── scripts/
 │   ├── gen.ts                      # asset + migration embedding
 │   ├── fetch-duckdb.ts             # platform library into vendor/
+│   ├── binary.ts                   # compiled-binary path per platform
+│   ├── release.ts                  # artifact name + sha256 into dist/release
+│   ├── start.ts                    # spawn the compiled binary
 │   └── smoke.ts                    # compiled-binary end-to-end checks
 ├── src/shared/                     # valibot schemas and paths for both sides
 │   ├── chat.ts                     # OpenAI ingress schema, model list

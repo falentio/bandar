@@ -1,10 +1,11 @@
+import { readFileSync } from "node:fs";
 import { createApp } from "./app";
 import { createClientBundle } from "./assets";
 import { createAuth } from "./auth";
 import { parseArgs } from "./cli/args";
 import type { Env } from "./cli/command";
 import { createCli, renderUsage } from "./cli/registry";
-import { parseConfig } from "./config";
+import { loadConfig } from "./config";
 import { openDatabase } from "./db/client";
 import { applyMigrations } from "./db/migrate";
 import { DuckDb } from "./duck/client";
@@ -41,7 +42,7 @@ export async function main(env: Env, argv: readonly string[]): Promise<number> {
 }
 
 async function startServer(env: Env): Promise<void> {
-  const config = parseConfig(env);
+  const config = loadConfig(env, (path) => readFileSync(path, "utf8"));
 
   const { sqlite, db } = openDatabase(config.databasePath);
   const migration = applyMigrations(sqlite, migrations);

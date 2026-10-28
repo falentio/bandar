@@ -95,7 +95,11 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
     credentials.set(row.providerId, list);
   }
 
-  const enabledSlugs = new Set(modelRows.filter((row) => row.enabled).map((row) => row.slug));
+  // A model's ref is shadowed when another model's address already names it.
+  const enabledSlugHolders = new Map(
+    modelRows.filter((row) => row.enabled).map((row) => [row.slug, row.id]),
+  );
+
   const providerSlugs = new Map(providerRows.map((row) => [row.id, row.slug]));
   const providerKinds = new Map(providerRows.map((row) => [row.id, row.kind]));
 
@@ -104,6 +108,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
   for (const row of modelRows) {
     const list = grouped.get(row.providerId) ?? [];
     const ref = providerRefOf(providerSlugs.get(row.providerId) ?? "", row.upstreamModel);
+    const holder = enabledSlugHolders.get(ref);
 
     list.push({
       id: row.id,
@@ -111,7 +116,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       slug: row.slug,
       alias: row.alias,
       ref,
-      shadowed: enabledSlugs.has(ref),
+      shadowed: holder !== undefined && holder !== row.id,
       compat: parseCompat(row.compat),
       defaultCompat: defaultCompatOf(providerKinds.get(row.providerId), row.upstreamModel),
       inputPricePerMtok: row.inputPricePerMtok,

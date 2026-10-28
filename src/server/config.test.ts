@@ -257,6 +257,16 @@ describe("the derived defaults", () => {
     ]);
   });
 
+  test("an auth URL leads the derived origins, so a proxy needs one setting", () => {
+    expect(
+      reportOf({ BANDAR_AUTH_URL: "https://llm.example.com/auth" }).config.trustedOrigins,
+    ).toEqual([
+      "https://llm.example.com",
+      `http://localhost:${DEFAULT_API_PORT}`,
+      `http://127.0.0.1:${DEFAULT_API_PORT}`,
+    ]);
+  });
+
   test("a wildcard host adds no host origin", () => {
     for (const host of ["0.0.0.0", "::"]) {
       expect(reportOf({ BANDAR_HOST: host }).config.trustedOrigins).toEqual([

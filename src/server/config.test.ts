@@ -185,12 +185,43 @@ describe("the settings file", () => {
       }),
       {
         BANDAR_AUTH_URL: "https://env.example.com",
-        BANDAR_TRUSTED_ORIGINS: " https://one.example.com , https://two.example.com ,",
+        BANDAR_TRUSTED_ORIGINS: " https://one.example.com/ , https://TWO.example.com ,",
       },
     );
 
     expect(config.authUrl).toBe("https://env.example.com");
     expect(config.trustedOrigins).toEqual(["https://one.example.com", "https://two.example.com"]);
+  });
+
+  test("an environment origin with a path fails the boot, naming the variable and the value", () => {
+    const origin = "https://llm.example.com/api";
+    const attempt = () => fromFile("{}", { BANDAR_TRUSTED_ORIGINS: origin });
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow(`BANDAR_TRUSTED_ORIGINS: ${origin}`);
+    expect(attempt).toThrow("must be an origin");
+  });
+
+  test("an environment entry that is not a URL fails the boot, naming the variable and the value", () => {
+    const attempt = () =>
+      fromFile("{}", { BANDAR_TRUSTED_ORIGINS: "https://one.example.com, local" });
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("BANDAR_TRUSTED_ORIGINS: local");
+  });
+
+  test("an environment origin that is not http or https fails the boot", () => {
+    const attempt = () => fromFile("{}", { BANDAR_TRUSTED_ORIGINS: "javascript:alert(1)" });
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("must be an http or https URL");
+  });
+
+  test("an environment list with no entries fails the boot", () => {
+    const attempt = () => fromFile("{}", { BANDAR_TRUSTED_ORIGINS: " , " });
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("BANDAR_TRUSTED_ORIGINS: needs at least one origin");
   });
 
   test("loadConfig reads config.json under BANDAR_HOME", () => {

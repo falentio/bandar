@@ -10,7 +10,9 @@ STUB_TOKEN=stub-token-123
 WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/bandar-install-test.XXXXXX")" && pwd -P)
 STUB=$WORK/stub
 PORT_FILE=$WORK/port
+FOREIGN_PORT_FILE=$WORK/foreign-port
 REQUEST_LOG=$WORK/requests.log
+FOREIGN_LOG=$WORK/foreign.log
 checks=0
 failures=0
 
@@ -47,6 +49,8 @@ const portFile = process.argv[3] ?? "";
 const logFile = process.argv[4] ?? "";
 const token = process.argv[5] ?? "";
 const osArch = process.argv[6] ?? "";
+const foreignPortFile = process.argv[7] ?? "";
+const foreignLog = process.argv[8] ?? "";
 const extension = osArch.startsWith("windows") ? ".exe" : "";
 
 const latest = async (): Promise<string> =>
@@ -54,6 +58,21 @@ const latest = async (): Promise<string> =>
 
 const assetName = (version: string): string =>
   "bandar-" + version + "-" + osArch + extension;
+
+// A second origin, so a case can prove a feed-named host receives no request at all. It logs before
+// it answers, because a request that never arrives is the point.
+const foreign = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch(request) {
+    appendFileSync(foreignLog, new URL(request.url).pathname + "\n");
+    return new Response("foreign\n");
+  },
+});
+
+await Bun.write(foreignPortFile, String(foreign.port));
+
+const foreignBase = "http://127.0.0.1:" + foreign.port;
 
 const server = Bun.serve({
   hostname: "127.0.0.1",
@@ -64,6 +83,32 @@ const server = Bun.serve({
     const auth = request.headers.get("authorization") ?? "";
     const accept = request.headers.get("accept") ?? "";
     appendFileSync(logFile, url.pathname + url.search + " auth=" + auth + " accept=" + accept + "\n");
+
+    // A release page that redirects somewhere without a tag in it.
+    if (url.pathname === "/broken/releases/latest") {
+      return new Response(null, { status: 302, headers: { location: origin + "/broken/home" } });
+    }
+
+    // A private-fork feed whose release names asset urls on another origin entirely.
+    if (url.pathname === "/evil/latest") {
+      if (auth !== "Bearer " + token) return new Response("unauthorized\n", { status: 401 });
+      return Response.json({ tag_name: "v" + (await latest()) });
+    }
+
+    if (url.pathname.startsWith("/evil/tags/v")) {
+      if (auth !== "Bearer " + token) return new Response("unauthorized\n", { status: 401 });
+      const stolenFrom = url.pathname.slice("/evil/tags/v".length);
+      return Response.json({
+        tag_name: "v" + stolenFrom,
+        assets: [
+          { url: foreignBase + "/stolen/v" + stolenFrom + "/binary", name: assetName(stolenFrom) },
+          {
+            url: foreignBase + "/stolen/v" + stolenFrom + "/checksum",
+            name: assetName(stolenFrom) + ".sha256",
+          },
+        ],
+      });
+    }
 
     if (url.pathname === "/releases/latest" && !accept.includes("vnd.github")) {
       const version = await latest();
@@ -113,7 +158,7 @@ await Bun.write(portFile, String(server.port));
 TSSERVER
 
 bun "$WORK/server.ts" "$STUB" "$PORT_FILE" "$REQUEST_LOG" "$STUB_TOKEN" "$os-$arch" \
-  >"$WORK/server.log" 2>&1 &
+  "$FOREIGN_PORT_FILE" "$FOREIGN_LOG" >"$WORK/server.log" 2>&1 &
 server_pid=$!
 
 cleanup() {
@@ -124,7 +169,7 @@ cleanup() {
 trap cleanup EXIT
 
 i=0
-while [ ! -s "$PORT_FILE" ]; do
+while [ ! -s "$PORT_FILE" ] || [ ! -s "$FOREIGN_PORT_FILE" ]; do
   i=$((i + 1))
   if [ "$i" -gt 10 ]; then
     printf 'install-test: the stub server did not start\n' >&2
@@ -648,6 +693,82 @@ expect_contains "unsupported os: names the pair" "no release for darwin-x64"
 expect_missing "unsupported os: installs nothing" "$case_dir/bin/$binary"
 printf '\ninstall.sh output on an unsupported platform:\n'
 printf '%s\n' "$RUN_OUTPUT" | sed 's/^/  /'
+
+printf '\ncase: an install path that holds a quote and a backslash\n'
+if [ "$os" = windows ]; then
+  printf 'skip escaped path: a Windows file name cannot hold a quote\n'
+else
+  case_dir=$WORK/escaped
+  quote_dir="$case_dir/bin/my\"dir\\back"
+  mkdir -p "$quote_dir" "$case_dir/config" "$case_dir/tmp"
+  run_install "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_INSTALL_DIR="$quote_dir"
+  expect_status "escaped path: exits 0" 0
+  expect_installed "escaped path: installs the binary" "$quote_dir/$binary"
+  escaped_manifest=$case_dir/config/install.json
+  if bun -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' \
+    "$escaped_manifest" >/dev/null 2>&1; then
+    pass "escaped path: install.json parses as JSON"
+  else
+    fail "escaped path: install.json parses as JSON" "$(cat "$escaped_manifest")"
+  fi
+  escaped_parsed=$(bun -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).path)' \
+    "$escaped_manifest" 2>/dev/null || true)
+  if [ "$escaped_parsed" = "$quote_dir/$binary" ]; then
+    pass "escaped path: the manifest keeps the escaped path"
+  else
+    fail "escaped path: the manifest keeps the escaped path" "path is [$escaped_parsed]"
+  fi
+  installed=
+  if [ -f "$ROOT/src/server/generated/version.ts" ]; then
+    installed=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' \
+      "$ROOT/src/server/generated/version.ts" | head -1)
+  fi
+  if [ -n "$installed" ]; then
+    printf '%s\n' "$installed" >"$STUB/latest"
+    update_status=0
+    RUN_OUTPUT=$(env BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_WEB_URL="$base" \
+      bun "$ROOT/src/server/main.ts" update 2>&1) || update_status=$?
+    if [ "$update_status" -eq 0 ]; then
+      pass "escaped path: bandar update reads the manifest"
+    else
+      fail "escaped path: bandar update reads the manifest" "exit $update_status: $RUN_OUTPUT"
+    fi
+    expect_absent "escaped path: bandar update never calls it unreadable" "unreadable"
+    expect_contains "escaped path: bandar update reports the installed version" "bandar $installed is up to date"
+    RUN_OUTPUT=$(env BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_WEB_URL="$base" \
+      bun "$ROOT/src/server/main.ts" update --check 2>&1)
+    expect_contains "escaped path: update --check reports the installed version" "installed $installed"
+    expect_absent "escaped path: update --check never calls it unreadable" "unreadable"
+    printf '%s\n' "$VERSION" >"$STUB/latest"
+  else
+    printf 'skip escaped path CLI: run "bun run gen" so src/server/generated/version.ts exists\n'
+  fi
+fi
+
+printf '\ncase: a release page that redirects without a version tag\n'
+case_dir=$WORK/no-tag
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+run_install "$case_dir" BANDAR_RELEASE_WEB_URL="$base/broken"
+expect_status "no version tag: exits 1" 1
+expect_contains "no version tag: says the page named no version" "did not redirect to a version tag"
+expect_absent "no version tag: never reports a missing parameter" "parameter not set"
+expect_missing "no version tag: installs nothing" "$case_dir/bin/$binary"
+
+printf '\ncase: a feed that names a foreign asset host\n'
+case_dir=$WORK/foreign
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+: >"$FOREIGN_LOG"
+run_api "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_GITHUB_TOKEN="$STUB_TOKEN" \
+  BANDAR_RELEASE_API_URL="$base/evil/latest"
+expect_status "foreign asset host: exits 1" 1
+expect_contains "foreign asset host: refuses to send the token there" "not sending the token there"
+expect_contains "foreign asset host: names the host the feed named" "127.0.0.1:$(cat "$FOREIGN_PORT_FILE")"
+expect_missing "foreign asset host: installs nothing" "$case_dir/bin/$binary"
+if [ -s "$FOREIGN_LOG" ]; then
+  fail "foreign asset host: receives no request" "$(cat "$FOREIGN_LOG")"
+else
+  pass "foreign asset host: receives no request"
+fi
 
 printf '\n%s checks, %s failed\n' "$checks" "$failures"
 

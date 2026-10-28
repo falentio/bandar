@@ -307,6 +307,17 @@ check_version() {
   esac
 }
 
+host_of() {
+  case $1 in
+    *://*) host=${1#*://} ;;
+    *) return 1 ;;
+  esac
+
+  host=${host%%/*}
+  host=${host##*@}
+  printf '%s' "$host" | tr '[:upper:]' '[:lower:]'
+}
+
 asset_url_of() {
   awk -v target="$2" '
     BEGIN { RS = "}" }
@@ -328,6 +339,26 @@ asset_url_of() {
   ' "$1"
 }
 
+# The allowlist "bandar update" already applies: a feed may rename an asset, but it does not get to
+# name a host that would receive the token.
+require_allowed_asset() {
+  asset_host=$(host_of "$1" || true)
+
+  if [ -n "$asset_host" ] && asset_host_allowed "$asset_host"; then
+    return 0
+  fi
+
+  die "asset $2 is served from ${asset_host:-an unparsable url}, which is not api.github.com, github.com, objects.githubusercontent.com, release-assets.githubusercontent.com, or the BANDAR_RELEASE_API_URL host: not sending the token there"
+}
+
+asset_host_allowed() {
+  case $1 in
+    api.github.com | github.com | objects.githubusercontent.com | release-assets.githubusercontent.com) return 0 ;;
+  esac
+
+  [ "$1" = "$feed_host" ]
+}
+
 if [ -n "${BANDAR_VERSION:-}" ]; then
   version=${BANDAR_VERSION#v}
   case $version in
@@ -344,10 +375,8 @@ else
   location=$(fetch_location "$latest_release_page") ||
     die "cannot read the latest release page: $latest_release_page"
 
-  version=$(version_from_location "$location") || {
-    check_version
-    die "cannot read the latest release from $latest_release_page"
-  }
+  version=$(version_from_location "$location") ||
+    die "the latest release page did not redirect to a version tag: $latest_release_page"
   check_version "$version"
 fi
 
@@ -360,6 +389,8 @@ fi
 asset_sha=$asset.sha256
 
 if [ -n "$api" ]; then
+  feed_host=$(host_of "$api" || true)
+
   case $api in
     */latest) tags_url=${api%/latest}/tags/v$version ;;
     *) tags_url=${api%/}/tags/v$version ;;
@@ -370,9 +401,11 @@ if [ -n "$api" ]; then
 
   asset_url=$(asset_url_of "$tmp/release.json" "$asset")
   [ -n "$asset_url" ] || die "release v$version publishes no $asset asset"
+  require_allowed_asset "$asset_url" "$asset"
 
   sha_url=$(asset_url_of "$tmp/release.json" "$asset_sha")
   [ -n "$sha_url" ] || die "release v$version publishes no $asset_sha asset"
+  require_allowed_asset "$sha_url" "$asset_sha"
 
   printf 'bandar: downloading %s %s\n' "$version" "$asset"
   download_authed "$asset_url" "$tmp/$asset" || die "cannot download the $asset asset from the API"
@@ -417,8 +450,25 @@ if [ -f "$manifest" ]; then
   had_manifest=1
 fi
 
+# A quote, a backslash, or a control character in the path has to reach install.json escaped. An
+# unescaped one writes a manifest that "bandar update" calls unreadable from then on, and the binary
+# it points at can never be replaced again.
 json_escape() {
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\"/g'
+  printf '%s' "$1" | awk '
+    BEGIN { RS = "\001"; ORS = ""; bs = "\\"; dq = "\"" }
+    {
+      escaped = ""
+      for (i = 1; i <= length($0); i += 1) {
+        character = substr($0, i, 1)
+        if (character == bs) escaped = escaped bs bs
+        else if (character == dq) escaped = escaped bs dq
+        else if (character == "\n") escaped = escaped bs "n"
+        else if (character == "\r") escaped = escaped bs "r"
+        else if (character == "\t") escaped = escaped bs "t"
+        else escaped = escaped character
+      }
+      printf "%s", escaped
+    }'
 }
 
 # The manifest lands before the binary. A manifest that cannot be written must leave no new binary,

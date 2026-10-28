@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vite-plus/test";
-import { loadSettings, settingsPath, settingsSchemaPath } from "./settings";
-import { settingsSchema } from "./settings-schema";
+import { loadSettings, settingsPath, settingsSchema, settingsSchemaPath } from "./settings";
 
 const home = "/home/andrew/.bandar";
 
@@ -283,18 +282,5 @@ describe("the schema beside the file", () => {
     });
 
     expect(result.kind).toBe("ok");
-  });
-
-  test("the schema lists the keys the server reads", () => {
-    expect(settingsSchema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
-    expect(Object.keys(settingsSchema.properties)).toEqual(["$schema", "server"]);
-    expect(Object.keys(settingsSchema.properties.server.properties)).toEqual([
-      "host",
-      "port",
-      "authUrl",
-      "trustedOrigins",
-    ]);
-    expect(settingsSchema.additionalProperties).toBe(false);
-    expect(settingsSchema.properties.server.additionalProperties).toBe(false);
   });
 });

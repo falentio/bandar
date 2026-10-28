@@ -179,10 +179,13 @@ typo never falls back to a default.
 
 `bandar` writes `config.schema.json` beside the settings on every read, and adds
 `"$schema": "./config.schema.json"` to a `config.json` that lacks the key, so an editor
-completes and checks the file offline. The schema file is written by the running binary, so the
-copy beside the settings always matches the version that wrote it, and a `$schema` you
-wrote yourself is left alone. Adding the key changes nothing else in the file. Neither
-write is required: a data directory that is not writable only costs the editor completion.
+completes and checks the file offline. The document is generated from the parser with
+[`@valibot/to-json-schema`](https://www.npmjs.com/package/@valibot/to-json-schema), by the
+binary that wrote it, so its keys, types, and bounds are the ones that boot accepts. The URL
+grammar behind an origin cannot be written in JSON Schema, so an editor accepts a few values
+the server still rejects at boot. A `$schema` you wrote yourself is left alone, and adding
+the key changes nothing else in the file. Neither write is required: a data directory that
+is not writable only costs the editor completion.
 
 The default trusted origins start with the auth URL's own origin. They then follow the
 resolved port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus

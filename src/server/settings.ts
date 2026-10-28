@@ -1,9 +1,13 @@
+import { toJsonSchema } from "@valibot/to-json-schema";
 import { join } from "node:path";
 import * as v from "valibot";
-import { MAX_PORT, MIN_PORT } from "../shared/topology";
-import { SETTINGS_SCHEMA_FILE, SETTINGS_SCHEMA_REF, SETTINGS_SCHEMA_TEXT } from "./settings-schema";
+import { DEFAULT_API_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
 
 const SETTINGS_FILE = "config.json";
+
+export const SETTINGS_SCHEMA_FILE = "config.schema.json";
+
+export const SETTINGS_SCHEMA_REF = `./${SETTINGS_SCHEMA_FILE}`;
 
 // valibot reads a JSON array as an object with no keys, so an array would boot on defaults instead
 // of naming the typo. This runs before strictObject, which only sees the keys it copies.
@@ -47,16 +51,43 @@ export const OriginSchema = v.pipe(
   HttpUrlSchema,
   v.check(isOrigin, "must be an origin such as https://llm.example.com, with no path"),
   v.transform((value) => new URL(value).origin),
+  v.description("An origin with no path, query, fragment, or credentials."),
 );
 
 const ServerSettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
-    host: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
-    port: v.optional(v.pipe(v.number(), v.integer(), v.minValue(MIN_PORT), v.maxValue(MAX_PORT))),
-    authUrl: v.optional(HttpUrlSchema),
+    host: v.optional(
+      v.pipe(
+        v.string(),
+        v.trim(),
+        v.minLength(1),
+        v.description("The interface to listen on. Defaults to 0.0.0.0."),
+      ),
+    ),
+    port: v.optional(
+      v.pipe(
+        v.number(),
+        v.integer(),
+        v.minValue(MIN_PORT),
+        v.maxValue(MAX_PORT),
+        v.description("The port to listen on. Defaults to " + String(DEFAULT_API_PORT) + "."),
+      ),
+    ),
+    authUrl: v.optional(
+      v.pipe(
+        HttpUrlSchema,
+        v.description("The public URL of this server. Defaults to http://localhost:<port>."),
+      ),
+    ),
     trustedOrigins: v.optional(
-      v.pipe(v.array(OriginSchema), v.minLength(1, "needs at least one origin")),
+      v.pipe(
+        v.array(OriginSchema),
+        v.minLength(1, "needs at least one origin"),
+        v.description(
+          "Origins allowed to sign in. Defaults to the auth URL's origin and the loopback.",
+        ),
+      ),
     ),
   }),
 );
@@ -64,10 +95,28 @@ const ServerSettingsSchema = v.pipe(
 export const SettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
-    $schema: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
+    $schema: v.optional(
+      v.pipe(
+        v.string(),
+        v.trim(),
+        v.minLength(1),
+        v.description('Set to "' + SETTINGS_SCHEMA_REF + '" by bandar when the file lacks it.'),
+      ),
+    ),
     server: v.optional(ServerSettingsSchema),
   }),
+  v.metadata({
+    title: "bandar config.json",
+    description: "Web server settings read from $BANDAR_HOME/config.json.",
+  }),
 );
+
+// The document is derived from the parser, so its keys, types, and bounds cannot drift from the
+// boot check. What JSON Schema cannot express, which is the URL grammar behind an origin, is
+// enforced at boot alone, so an editor is more permissive than the server in that one place.
+export const settingsSchema = toJsonSchema(SettingsSchema, { errorMode: "ignore" });
+
+export const SETTINGS_SCHEMA_TEXT = JSON.stringify(settingsSchema, null, 2) + "\n";
 
 export type Settings = v.InferOutput<typeof SettingsSchema>;
 

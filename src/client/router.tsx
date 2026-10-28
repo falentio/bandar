@@ -12,6 +12,8 @@ import * as v from "valibot";
 import { ApiKeysPanel } from "./components/api-keys-panel";
 import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
+import { CliToolPage } from "./components/cli-tool-page";
+import { CliToolsPanel } from "./components/cli-tools-panel";
 import { ErrorsPanel } from "./components/errors-panel";
 import { OverviewPanel } from "./components/overview-panel";
 import { ModelRowHarness } from "./components/model-row-harness";
@@ -20,11 +22,19 @@ import { ProvidersPanel } from "./components/providers-panel";
 import { RequestsPanel } from "./components/requests-panel";
 import { TagsPanel } from "./components/tags-panel";
 import { SessionProvider, useSession } from "./use-session";
-import { isViewPath } from "./views";
+import { redirectTarget } from "./views";
 
 const loginSearch = v.object({
   redirect: v.optional(
-    v.picklist(["/overview", "/providers", "/tags", "/requests", "/errors", "/api-keys"]),
+    v.picklist([
+      "/overview",
+      "/providers",
+      "/tags",
+      "/requests",
+      "/errors",
+      "/api-keys",
+      "/cli-tools",
+    ]),
     "/overview",
   ),
 });
@@ -122,6 +132,18 @@ const apiKeysRoute = createRoute({
   component: ApiKeysPanel,
 });
 
+const cliToolsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/cli-tools",
+  component: CliToolsPanel,
+});
+
+const cliToolRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/cli-tools/$toolId",
+  component: CliToolDetailRoute,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -134,6 +156,8 @@ const routeTree = rootRoute.addChildren([
     requestsRoute,
     errorsRoute,
     apiKeysRoute,
+    cliToolsRoute,
+    cliToolRoute,
   ]),
 ]);
 
@@ -164,6 +188,12 @@ function ProviderDetailRoute() {
   );
 }
 
+function CliToolDetailRoute() {
+  const { toolId } = cliToolRoute.useParams();
+
+  return <CliToolPage toolId={toolId} />;
+}
+
 function LoginPage() {
   const auth = useSession();
   const search = loginRoute.useSearch();
@@ -184,9 +214,11 @@ function AppLayout() {
   if (auth.status === "signed-out") {
     // While the redirect is in flight the location already reads /login, and a
     // second Navigate rendered from that state would overwrite the redirect target.
-    if (!isViewPath(pathname)) return <SessionLoading />;
+    const target = redirectTarget(pathname);
 
-    return <Navigate to="/login" search={{ redirect: pathname }} replace />;
+    if (target === undefined) return <SessionLoading />;
+
+    return <Navigate to="/login" search={{ redirect: target }} replace />;
   }
 
   return <AppShell email={auth.user.email} pending={auth.pending} onSignOut={auth.signOut} />;

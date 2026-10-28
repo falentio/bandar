@@ -5,7 +5,7 @@ chat completions API. bandar resolves the model name to a provider, translates t
 request to that provider's wire, streams the answer back, and records one analytics
 event per attempt in an embedded DuckDB database.
 
-The dashboard covers providers, model tags, requests, cooldowns, API keys, and usage:
+The dashboard covers providers, model tags, requests, cooldowns, API keys, CLI setup, and usage:
 tokens, time to first token, tokens per second, error rate, p95 latency, daily
 tokens, and a 30-day average. Provider credentials are sealed before they reach
 SQLite.
@@ -138,4 +138,5 @@ rm -rf ~/.config/bandar ~/.bandar ~/.bandar_dev
 ```
 
 Read [`docs/install.md`](./docs/install.md) for the installer in full, [`docs/update.md`](./docs/update.md)
-for updates, and [`docs/service.md`](./docs/service.md) for the service unit.
+for updates, and [`docs/service.md`](./docs/service.md) for the service unit. To point a
+coding CLI at the gateway, read [`docs/cli-tools.md`](./docs/cli-tools.md).

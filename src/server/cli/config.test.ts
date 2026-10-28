@@ -151,12 +151,15 @@ describe("the config command", () => {
     ).toBe(true);
   });
 
-  test("an argument exits 2", async () => {
-    const { code, stdout, stderr } = await run(["config", "now"]);
-
-    expect(code).toBe(2);
-    expect(stdout).toEqual([]);
-    expect(stderr).toEqual(["bandar config: takes no arguments"]);
+  test("an argument or a stray option is invalid before the command runs", () => {
+    expect(parseArgs(["config", "now"], cli)).toEqual({
+      kind: "invalid",
+      message: "config takes no arguments",
+    });
+    expect(parseArgs(["config", "--nope"], cli)).toEqual({
+      kind: "invalid",
+      message: "unknown option: --nope",
+    });
   });
 
   test("an invalid file exits 1, naming the path and the field", async () => {

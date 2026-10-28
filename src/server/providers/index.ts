@@ -12,7 +12,7 @@ import {
   type ProviderModelEditInput,
   type ProviderModelInput,
 } from "../../shared/providers";
-import { availableSlug, defaultModelSlug, providerRefOf, slugify } from "../../shared/slugs";
+import { availableSlug, defaultModelSlug, slugify } from "../../shared/slugs";
 import { parseCredential, type Credential } from "../credential";
 import { isUniqueViolation, type Db } from "../db/client";
 import { providerCredentials, providerModels, providers } from "../db/schema";
@@ -106,7 +106,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
 
   for (const row of modelRows) {
     const list = grouped.get(row.providerId) ?? [];
-    const ref = providerRefOf(providerSlugs.get(row.providerId) ?? "", row.upstreamModel);
+    const ref = defaultModelSlug(providerSlugs.get(row.providerId) ?? "", row.upstreamModel);
     const holder = enabledSlugHolders.get(ref);
 
     list.push({

@@ -1,4 +1,10 @@
-import { DEFAULT_API_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
+import {
+  authUrlForPort,
+  DEFAULT_API_PORT,
+  DEFAULT_HOST,
+  MAX_PORT,
+  MIN_PORT,
+} from "../shared/topology";
 
 export const SETTINGS_SCHEMA_FILE = "config.schema.json";
 
@@ -26,7 +32,7 @@ export const settingsSchema = {
         host: {
           type: "string",
           minLength: 1,
-          description: "The interface to listen on. Defaults to 0.0.0.0.",
+          description: `The interface to listen on. Defaults to ${DEFAULT_HOST}.`,
         },
         port: {
           type: "integer",
@@ -38,7 +44,7 @@ export const settingsSchema = {
           type: "string",
           format: "uri",
           pattern: "^https?://",
-          description: "The public URL of this server. Defaults to http://localhost:<port>.",
+          description: `The public URL of this server. Defaults to ${authUrlForPort("<port>")}.`,
         },
         trustedOrigins: {
           type: "array",

@@ -2,7 +2,15 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
-import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
+import {
+  authUrlForPort,
+  DEFAULT_API_PORT,
+  DEFAULT_HOST,
+  DEFAULT_WEB_PORT,
+  loopbackOrigin,
+  MAX_PORT,
+  MIN_PORT,
+} from "../shared/topology";
 import {
   HttpUrlSchema,
   OriginSchema,
@@ -72,8 +80,6 @@ const HOME_DIRS = {
 export function detectRunMode(): RunMode {
   return Bun.isStandaloneExecutable ? "production" : "development";
 }
-
-const DEFAULT_HOST = "0.0.0.0";
 
 const TRUSTED_ORIGINS_ENV = "BANDAR_TRUSTED_ORIGINS";
 
@@ -174,11 +180,7 @@ function buildConfig(
   const host = resolve(values.BANDAR_HOST, server?.host, DEFAULT_HOST);
   const port = resolve(values.BANDAR_PORT, server?.port, DEFAULT_API_PORT);
 
-  const authUrl = resolve(
-    values.BANDAR_AUTH_URL,
-    server?.authUrl,
-    `http://localhost:${port.value}`,
-  );
+  const authUrl = resolve(values.BANDAR_AUTH_URL, server?.authUrl, authUrlForPort(port.value));
 
   const trustedOrigins = resolve(
     environmentOrigins,
@@ -265,7 +267,7 @@ function defaultTrustedOrigins(
   port: number,
   mode: RunMode,
 ): readonly string[] {
-  const origins = [new URL(authUrl).origin, `http://localhost:${port}`, `http://127.0.0.1:${port}`];
+  const origins = [new URL(authUrl).origin, authUrlForPort(port), loopbackOrigin(port)];
   const anywhere = host === "0.0.0.0" || host === "::";
 
   if (!anywhere) origins.push(`http://${host.includes(":") ? `[${host}]` : host}:${port}`);

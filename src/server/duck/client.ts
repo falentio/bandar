@@ -31,6 +31,7 @@ export class DuckDbError extends Error {
 const RESULT_WORDS = 512;
 
 export class DuckDb {
+  readonly path: string;
   private readonly database = new BigUint64Array(1);
   private readonly connection = new BigUint64Array(1);
   private readonly result = new BigUint64Array(RESULT_WORDS);
@@ -38,6 +39,7 @@ export class DuckDb {
   private closed = false;
 
   constructor(path: string, libraryPath: string) {
+    this.path = path;
     this.library = duckLibrary(libraryPath);
 
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });

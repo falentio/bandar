@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
 import * as v from "valibot";
 import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
@@ -23,6 +24,7 @@ import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
+import { createBackup } from "./backup";
 import type { MigrationResult } from "./db/migrate";
 import { readCooldowns } from "./cooldowns";
 import type { DuckDb } from "./duck/client";
@@ -55,6 +57,7 @@ import { InputError, parseInput, type ParseableInput } from "./validation";
 export type ApiDeps = {
   readonly auth: Auth;
   readonly duck: DuckDb;
+  readonly sqlite: Database;
   readonly providers: ProviderDeps;
   readonly migration: MigrationResult;
   readonly duckMigration: { readonly current: string | null };
@@ -115,6 +118,26 @@ export function createApi(deps: ApiDeps) {
     })
     .all("/auth/*", ({ request }) => deps.auth.handler(request))
     .get("/health", health(deps.migration, deps.duckMigration), { response: HealthSchema })
+    .get("/backup", async ({ request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const archive = await createBackup({
+        sqlite: deps.sqlite,
+        duck: deps.duck,
+        sqliteTag: deps.migration.current,
+        duckdbTag: deps.duckMigration.current,
+      });
+
+      return new Response(archive.bytes, {
+        headers: {
+          "content-type": "application/zip",
+          "content-disposition": `attachment; filename="${archive.name}"`,
+          "content-length": String(archive.bytes.byteLength),
+        },
+      });
+    })
     .get("/providers", async ({ request }) => {
       const caller = await authenticate(deps.auth, request);
 

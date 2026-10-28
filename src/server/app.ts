@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { isApiPath, isGatewayPath } from "../shared/api";
 import { createApi } from "./api";
 import { type ClientBundle, serveStatic } from "./assets";
@@ -13,6 +14,7 @@ export type App = { readonly handle: (request: Request) => Promise<Response> };
 
 export type AppDeps = {
   readonly db: Db;
+  readonly sqlite: Database;
   readonly client: ClientBundle;
   readonly migration: MigrationResult;
   readonly duckMigration: DuckMigrationResult;
@@ -27,6 +29,7 @@ export function createApp(deps: AppDeps): App {
   const api = createApi({
     auth: deps.auth,
     duck: deps.duck,
+    sqlite: deps.sqlite,
     providers,
     migration: deps.migration,
     duckMigration: deps.duckMigration,

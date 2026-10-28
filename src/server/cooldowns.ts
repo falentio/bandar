@@ -19,7 +19,7 @@ export async function readCooldowns(db: Db, userId: string, limit: number): Prom
       providerId: row.providerId,
       providerName: row.providerName,
       modelId: row.modelId,
-      modelAlias: row.modelAlias,
+      modelSlug: row.modelSlug,
       credentialId: row.credentialId,
       credentialName: row.credentialName,
       errorKind: row.errorKind,

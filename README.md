@@ -192,6 +192,16 @@ and the browser's origin check agree with that one key, and `server.trustedOrigi
 for extra origins only. `authSecret` is not a settings key: the data directory is
 world-readable, while the service env file is mode 600.
 
+Run `bandar config` to print the file it read and where each value came from:
+
+```text
+settings        /home/andrew/.bandar/config.json (found)
+server.host     0.0.0.0 (default)
+server.port     4100 (config.json)
+server.authUrl  https://llm.example.com (config.json)
+trustedOrigins  https://llm.example.com, https://alt.example.com (config.json)
+```
+
 `bandar` reads the file on every start, so a restart applies an edit. A service unit
 outranks the file only when `bandar install-service` was given `--port`. Read
 [`docs/service.md`](./docs/service.md) for the unit.

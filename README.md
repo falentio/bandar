@@ -106,6 +106,10 @@ bun run dev
 The client listens on `:5173` and the API on `:3000`. The client proxies `/api` and
 `/v1` to the API port.
 
+A run from source is a development environment. Its databases land in `~/.bandar_dev`,
+so they stay clear of an installed copy, which keeps using `~/.bandar`. Set
+`BANDAR_HOME` to point either one somewhere else.
+
 ### First run
 
 ```sh
@@ -113,8 +117,8 @@ BANDAR_AUTH_SECRET="$(openssl rand -hex 32)" bandar
 ```
 
 Open <http://localhost:3000> and create an account. The binary creates `bandar.db` and
-`bandar.duckdb` in `BANDAR_HOME`, which defaults to `~/.bandar`. Set
-`BANDAR_AUTH_SECRET` to keep sessions and sealed credentials across restarts, because
+`bandar.duckdb` in `BANDAR_HOME`, which defaults to `~/.bandar` for an installed binary.
+Set `BANDAR_AUTH_SECRET` to keep sessions and sealed credentials across restarts, because
 the default is generated per boot and changing the secret makes stored credentials
 unreadable.
 
@@ -130,7 +134,7 @@ bandar install-service --scope user
 bandar update
 bandar uninstall-service --scope user
 rm "$(command -v bandar)"
-rm -rf ~/.config/bandar ~/.bandar
+rm -rf ~/.config/bandar ~/.bandar ~/.bandar_dev
 ```
 
 Read [`docs/install.md`](./docs/install.md) for the installer in full, [`docs/update.md`](./docs/update.md)

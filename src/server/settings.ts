@@ -2,13 +2,13 @@ import { join } from "node:path";
 import * as v from "valibot";
 import { MAX_PORT, MIN_PORT } from "../shared/topology";
 
-export const SETTINGS_FILE = "config.json";
+const SETTINGS_FILE = "config.json";
 
 // valibot reads a JSON array as an object with no keys, so an array would boot on defaults instead
 // of naming the typo. This runs before strictObject, which only sees the keys it copies.
 const notAnArray = v.custom((value) => !Array.isArray(value), "must hold an object");
 
-export const ServerSettingsSchema = v.pipe(
+const ServerSettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
     host: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),

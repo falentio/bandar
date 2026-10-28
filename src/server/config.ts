@@ -88,7 +88,7 @@ const ConfigSchema = v.object({
  * The home directory decides where the settings file lives, so it is resolved before that file is
  * read, and parseConfig takes the result instead of validating BANDAR_HOME a second time.
  */
-export function resolveHome(env: Record<string, string | undefined>): string {
+function resolveHome(env: Record<string, string | undefined>): string {
   const home = (env.BANDAR_HOME ?? DEFAULT_HOME_DIR).trim();
 
   if (!isAbsolute(home)) throw new ConfigError(["BANDAR_HOME: must be an absolute path"]);

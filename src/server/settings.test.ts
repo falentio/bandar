@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vite-plus/test";
-import { SETTINGS_FILE, readSettings, settingsPath } from "./settings";
+import { readSettings, settingsPath } from "./settings";
 
 const home = "/home/andrew/.bandar";
 
@@ -17,7 +17,6 @@ const missingFile = (): string => {
 
 describe("settings", () => {
   test("the settings path appends config.json to the home directory", () => {
-    expect(SETTINGS_FILE).toBe("config.json");
     expect(settingsPath(home)).toBe("/home/andrew/.bandar/config.json");
   });
 

@@ -27,7 +27,8 @@ SQLite.
   and Nous Portal also sign in with a device code, and OpenCode Go picks a wire per
   model across the chat, responses, messages, and GenAI endpoints.
 - Custom providers added from the dashboard without changing code.
-- Provider and model-alias management in the dashboard or over `/api`.
+- Provider and model-alias management in the dashboard or over `/api`, with an
+  optional per-model wire override: one upstream may answer on several protocols.
 - Gateway keys from better-auth's API-key plugin, sent as
   `Authorization: Bearer <key>` or `x-api-key`.
 - Per-request analytics in DuckDB with SQL migrations embedded in the binary.
@@ -495,7 +496,8 @@ fake upstreams, checks the seven seeded built-ins, imports every catalog (one wi
 an alias collision, one joined to a pricing table, three public), approves fake Kilo
 Code and Nous Portal device logins, renews a Nous token under two concurrent
 chats, calls the gateway streaming and non-streaming, calls one OpenCode Go model
-on each of its four wires, walks a tag with a failing first model, checks the
+on each of its four wires, moves an OpenAI model onto the responses wire and back,
+walks a tag with a failing first model, checks the
 recorded references, rejects reserved slugs, revokes the key, restarts the binary,
 and proves the analytics rows survived.
 
@@ -605,6 +607,7 @@ bandar/
 | `DELETE /api/providers/:id/credentials/:credentialId` | Session or `x-api-key` | Remove a credential and compact the order.              |
 | `GET /api/providers/:id?days=30`                      | Session or `x-api-key` | One provider plus its window usage.                     |
 | `POST /api/providers/:id/models`                      | Session or `x-api-key` | Add one model alias; returns the provider.              |
+| `PUT /api/providers/:id/models/:modelId`              | Session or `x-api-key` | Set or clear one model's wire; returns the provider.    |
 | `POST /api/providers/:id/models/refresh`              | Session or `x-api-key` | Import new models from the provider's catalog.          |
 | `DELETE /api/providers/:id/models/:modelId`           | Session or `x-api-key` | Remove a model alias; returns the provider.             |
 | `POST /api/providers/:id/oauth/start`                 | Session or `x-api-key` | Start a device login; returns a user code.              |
@@ -620,8 +623,8 @@ bandar/
 
 Each provider has its own page at `/providers/<id>` with four tabs:
 **Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
-(name, slug, kind, base URL), **Models** (aliases, refs, tag chips, removal, and
-a catalog import when the provider has one), and **Credentials** or
+(name, slug, kind, base URL), **Models** (aliases, refs, each model's wire, tag
+chips, removal, and a catalog import when the provider has one), and **Credentials** or
 **Connection** (the ordered credential list: add, move, and remove a key, connect
 an OAuth account, remove a custom provider). The tab lives in the URL as `?tab=`,
 so a reload or a shared link opens the same tab. Custom providers are created

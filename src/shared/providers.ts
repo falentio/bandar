@@ -25,9 +25,16 @@ export const PROVIDER_ORIGINS = ["builtin", "custom"] as const;
 // A compatibility is the wire a model answers on, independent of the kind that reaches it.
 export const COMPATIBILITIES = ["chat", "responses", "messages", "genai"] as const;
 
-export type BuiltInProviderKind = (typeof BUILT_IN_PROVIDER_KINDS)[number];
-
 export type Compat = (typeof COMPATIBILITIES)[number];
+
+export const COMPAT_LABELS: Record<Compat, string> = {
+  chat: "Chat completions",
+  responses: "Responses",
+  messages: "Messages",
+  genai: "GenAI",
+};
+
+export type BuiltInProviderKind = (typeof BUILT_IN_PROVIDER_KINDS)[number];
 
 export const BUILT_IN_PROVIDERS = {
   kilocode: {
@@ -84,6 +91,13 @@ export const BUILT_IN_PROVIDERS = {
 
 export const ProviderKindSchema = v.picklist(PROVIDER_KINDS);
 
+export const CompatSchema = v.picklist(COMPATIBILITIES);
+
+/** A compat this build knows, or null. The column and the wire value both pass through here. */
+export function parseCompat(value: string | null): Compat | null {
+  return COMPATIBILITIES.find((compat) => compat === value) ?? null;
+}
+
 export const GenericProviderKindSchema = v.picklist(GENERIC_PROVIDER_KINDS);
 
 export const ProviderAuthModeSchema = v.picklist(PROVIDER_AUTH_MODES);
@@ -96,6 +110,8 @@ export const ProviderModelSchema = v.object({
   alias: v.string(),
   ref: v.string(),
   shadowed: v.boolean(),
+  compat: v.nullable(CompatSchema),
+  defaultCompat: v.nullable(CompatSchema),
   inputPricePerMtok: v.nullable(v.number()),
   outputPricePerMtok: v.nullable(v.number()),
   failures: v.number(),
@@ -120,6 +136,7 @@ export const ProviderSchema = v.object({
   origin: ProviderOriginSchema,
   baseUrl: v.string(),
   authModes: v.array(ProviderAuthModeSchema),
+  compats: v.array(CompatSchema),
   hasCatalog: v.boolean(),
   credentials: v.array(ProviderCredentialSchema),
   models: v.array(ProviderModelSchema),
@@ -154,6 +171,10 @@ export const ProviderModelInputSchema = v.pipe(
     `an alias cannot start with ${TAG_REF_PREFIX}`,
   ),
 );
+
+export const ProviderModelCompatInputSchema = v.object({
+  compat: v.nullable(CompatSchema),
+});
 
 export const ProviderInputSchema = v.object({
   name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(60)),
@@ -278,6 +299,8 @@ export type ProviderOAuthPoll = v.InferOutput<typeof ProviderOAuthPollSchema>;
 export type ProviderModelRefresh = v.InferOutput<typeof ProviderModelRefreshSchema>;
 
 export type ProviderModel = v.InferOutput<typeof ProviderModelSchema>;
+
+export type ProviderModelCompatInput = v.InferOutput<typeof ProviderModelCompatInputSchema>;
 
 export type Provider = v.InferOutput<typeof ProviderSchema>;
 

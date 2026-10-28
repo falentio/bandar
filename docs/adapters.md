@@ -491,6 +491,38 @@ Two rules keep a multi-wire catalog honest:
 A single-wire gateway is the opposite policy: Hyper imports every id its public
 list returns, because its one wire cannot list a model it cannot serve.
 
+## Per-model compatibility
+
+A provider row fixes the kind; a model row may fix its wire. The override lives in
+`provider_models.compat` as raw text, with no default and no backfill, and only an
+override is ever stored: `NULL` means "the provider's own default" in SQL, in
+`resolvePlan`, in `routeAttempt`, and on the dashboard.
+
+`routeAttempt` resolves an attempt's wire in one order: a declared override, then
+the provider's `defaultCompat` for that upstream model, then a 400. An override the
+kind no longer declares is treated as absent, so a row that outlives its wire
+degrades to the default instead of failing the request. `parseCompat` reads the raw
+column, so a value this build does not name comes back as `null`: the row shows
+"Provider default" and answers there, and the next `PUT` overwrites the stored
+value with one the build knows.
+
+The `Provider` value carries both sides of the decision per model, so the dashboard
+never recomputes it:
+
+- `compat` is the stored override, or `null`.
+- `defaultCompat` is the wire the next request uses when no override is set, or
+  `null` when the provider cannot route that id at all.
+- `compats` on the provider is `compatsOf(kind)`: the list the model row offers.
+
+`PUT /api/providers/:id/models/:modelId` takes `{ compat: Compat | null }` and
+returns the whole provider, like the other model routes. It answers 404 when the
+provider or the model does not exist, and 422 (`validation`) for a compat the kind
+does not declare. A `null` body clears the override.
+
+On OpenCode Go, `defaultCompat` is the table, so the override is how a listed id is
+put on another wire. Importing a catalog never touches an existing row: a re-import
+skips an upstream model it already has, so it cannot clobber a user's override.
+
 ## Streaming rules
 
 1. `stream()` yields text events only for non-empty deltas.

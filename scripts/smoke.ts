@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -193,6 +194,7 @@ const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
 const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
 const wireProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
+let overrideModelId = "";
 let keyId = "";
 
 const first = await boot(await reservePort(), FIRST_BOOT_TIMEOUT_MS);
@@ -3046,6 +3048,65 @@ function startUpstream() {
           },
           "[DONE]",
         ]);
+      }
+
+      if (url.pathname === "/openai/responses") {
+        if (request.headers.get("authorization") !== "Bearer openai-key") {
+          return jsonError(401, "bad openai key");
+        }
+
+        const parsed = v.safeParse(ResponsesBodySchema, await request.json());
+
+        if (!parsed.success) return jsonError(400, "the openai responses body is off");
+
+        if (parsed.output.model === "fake-openai-broken") {
+          return Response.json({
+            status: "failed",
+            output: [],
+            error: { message: "the model is broken" },
+          });
+        }
+
+        if (
+          parsed.output.model === "fake-openai-override" &&
+          parsed.output.max_output_tokens !== 32
+        ) {
+          return jsonError(400, "the responses wire did not carry max_output_tokens");
+        }
+
+        if (parsed.output.stream === true) {
+          return sse([
+            { type: "response.created", response: { status: "in_progress", output: [] } },
+            { type: "response.output_text.delta", delta: "Hello from OpenAI " },
+            { type: "response.output_text.delta", delta: "Responses" },
+            {
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "message",
+                    content: [{ type: "output_text", text: "Hello from OpenAI Responses" }],
+                  },
+                ],
+                usage: { input_tokens: 12, output_tokens: 4 },
+              },
+            },
+            "[DONE]",
+          ]);
+        }
+
+        return Response.json({
+          status: "completed",
+          output: [
+            { type: "reasoning", summary: [] },
+            {
+              type: "message",
+              content: [{ type: "output_text", text: "Hello from OpenAI Responses" }],
+            },
+          ],
+          usage: { input_tokens: 12, output_tokens: 4 },
+        });
       }
 
       if (url.pathname === "/anthropic/messages") {

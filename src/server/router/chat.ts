@@ -455,7 +455,7 @@ function flaggedUntilOf(attempt: ResolvedAttempt, subject: Subject): Date | null
 }
 
 async function routeOf(providers: ProviderDeps, attempt: ResolvedAttempt): Promise<RoutedAttempt> {
-  return routeAttempt(attempt.kind, await targetOf(providers, attempt), null);
+  return routeAttempt(attempt.kind, await targetOf(providers, attempt), attempt.compat);
 }
 
 async function targetOf(

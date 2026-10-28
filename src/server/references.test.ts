@@ -764,6 +764,7 @@ describe("provider credentials", () => {
       "0008_provider_credentials",
       "0009_remarkable_ronan",
       "0010_cooldown_error_message",
+      "0011_petite_leopardon",
     ]);
 
     const rows = handle.sqlite

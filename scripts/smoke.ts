@@ -45,6 +45,7 @@ type Journal = { readonly entries: readonly { readonly idx: number; readonly tag
 type Booted = {
   readonly origin: string;
   readonly log: () => string;
+  readonly errors: () => string;
   readonly stop: () => Promise<void>;
 };
 
@@ -1968,7 +1969,18 @@ try {
 
     const response = await fetch(new URL(apiPaths.backup, origin), { headers: sessionHeaders() });
 
-    assert.equal(response.status, 200);
+    if (response.status !== 200) {
+      const body = await response.text();
+
+      // The cause lands on the server stderr; give the reader a moment to collect it.
+      await Bun.sleep(250);
+
+      throw new Error(
+        `the route answered ${String(response.status)}: ${body}\n` +
+          `server stderr: ${first.errors().slice(-1500)}`,
+      );
+    }
+
     assert.match(contentType(response), /^application\/zip/);
     assert.match(
       response.headers.get("content-disposition") ?? "",
@@ -2158,35 +2170,38 @@ async function boot(port = 0): Promise<Booted> {
     stderr: "pipe",
   });
 
-  const decoder = new TextDecoder();
-  let log = "";
-  const stderr = Bun.readableStreamToText(proc.stderr).catch(() => "");
-
-  void (async () => {
-    const reader = proc.stdout.getReader();
-
-    for (;;) {
-      const { value, done } = await reader.read();
-
-      if (done) return;
-      log += decoder.decode(value, { stream: true });
-    }
-  })();
+  const log = collect(proc.stdout);
+  const errors = collect(proc.stderr);
 
   const deadline = Date.now() + 15_000;
 
   while (Date.now() < deadline) {
-    const found = log.match(/listening on (http:\/\/\S+)/)?.[1];
+    const found = log.text().match(/listening on (http:\/\/\S+)/)?.[1];
 
-    if (found) return { origin: found, log: () => log, stop: () => stop(proc) };
+    if (found) return { origin: found, log: log.text, errors: errors.text, stop: () => stop(proc) };
 
     if (proc.exitCode !== null)
-      throw new Error(`the binary exited with ${proc.exitCode}\n${await stderr}`);
+      throw new Error(`the binary exited with ${proc.exitCode}\n${await errors.done}`);
     await Bun.sleep(25);
   }
 
   proc.kill();
-  throw new Error(`the binary never reported a port\n${await stderr}`);
+  throw new Error(`the binary never reported a port\n${await errors.done}`);
+}
+
+type Collected = { readonly text: () => string; readonly done: Promise<string> };
+
+function collect(stream: ReadableStream<Uint8Array>): Collected {
+  let text = "";
+  const decoder = new TextDecoder();
+
+  const done = (async () => {
+    for await (const chunk of stream) text += decoder.decode(chunk, { stream: true });
+
+    return text;
+  })();
+
+  return { text: () => text, done };
 }
 
 async function stop(proc: Bun.Subprocess): Promise<void> {

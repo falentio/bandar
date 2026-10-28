@@ -16,7 +16,7 @@ const ARCH = new Map([
   ["arm64", "arm64"],
 ]);
 
-const version = Bun.env.BANDAR_RELEASE_VERSION;
+const version = Bun.env.BANDAR_RELEASE_VERSION?.replace(/^v/, "");
 
 if (version === undefined || !VERSION.test(version)) {
   console.error(

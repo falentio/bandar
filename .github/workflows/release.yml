@@ -15,7 +15,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
@@ -36,20 +36,17 @@ jobs:
           - name: windows-x64
             runner: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun run smoke
-      - name: Read the version from the tag
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - name: Package the release files
         run: bun scripts/release.ts
         env:
-          BANDAR_RELEASE_VERSION: ${{ env.VERSION }}
+          BANDAR_RELEASE_VERSION: ${{ github.ref_name }}
       - uses: actions/upload-artifact@v4
         with:
           name: bandar-${{ matrix.name }}
@@ -62,7 +59,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/download-artifact@v4

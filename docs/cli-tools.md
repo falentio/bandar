@@ -7,7 +7,7 @@ Two gateway gaps decide what works today:
 - The canonical request carries text only. A client that sends `tools` reaches the model without them, and an Anthropic request that sends a `tool_result` block gets a 422.
 - There is no `/v1/responses` route.
 
-The page reads both facts from `GATEWAY_SURFACE` in `./src/shared/cli-tools.ts` and prints `ready`, `partial`, or `blocked` for each tool. A test in `./src/shared/cli-tools.test.ts` compares that constant with `./src/server/gateway.ts` and fails when they disagree, so the page cannot drift away from the server.
+The page reads both facts from `GATEWAY_SURFACE` in `./src/shared/cli-tools.ts` and prints `ready`, `partial`, or `blocked` for each tool. A test in `./src/server/gateway-surface.test.ts` compares that constant with `./src/server/gateway.ts` and `./src/server/providers/types.ts`, and fails when they disagree, so the page cannot drift away from the server.
 
 So every tool here connects and answers a prompt. None of them finishes a tool call yet, and Codex fails at the first request because it speaks only the Responses API. The repair list is at the end of this file.
 
@@ -150,8 +150,8 @@ claude
 
 ```bash
 mkdir -p ~/.config/bandar
-chmod 600 ~/.config/bandar/key
 $EDITOR ~/.config/bandar/key
+chmod 600 ~/.config/bandar/key
 ```
 
 The key file holds one line and no trailing newline. Run `claude`, then `/status`: it lists the base URL and the `apiKeyHelper` line when the setup took.
@@ -216,7 +216,7 @@ Two rules the tests enforce, so keep them true:
 - A snippet that names a file must reference the key variable and must not contain the key.
 - The base URL in the snippets must equal `tool.baseUrl(origin)`.
 
-When an ingress lands, flip its flag in `GATEWAY_SURFACE`. The drift test fails until the flag matches `./src/server/gateway.ts`, and the badges follow.
+When an ingress lands, flip its flag in `GATEWAY_SURFACE`. The drift test in `./src/server/gateway-surface.test.ts` fails until the flag matches `./src/server/gateway.ts` and `./src/server/providers/types.ts`, and the badges follow.
 
 ## Check the setup
 
@@ -227,7 +227,7 @@ curl -sS "$ANTHROPIC_BASE_URL/v1/models" -H "Authorization: Bearer $BANDAR_API_K
 The model list proves the URL and the key. Then send one chat turn:
 
 ```bash
-curl -sS "$BANDAR_BASE_URL/v1/chat/completions" \
+curl -sS "${ANTHROPIC_BASE_URL:-http://localhost:3000}/v1/chat/completions" \
   -H "Authorization: Bearer $BANDAR_API_KEY" \
   -H "content-type: application/json" \
   -d '{"model":"sonnet","messages":[{"role":"user","content":"say hi"}]}'

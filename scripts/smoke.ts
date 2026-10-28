@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -140,6 +141,20 @@ const StreamChunkSchema = v.object({
   ),
 });
 
+const ResponsesBodySchema = v.strictObject({
+  model: v.string(),
+  input: v.array(
+    v.object({
+      role: v.picklist(["system", "user", "assistant"]),
+      content: v.array(v.object({ type: v.literal("input_text"), text: v.string() })),
+    }),
+  ),
+  stream: v.optional(v.boolean()),
+  max_output_tokens: v.optional(v.number()),
+  temperature: v.optional(v.number()),
+  top_p: v.optional(v.number()),
+});
+
 const expectedMigration = lastJournalTag();
 const expectedDuckMigration = lastDuckTag();
 const workDir = mkdtempSync(join(tmpdir(), "bandar-smoke-"));
@@ -179,6 +194,7 @@ const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
 const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
 const wireProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
+let overrideModelId = "";
 let keyId = "";
 
 const first = await boot(await reservePort(), FIRST_BOOT_TIMEOUT_MS);
@@ -1013,7 +1029,7 @@ try {
       200,
     );
 
-    assert.equal(refresh.added, 3);
+    assert.equal(refresh.added, 4);
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
@@ -1022,15 +1038,19 @@ try {
       "claude-haiku-5-5",
       "gemini-4-argon",
       "glm-5.3",
+      "gpt-6-luna",
     ]);
 
     const glm = detail.provider.models.find((model) => model.alias === "glm-5.3");
     const gemini = detail.provider.models.find((model) => model.alias === "gemini-4-argon");
+    const luna = detail.provider.models.find((model) => model.alias === "gpt-6-luna");
 
     assert.equal(glm?.inputPricePerMtok, 1.4);
     assert.equal(glm?.outputPricePerMtok, 4.4);
     assert.equal(gemini?.inputPricePerMtok, null);
     assert.equal(gemini?.outputPricePerMtok, null);
+    assert.equal(luna?.inputPricePerMtok, null);
+    assert.equal(luna?.outputPricePerMtok, null);
   });
 
   await check("OpenCode Go answers chat on each wire with one bearer", async () => {
@@ -1083,28 +1103,66 @@ try {
     assert.equal(googleEvents.text, "Hello from OpenCode Google");
     assert.equal(googleEvents.usage?.prompt_tokens, 4);
     assert.equal(googleEvents.usage?.completion_tokens, 2);
+
+    const responses = await chatRequest("gpt-6-luna", false);
+
+    assert.equal(responses.status, 200);
+
+    const responsesBody = v.parse(CompletionSchema, await responses.json());
+
+    assert.equal(responsesBody.choices[0]?.message.content, "Hello from OpenCode Responses");
+    assert.equal(responsesBody.usage?.prompt_tokens, 7);
+    assert.equal(responsesBody.usage?.completion_tokens, 3);
+
+    const responsesStream = await chatRequest("gpt-6-luna", true);
+
+    assert.equal(responsesStream.status, 200);
+
+    const responsesEvents = await readStream(responsesStream);
+
+    assert.equal(responsesEvents.text, "Hello from OpenCode Responses");
+    assert.equal(responsesEvents.usage?.prompt_tokens, 7);
+    assert.equal(responsesEvents.usage?.completion_tokens, 3);
   });
 
-  await check("a hand-added responses model is a 400 before any request", async () => {
+  await check("a hand-added responses model answers on the responses wire", async () => {
     const id = opencodeProvider.provider?.id ?? "";
 
     await postJson(
       providerPaths.models(id),
-      { upstreamModel: "gpt-6-luna", alias: "luna-gap" },
+      { upstreamModel: "grok-4.7", alias: "grok-luna" },
+      ProviderSchema,
+      201,
+    );
+
+    const response = await chatRequest("grok-luna", false);
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await response.json()).choices[0]?.message.content,
+      "Hello from OpenCode Responses",
+    );
+  });
+
+  await check("an undocumented go model is a 400 before any request", async () => {
+    const id = opencodeProvider.provider?.id ?? "";
+
+    await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "omen-alpha", alias: "omen-gap" },
       ProviderSchema,
       201,
     );
 
     const before = opencodeState.requests;
-    const response = await chatRequest("luna-gap", false);
+    const response = await chatRequest("omen-gap", false);
 
     assert.equal(response.status, 400);
 
     const error = await openAiError(response);
 
     assert.equal(error.code, "invalid_request");
-    assert.match(error.message, /gpt-6-luna/);
-    assert.match(error.message, /responses/);
+    assert.match(error.message, /omen-alpha/);
     assert.equal(opencodeState.requests, before);
   });
 
@@ -2306,6 +2364,163 @@ try {
     assert.equal(body.input_tokens, Math.ceil((system.length + 1 + text.length) / CHARS_PER_TOKEN));
   });
 
+  await check("PUT a model's compat moves its traffic to the responses wire", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const added = await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "fake-openai-override", alias: "override-fast" },
+      ProviderSchema,
+      201,
+    );
+
+    overrideModelId = added.models.find((model) => model.alias === "override-fast")?.id ?? "";
+
+    const moved = await putJson(
+      providerPaths.model(id, overrideModelId),
+      { compat: "responses" },
+      ProviderSchema,
+      200,
+    );
+
+    const model = moved.models.find((row) => row.id === overrideModelId);
+
+    assert.equal(model?.compat, "responses");
+    assert.equal(model?.defaultCompat, "chat");
+
+    const response = await fetch(new URL("/v1/chat/completions", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...bearer() },
+      body: JSON.stringify({
+        model: "override-fast",
+        stream: false,
+        temperature: 0.1,
+        max_tokens: 32,
+        stop: ["stop-here"],
+        messages: [{ role: "user", content: "hello from the override" }],
+      }),
+    });
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from OpenAI Responses");
+    assert.deepEqual(body.usage, { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 });
+
+    const cleared = await putJson(
+      providerPaths.model(id, overrideModelId),
+      { compat: null },
+      ProviderSchema,
+      200,
+    );
+
+    assert.equal(cleared.models.find((row) => row.id === overrideModelId)?.compat, null);
+
+    const back = await chatRequest("override-fast", false);
+
+    assert.equal(back.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await back.json()).choices[0]?.message.content,
+      "Hello from OpenAI",
+    );
+  });
+
+  await check("a compat the provider kind does not declare is a 422", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const response = await put(providerPaths.model(id, overrideModelId), { compat: "genai" });
+
+    assert.equal(response.status, 422);
+    assert.equal((await errorBody(response)).code, "validation");
+  });
+
+  await check("PUT a model's compat on a missing model is a 404", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const response = await put(providerPaths.model(id, "missing-model"), { compat: "chat" });
+
+    assert.equal(response.status, 404);
+  });
+
+  await check("a stored compat this build does not know answers on the default", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+    const db = new Database(dbPath);
+
+    try {
+      db.query("UPDATE provider_models SET compat = 'rubbish' WHERE id = ?").run(overrideModelId);
+    } finally {
+      db.close();
+    }
+
+    const response = await chatRequest("override-fast", false);
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await response.json()).choices[0]?.message.content,
+      "Hello from OpenAI",
+    );
+
+    const healed = await putJson(
+      providerPaths.model(id, overrideModelId),
+      { compat: null },
+      ProviderSchema,
+      200,
+    );
+
+    assert.equal(healed.models.find((row) => row.id === overrideModelId)?.compat, null);
+  });
+
+  await check("a failed responses body is an error, not an empty success", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const added = await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "fake-openai-broken", alias: "openai-broken" },
+      ProviderSchema,
+      201,
+    );
+
+    const brokenId = added.models.find((model) => model.alias === "openai-broken")?.id ?? "";
+
+    await putJson(providerPaths.model(id, brokenId), { compat: "responses" }, ProviderSchema, 200);
+
+    const response = await chatRequest("openai-broken", false);
+
+    assert.equal(response.status, 502);
+
+    const error = await openAiError(response);
+
+    assert.equal(error.code, "protocol");
+    assert.match(error.message, /the model is broken/);
+  });
+
+  await check("a responses stream that fails mid-flight sends an error frame", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const added = await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "fake-openai-stream-broken", alias: "openai-stream-broken" },
+      ProviderSchema,
+      201,
+    );
+
+    const brokenId = added.models.find((model) => model.alias === "openai-stream-broken")?.id ?? "";
+
+    await putJson(providerPaths.model(id, brokenId), { compat: "responses" }, ProviderSchema, 200);
+
+    const response = await chatRequest("openai-stream-broken", true);
+
+    assert.equal(response.status, 200);
+
+    const raw = await response.text();
+
+    assert.match(raw, /Half an answer/);
+    assert.match(raw, /"code":"protocol"/);
+    assert.match(raw, /the stream broke/);
+    assert.match(raw, /data: \[DONE\]/);
+  });
+
   await check("GET /api/providers/:id hides another account's provider", async () => {
     const response = await fetch(
       new URL(`${providerPaths.detail("00000000-0000-0000-0000-000000000000")}?days=30`, origin),
@@ -2956,7 +3171,7 @@ function startUpstream() {
     port: 0,
     async fetch(request) {
       const url = new URL(request.url);
-      const raw: unknown = await request.json();
+      const raw: unknown = await request.clone().json();
       const body = v.safeParse(v.object({ stream: v.optional(v.boolean()) }), raw);
       const stream = body.success ? (body.output.stream ?? false) : false;
 
@@ -2990,6 +3205,75 @@ function startUpstream() {
           },
           "[DONE]",
         ]);
+      }
+
+      if (url.pathname === "/openai/responses") {
+        if (request.headers.get("authorization") !== "Bearer openai-key") {
+          return jsonError(401, "bad openai key");
+        }
+
+        const parsed = v.safeParse(ResponsesBodySchema, await request.json());
+
+        if (!parsed.success) return jsonError(400, "the openai responses body is off");
+
+        if (parsed.output.model === "fake-openai-stream-broken") {
+          return sse([
+            { type: "response.output_text.delta", delta: "Half an answer" },
+            {
+              type: "response.failed",
+              response: { status: "failed", output: [], error: { message: "the stream broke" } },
+            },
+          ]);
+        }
+
+        if (parsed.output.model === "fake-openai-broken") {
+          return Response.json({
+            status: "failed",
+            output: [],
+            error: { message: "the model is broken" },
+          });
+        }
+
+        if (
+          parsed.output.model === "fake-openai-override" &&
+          parsed.output.max_output_tokens !== 32
+        ) {
+          return jsonError(400, "the responses wire did not carry max_output_tokens");
+        }
+
+        if (parsed.output.stream === true) {
+          return sse([
+            { type: "response.created", response: { status: "in_progress", output: [] } },
+            { type: "response.output_text.delta", delta: "Hello from OpenAI " },
+            { type: "response.output_text.delta", delta: "Responses" },
+            {
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "message",
+                    content: [{ type: "output_text", text: "Hello from OpenAI Responses" }],
+                  },
+                ],
+                usage: { input_tokens: 12, output_tokens: 4 },
+              },
+            },
+            "[DONE]",
+          ]);
+        }
+
+        return Response.json({
+          status: "completed",
+          output: [
+            { type: "reasoning", summary: [] },
+            {
+              type: "message",
+              content: [{ type: "output_text", text: "Hello from OpenAI Responses" }],
+            },
+          ],
+          usage: { input_tokens: 12, output_tokens: 4 },
+        });
       }
 
       if (url.pathname === "/anthropic/messages") {
@@ -3326,6 +3610,54 @@ function startBuiltIns() {
             },
           ],
           usage: { prompt_tokens: 8, completion_tokens: 2 },
+        });
+      }
+
+      if (url.pathname === "/opencode/inference/go/openai/v1/responses") {
+        if (authorization !== "Bearer opencode_test") return jsonError(401, "bad opencode key");
+
+        if (request.headers.has("x-api-key") || request.headers.has("x-goog-api-key")) {
+          return jsonError(401, "opencode go takes one bearer");
+        }
+
+        const parsed = v.safeParse(ResponsesBodySchema, await request.json());
+
+        if (!parsed.success) {
+          return jsonError(400, "opencode go responses wants the responses body");
+        }
+
+        if (parsed.output.stream === true) {
+          return sse([
+            { type: "response.created", response: { status: "in_progress", output: [] } },
+            { type: "response.output_text.delta", delta: "Hello from OpenCode " },
+            { type: "response.output_text.delta", delta: "Responses" },
+            {
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "message",
+                    content: [{ type: "output_text", text: "Hello from OpenCode Responses" }],
+                  },
+                ],
+                usage: { input_tokens: 7, output_tokens: 3 },
+              },
+            },
+            "[DONE]",
+          ]);
+        }
+
+        return Response.json({
+          status: "completed",
+          output: [
+            { type: "reasoning", summary: [] },
+            {
+              type: "message",
+              content: [{ type: "output_text", text: "Hello from OpenCode Responses" }],
+            },
+          ],
+          usage: { input_tokens: 7, output_tokens: 3 },
         });
       }
 

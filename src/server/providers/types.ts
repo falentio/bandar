@@ -1,5 +1,6 @@
 import type {
   BuiltInProviderKind,
+  Compat,
   GenericProviderKind,
   ProviderAuthMode,
   ProviderKind,
@@ -127,13 +128,32 @@ export type BuiltInProviderSettings = {
   readonly baseUrl: () => string;
 };
 
-export type DefinitionCapabilities<K extends ProviderKind> = {
+export type WireRoute<K extends ProviderKind = ProviderKind> = {
   readonly adapter: ProviderAdapter<K>;
+  /** Joined onto the provider base URL for this (kind, compat) pair. Absent: the base URL ends at the wire. */
+  readonly mount?: string;
+};
+
+export type ProviderRoutes<K extends ProviderKind = ProviderKind> = Readonly<
+  Partial<Record<Compat, WireRoute<K>>>
+>;
+
+export type CompatChoice =
+  | { readonly compat: Compat }
+  | { readonly compat: null; readonly reason: string };
+
+export type DefinitionCapabilities<K extends ProviderKind> = {
+  readonly routes: ProviderRoutes<K>;
+  readonly defaultCompat: (upstreamModel: string) => CompatChoice;
   readonly authModes: readonly ProviderAuthMode[];
   readonly oauth?: OAuthConnector;
   readonly catalog?: ProviderCatalog;
   readonly renew?: CredentialRenewer;
 };
+
+export function always(compat: Compat): (upstreamModel: string) => CompatChoice {
+  return () => ({ compat });
+}
 
 export type GenericProviderDefinition<K extends GenericProviderKind = GenericProviderKind> =
   DefinitionCapabilities<K> & {

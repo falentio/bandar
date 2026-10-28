@@ -25,16 +25,17 @@ SQLite.
 - Seven built-in providers on every account: Kilo Code, Token Harbor, Yeta,
   River, Nous Portal, Hyper, and OpenCode Go. Most speak the OpenAI wire; Kilo Code
   and Nous Portal also sign in with a device code, and OpenCode Go picks a wire per
-  model across the chat, messages, and GenAI endpoints.
+  model across the chat, responses, messages, and GenAI endpoints.
 - Custom providers added from the dashboard without changing code.
-- Provider and model-alias management in the dashboard or over `/api`.
+- Provider and model-alias management in the dashboard or over `/api`, with an
+  optional per-model wire override: one upstream may answer on several protocols.
 - Gateway keys from better-auth's API-key plugin, sent as
   `Authorization: Bearer <key>` or `x-api-key`.
 - Per-request analytics in DuckDB with SQL migrations embedded in the binary.
 - Email/password accounts and per-user data isolation.
 
-Not in v1: tools, images, embeddings, and the responses API. Prices come only
-from a catalog import. The adapter contract is text-only and says so.
+Not in v1: tools, images, and embeddings. Prices come only from a catalog import.
+The adapter contract is text-only and says so.
 
 ## Quickstart
 
@@ -484,7 +485,7 @@ BANDAR_DB=/srv/bandar/bandar.db BANDAR_DUCKDB=/srv/bandar/bandar.duckdb bandar s
 | `bun run check`          | Format, lint, and type-check.                                                              |
 | `bun run check:fix`      | The same with fixes.                                                                       |
 | `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                                 |
-| `bun run smoke`          | Boot the compiled binary and run 72 end-to-end checks against fake upstreams.              |
+| `bun run smoke`          | Boot the compiled binary and run 87 end-to-end checks against fake upstreams.              |
 | `bun run verify`         | `check`, `test`, `build`, `smoke`.                                                         |
 | `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                              |
 | `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                                 |
@@ -495,7 +496,8 @@ fake upstreams, checks the seven seeded built-ins, imports every catalog (one wi
 an alias collision, one joined to a pricing table, three public), approves fake Kilo
 Code and Nous Portal device logins, renews a Nous token under two concurrent
 chats, calls the gateway streaming and non-streaming, calls one OpenCode Go model
-on each of its three mounts, walks a tag with a failing first model, checks the
+on each of its four wires, moves an OpenAI model onto the responses wire and back,
+walks a tag with a failing first model, checks the
 recorded references, rejects reserved slugs, revokes the key, restarts the binary,
 and proves the analytics rows survived.
 
@@ -605,6 +607,7 @@ bandar/
 | `DELETE /api/providers/:id/credentials/:credentialId` | Session or `x-api-key` | Remove a credential and compact the order.              |
 | `GET /api/providers/:id?days=30`                      | Session or `x-api-key` | One provider plus its window usage.                     |
 | `POST /api/providers/:id/models`                      | Session or `x-api-key` | Add one model alias; returns the provider.              |
+| `PUT /api/providers/:id/models/:modelId`              | Session or `x-api-key` | Set or clear one model's wire; returns the provider.    |
 | `POST /api/providers/:id/models/refresh`              | Session or `x-api-key` | Import new models from the provider's catalog.          |
 | `DELETE /api/providers/:id/models/:modelId`           | Session or `x-api-key` | Remove a model alias; returns the provider.             |
 | `POST /api/providers/:id/oauth/start`                 | Session or `x-api-key` | Start a device login; returns a user code.              |
@@ -620,8 +623,8 @@ bandar/
 
 Each provider has its own page at `/providers/<id>` with four tabs:
 **Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
-(name, slug, kind, base URL), **Models** (aliases, refs, tag chips, removal, and
-a catalog import when the provider has one), and **Credentials** or
+(name, slug, kind, base URL), **Models** (aliases, refs, each model's wire, tag
+chips, removal, and a catalog import when the provider has one), and **Credentials** or
 **Connection** (the ordered credential list: add, move, and remove a key, connect
 an OAuth account, remove a custom provider). The tab lives in the URL as `?tab=`,
 so a reload or a shared link opens the same tab. Custom providers are created
@@ -679,9 +682,10 @@ yet.
   tier's USD per million tokens and DeepSeek's peak rate, so a long-context tier or
   an off-peak DeepSeek call costs less than the recorded number. Gemini's price is
   not published, so it imports unpriced.
-- **Thirteen OpenCode Go ids cannot be called.** Five answer only on the Responses
-  wire, which bandar does not speak, and the docs name no wire for eight more.
-  Neither group imports; typing one in fails with a 400 that names the gap.
+- **Eight OpenCode Go ids cannot be called.** The docs name no wire for them, so
+  they never import and typing one in fails with a 400 that names the gap. The
+  five ids the gateway serves only on the Responses wire are callable, and import
+  unpriced because the docs publish no price for them.
 - **Built-ins can share an upstream model id.** Aliases are unique across providers,
   so importing a catalog skips an id another provider already imported. Add the
   second copy with a distinct alias, or remove the first.

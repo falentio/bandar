@@ -68,6 +68,7 @@ export const providerModels = sqliteTable(
       .references(() => providers.id, { onDelete: "cascade" }),
     alias: text("alias").notNull(),
     upstreamModel: text("upstream_model").notNull(),
+    compat: text("compat"),
     inputPricePerMtok: real("input_price_per_mtok"),
     outputPricePerMtok: real("output_price_per_mtok"),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),

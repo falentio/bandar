@@ -19,8 +19,11 @@ import type { ProviderUsage } from "../../shared/analytics";
 import { type Tag } from "../../shared/tags";
 import {
   BUILT_IN_PROVIDERS,
+  COMPAT_LABELS,
   GENERIC_PROVIDER_KINDS,
   PROVIDER_KIND_LABELS,
+  parseCompat,
+  type Compat,
   type Provider,
   type ProviderAuthMode,
   type ProviderKind,
@@ -621,8 +624,14 @@ function ModelsCard({
               <ModelRow
                 key={model.id}
                 model={model}
+                compats={provider.compats}
                 pending={providers.pending}
                 tags={tagsOf(tags.tags, model.id)}
+                onCompat={(compat) => {
+                  void providers.setModelCompat(provider.id, model.id, compat).then((saved) => {
+                    if (saved) onChanged();
+                  });
+                }}
                 onRemove={() => {
                   void providers.removeModel(provider.id, model.id).then(onChanged);
                 }}
@@ -645,15 +654,25 @@ function tagsOf(tags: readonly Tag[], modelId: string): readonly ModelTag[] {
   });
 }
 
+function compatLabelOf(model: ProviderModel): string {
+  if (model.defaultCompat === null) return "Provider default (no wire)";
+
+  return `Provider default (${COMPAT_LABELS[model.defaultCompat]})`;
+}
+
 function ModelRow({
   model,
+  compats,
   pending,
   tags,
+  onCompat,
   onRemove,
 }: {
   model: ProviderModel;
+  compats: readonly Compat[];
   pending: boolean;
   tags: readonly ModelTag[];
+  onCompat: (compat: Compat | null) => void;
   onRemove: () => void;
 }) {
   return (
@@ -678,6 +697,23 @@ function ModelRow({
           {formatUsd(model.inputPricePerMtok)} in / {formatUsd(model.outputPricePerMtok)} out per M
         </span>
       )}
+      <select
+        aria-label={`Compatibility for ${model.alias}`}
+        value={model.compat ?? ""}
+        onChange={(event) => onCompat(parseCompat(event.target.value))}
+        disabled={pending}
+        className="max-w-56 rounded-md border bg-background px-1.5 py-0.5 text-xs text-muted-foreground transition-colors duration-150 ease-out hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+      >
+        <option value="">{compatLabelOf(model)}</option>
+        {model.compat === null || compats.includes(model.compat) ? null : (
+          <option value={model.compat}>{COMPAT_LABELS[model.compat]} (unavailable)</option>
+        )}
+        {compats.map((compat) => (
+          <option key={compat} value={compat}>
+            {COMPAT_LABELS[compat]}
+          </option>
+        ))}
+      </select>
       <button
         type="button"
         aria-label={`Remove ${model.alias}`}

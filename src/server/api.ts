@@ -12,6 +12,7 @@ import {
   ProviderCredentialOrderInputSchema,
   ProviderCredentialParamsSchema,
   ProviderCredentialProbeSchema,
+  ProviderModelCompatInputSchema,
   ProviderModelRefreshSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
@@ -49,6 +50,7 @@ import {
   removeProviderModel,
   ProviderRuleError,
   updateProvider,
+  updateProviderModel,
   type ProviderDeps,
 } from "./providers";
 import { probeProviderCredential } from "./providers/probe";
@@ -460,6 +462,41 @@ export function createApi(deps: ApiDeps) {
           set.status = 409;
 
           return failure("conflict", `the alias ${input.alias ?? input.upstreamModel} is taken`);
+        }
+
+        throw error;
+      }
+    })
+    .put("/providers/:id/models/:modelId", async ({ body, params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id, modelId } = parseInput(ProviderModelParamsSchema, params);
+      // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
+      const input = parseInput(ProviderModelCompatInputSchema, body as ParseableInput);
+
+      try {
+        const provider = await updateProviderModel(
+          deps.providers,
+          caller.userId,
+          id,
+          modelId,
+          input.compat,
+        );
+
+        if (provider === null) {
+          set.status = 404;
+
+          return failure("not_found", `model ${modelId} not found on provider ${id}`);
+        }
+
+        return provider;
+      } catch (error) {
+        if (error instanceof ProviderRuleError) {
+          set.status = providerRuleStatus(error);
+
+          return failure(error.code, error.message);
         }
 
         throw error;

@@ -7,7 +7,8 @@ import {
   subjectKey,
   type Subject,
 } from "../health";
-import { definitionFor, type ProviderDeps } from "../providers";
+import type { ProviderDeps } from "../providers";
+import { routeAttempt, type RoutedAttempt } from "../providers/route";
 import { freshCredential } from "../providers/refresh";
 import { recordRequest, type RequestEventInput, type RequestOutcome } from "./record";
 import { resolvePlan, type ResolvedAttempt, type ResolvedPlan } from "./resolve";
@@ -116,10 +117,10 @@ async function complete(
     const base = eventBase(input, plan.ref, attempt, startedAt);
 
     try {
-      const target = await targetOf(deps.providers, attempt);
+      const route = await routeOf(deps.providers, attempt);
 
-      const result = await definitionFor(attempt.kind).adapter.chat({
-        target,
+      const result = await route.adapter.chat({
+        target: route.target,
         request: input.request,
         signal: input.signal,
       });
@@ -239,10 +240,10 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         let finishReason: string | null = null;
 
         try {
-          const target = await targetOf(deps.providers, attempt);
+          const route = await routeOf(deps.providers, attempt);
 
-          for await (const event of definitionFor(attempt.kind).adapter.stream({
-            target,
+          for await (const event of route.adapter.stream({
+            target: route.target,
             request: input.request,
             signal: abort.signal,
           })) {
@@ -451,6 +452,10 @@ function flaggedUntilOf(attempt: ResolvedAttempt, subject: Subject): Date | null
       return _exhaustive;
     }
   }
+}
+
+async function routeOf(providers: ProviderDeps, attempt: ResolvedAttempt): Promise<RoutedAttempt> {
+  return routeAttempt(attempt.kind, await targetOf(providers, attempt), attempt.compat);
 }
 
 async function targetOf(

@@ -2,6 +2,7 @@ import { toJsonSchema } from "@valibot/to-json-schema";
 import { join } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_API_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
+import { PROVIDER_ENDPOINT_SPECS, type EndpointSpec } from "./providers/endpoints";
 
 const SETTINGS_FILE = "config.json";
 
@@ -92,6 +93,66 @@ const ServerSettingsSchema = v.pipe(
   }),
 );
 
+const endpointField = (spec: EndpointSpec) =>
+  v.optional(v.pipe(HttpUrlSchema, v.description(spec.description)));
+
+const KilocodeSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({
+    baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.kilocode.baseUrl),
+    catalogUrl: endpointField(PROVIDER_ENDPOINT_SPECS.kilocode.catalogUrl),
+  }),
+);
+
+const TokenharborSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({ baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.tokenharbor.baseUrl) }),
+);
+
+const YetaSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({ baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.yeta.baseUrl) }),
+);
+
+const RiverSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({
+    baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.river.baseUrl),
+    catalogUrl: endpointField(PROVIDER_ENDPOINT_SPECS.river.catalogUrl),
+  }),
+);
+
+const NousSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({
+    baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.nous.baseUrl),
+    authUrl: endpointField(PROVIDER_ENDPOINT_SPECS.nous.authUrl),
+  }),
+);
+
+const HyperSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({ baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.hyper.baseUrl) }),
+);
+
+const OpenCodeSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({ baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.opencode.baseUrl) }),
+);
+
+const ProvidersSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({
+    kilocode: v.optional(KilocodeSettingsSchema),
+    tokenharbor: v.optional(TokenharborSettingsSchema),
+    yeta: v.optional(YetaSettingsSchema),
+    river: v.optional(RiverSettingsSchema),
+    nous: v.optional(NousSettingsSchema),
+    hyper: v.optional(HyperSettingsSchema),
+    opencode: v.optional(OpenCodeSettingsSchema),
+  }),
+);
+
 export const SettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
@@ -104,10 +165,11 @@ export const SettingsSchema = v.pipe(
       ),
     ),
     server: v.optional(ServerSettingsSchema),
+    providers: v.optional(ProvidersSettingsSchema),
   }),
   v.metadata({
     title: "bandar config.json",
-    description: "Web server settings read from $BANDAR_HOME/config.json.",
+    description: "Runtime settings read from $BANDAR_HOME/config.json.",
   }),
 );
 

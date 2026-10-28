@@ -129,6 +129,53 @@ describe("settings", () => {
     );
   });
 
+  test("a provider section parses the fields its kind has", () => {
+    expect(
+      settingsFrom(
+        readerOf(
+          '{"providers":{"kilocode":{"baseUrl":"https://kilo.example.test/api","catalogUrl":"https://kilo.example.test/models"},"nous":{"authUrl":"https://portal.example.test"}}}',
+        ),
+      ),
+    ).toEqual({
+      kind: "ok",
+      path,
+      settings: {
+        providers: {
+          kilocode: {
+            baseUrl: "https://kilo.example.test/api",
+            catalogUrl: "https://kilo.example.test/models",
+          },
+          nous: { authUrl: "https://portal.example.test" },
+        },
+      },
+    });
+  });
+
+  test("an unknown provider kind or field is invalid", () => {
+    expect(reasonOf(settingsFrom(readerOf('{"providers":{"nope":{}}}')))).toContain(
+      "providers.nope",
+    );
+    expect(
+      reasonOf(settingsFrom(readerOf('{"providers":{"kilocode":{"authUrl":"https://x.test"}}}'))),
+    ).toContain("providers.kilocode.authUrl");
+    expect(
+      reasonOf(settingsFrom(readerOf('{"providers":{"hyper":{"catalogUrl":"https://x.test"}}}'))),
+    ).toContain("providers.hyper.catalogUrl");
+  });
+
+  test("a provider URL must be http or https", () => {
+    const reason = reasonOf(
+      settingsFrom(readerOf('{"providers":{"tokenharbor":{"baseUrl":"ftp://x.test"}}}')),
+    );
+
+    expect(reason).toContain("providers.tokenharbor.baseUrl");
+    expect(reason).toContain("must be an http or https URL");
+  });
+
+  test("a providers section that is not an object is invalid", () => {
+    expect(reasonOf(settingsFrom(readerOf('{"providers":[]}')))).toContain("providers");
+  });
+
   test("an unknown key is invalid at either level", () => {
     expect(reasonOf(settingsFrom(readerOf('{"nope":true}')))).toMatch(/^nope: Invalid key\b/u);
     expect(

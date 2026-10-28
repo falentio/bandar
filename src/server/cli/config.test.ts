@@ -88,7 +88,7 @@ describe("the config command", () => {
 
     expect(code).toBe(0);
     expect(stderr).toEqual([]);
-    expect(stdout).toHaveLength(6);
+    expect(stdout).toHaveLength(16);
 
     const printed = lineOf(stdout, "mode").replace(/^mode\s+/u, "");
 
@@ -181,6 +181,41 @@ describe("the config command", () => {
     ).toBe(true);
   });
 
+  test("a provider line names the file or the environment as its source", async () => {
+    writeFileSync(
+      file(),
+      JSON.stringify({
+        providers: {
+          kilocode: { baseUrl: "https://kilo.example.test/api/openrouter" },
+          hyper: { baseUrl: "https://hyper.example.test/v1" },
+        },
+      }),
+    );
+
+    const { stdout } = await run(["config"], {
+      BANDAR_RIVER_API: "http://127.0.0.1:9/river",
+    });
+
+    expect(
+      lineOf(stdout, "providers.kilocode.baseUrl").endsWith(
+        "https://kilo.example.test/api/openrouter (config.json)",
+      ),
+    ).toBe(true);
+    expect(
+      lineOf(stdout, "providers.hyper.baseUrl").endsWith(
+        "https://hyper.example.test/v1 (config.json)",
+      ),
+    ).toBe(true);
+    expect(
+      lineOf(stdout, "providers.river.baseUrl").endsWith(
+        "http://127.0.0.1:9/river/v1 (environment)",
+      ),
+    ).toBe(true);
+    expect(
+      lineOf(stdout, "providers.yeta.baseUrl").endsWith("https://platform.yeta.ai/v1 (default)"),
+    ).toBe(true);
+  });
+
   test("an unset auth secret warns once on stderr, and stdout carries only the report", async () => {
     const { code, stdout, stderr, warned } = await run(["config"], {
       BANDAR_AUTH_SECRET: undefined,
@@ -198,6 +233,16 @@ describe("the config command", () => {
       "server.port",
       "server.authUrl",
       "server.trustedOrigins",
+      "providers.kilocode.baseUrl",
+      "providers.kilocode.catalogUrl",
+      "providers.tokenharbor.baseUrl",
+      "providers.yeta.baseUrl",
+      "providers.river.baseUrl",
+      "providers.river.catalogUrl",
+      "providers.nous.baseUrl",
+      "providers.nous.authUrl",
+      "providers.hyper.baseUrl",
+      "providers.opencode.baseUrl",
     ]);
   });
 
@@ -227,7 +272,7 @@ describe("the config command", () => {
     expect(line).toContain("invalid environment: ");
     expect(line).toContain("BANDAR_PORT: ");
     expect(line).toContain("; BANDAR_AUTH_URL: ");
-    expect(line).toContain("; BANDAR_KILOCODE_API: ");
+    expect(line).toContain("; providers.kilocode.baseUrl: BANDAR_KILOCODE_API: ");
     expect(line).not.toContain("\n");
     expect(line).not.toContain("99999 BANDAR_AUTH_URL");
   });

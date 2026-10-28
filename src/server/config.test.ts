@@ -38,26 +38,36 @@ const reportOf = (
     mode,
   );
 
-const sourcesOf = (report: ConfigReport): Record<string, ConfigSource> =>
-  Object.fromEntries(report.rows.map((row) => [row.key, row.source]));
+const fromFile = (json: string, env: Record<string, string | undefined> = {}) =>
+  loadConfig(
+    { BANDAR_HOME: home, ...env },
+    ioOf(() => json),
+    "production",
+  );
+
+const sourcesOf = (report: ConfigReport, prefix = "server."): Record<string, ConfigSource> =>
+  Object.fromEntries(
+    report.rows.filter((row) => row.key.startsWith(prefix)).map((row) => [row.key, row.source]),
+  );
 
 describe("config", () => {
-  test("a provider origin that is not a URL fails at boot", () => {
-    for (const name of [
-      "BANDAR_KILOCODE_API",
-      "BANDAR_KILOCODE_MODELS_URL",
-      "BANDAR_TOKENHARBOR_API",
-      "BANDAR_YETA_API",
-      "BANDAR_RIVER_API",
-      "BANDAR_RIVER_PRICING_URL",
-      "BANDAR_NOUS_API",
-      "BANDAR_NOUS_PORTAL",
-      "BANDAR_HYPER_API",
-      "BANDAR_OPENCODE_API",
-    ]) {
+  test("a provider origin that is not a URL fails at boot, naming the settings key", () => {
+    for (const [name, key] of [
+      ["BANDAR_KILOCODE_API", "providers.kilocode.baseUrl"],
+      ["BANDAR_KILOCODE_MODELS_URL", "providers.kilocode.catalogUrl"],
+      ["BANDAR_TOKENHARBOR_API", "providers.tokenharbor.baseUrl"],
+      ["BANDAR_YETA_API", "providers.yeta.baseUrl"],
+      ["BANDAR_RIVER_API", "providers.river.baseUrl"],
+      ["BANDAR_RIVER_PRICING_URL", "providers.river.catalogUrl"],
+      ["BANDAR_NOUS_API", "providers.nous.baseUrl"],
+      ["BANDAR_NOUS_PORTAL", "providers.nous.authUrl"],
+      ["BANDAR_HYPER_API", "providers.hyper.baseUrl"],
+      ["BANDAR_OPENCODE_API", "providers.opencode.baseUrl"],
+    ] as const) {
       const attempt = () => parseConfig({ [name]: "hyper.local" });
 
       expect(attempt).toThrow(ConfigError);
+      expect(attempt).toThrow(key);
       expect(attempt).toThrow(name);
     }
   });
@@ -148,13 +158,6 @@ describe("config", () => {
 
 describe("the settings file", () => {
   const file = JSON.stringify({ server: { host: "127.0.0.1", port: 4000 } });
-
-  const fromFile = (json: string, env: Record<string, string | undefined> = {}) =>
-    loadConfig(
-      { BANDAR_HOME: home, ...env },
-      ioOf(() => json),
-      "production",
-    );
 
   test("the file supplies the host and the port", () => {
     const config = fromFile(file);
@@ -422,12 +425,11 @@ describe("the config report", () => {
   });
 
   test("the rows name the server keys in order", () => {
-    expect(reportOf().rows.map((row) => row.key)).toEqual([
-      "server.host",
-      "server.port",
-      "server.authUrl",
-      "server.trustedOrigins",
-    ]);
+    expect(
+      reportOf()
+        .rows.filter((row) => row.key.startsWith("server."))
+        .map((row) => row.key),
+    ).toEqual(["server.host", "server.port", "server.authUrl", "server.trustedOrigins"]);
   });
 
   test("a row carries the resolved value beside its source", () => {
@@ -439,7 +441,7 @@ describe("the config report", () => {
       }),
     ).rows;
 
-    expect(rows.map((row) => row.value)).toEqual([
+    expect(rows.filter((row) => row.key.startsWith("server.")).map((row) => row.value)).toEqual([
       "0.0.0.0",
       String(DEFAULT_API_PORT),
       `http://localhost:${String(DEFAULT_API_PORT)}`,
@@ -557,5 +559,133 @@ describe("the config report", () => {
       "server.authUrl": "environment",
       "server.trustedOrigins": "default",
     });
+  });
+});
+
+describe("the provider endpoints", () => {
+  test("every kind takes its default", () => {
+    const providers = reportOf().config.providers;
+
+    expect(providers.kilocode).toEqual({
+      baseUrl: "https://api.kilo.ai/api/openrouter",
+      catalogUrl: "https://api.kilo.ai/api/gateway/models",
+      authUrl: "https://api.kilo.ai",
+    });
+    expect(providers.tokenharbor).toEqual({
+      baseUrl: "https://tokenharbor.ai/v1",
+      catalogUrl: null,
+      authUrl: null,
+    });
+    expect(providers.yeta).toEqual({
+      baseUrl: "https://platform.yeta.ai/v1",
+      catalogUrl: null,
+      authUrl: null,
+    });
+    expect(providers.river).toEqual({
+      baseUrl: "https://api.river.ai/v1",
+      catalogUrl: "https://console.river.ai/api/public/pricing",
+      authUrl: null,
+    });
+    expect(providers.nous).toEqual({
+      baseUrl: "https://inference-api.nousresearch.com/v1",
+      catalogUrl: null,
+      authUrl: "https://portal.nousresearch.com",
+    });
+    expect(providers.hyper.baseUrl).toBe("https://hyper.charm.land/v1");
+    expect(providers.opencode.baseUrl).toBe("https://opencode.ai/inference");
+  });
+
+  test("the file supplies full base URLs, without a mount", () => {
+    const config = fromFile(
+      JSON.stringify({
+        providers: {
+          hyper: { baseUrl: "https://hyper.example.test/inference" },
+          river: {
+            baseUrl: "https://river.example.test/api",
+            catalogUrl: "https://river.example.test/pricing",
+          },
+          nous: { authUrl: "https://portal.example.test/oauth" },
+        },
+      }),
+    );
+
+    expect(config.providers.hyper.baseUrl).toBe("https://hyper.example.test/inference");
+    expect(config.providers.river).toEqual({
+      baseUrl: "https://river.example.test/api",
+      catalogUrl: "https://river.example.test/pricing",
+      authUrl: null,
+    });
+    expect(config.providers.nous.authUrl).toBe("https://portal.example.test/oauth");
+  });
+
+  test("the environment origin gains the kind's mount", () => {
+    const config = fromFile("{}", {
+      BANDAR_HYPER_API: "http://127.0.0.1:9/hyper/",
+      BANDAR_OPENCODE_API: "http://127.0.0.1:9/opencode",
+      BANDAR_RIVER_PRICING_URL: "http://127.0.0.1:9/river/pricing",
+    });
+
+    expect(config.providers.hyper.baseUrl).toBe("http://127.0.0.1:9/hyper/v1");
+    expect(config.providers.opencode.baseUrl).toBe("http://127.0.0.1:9/opencode/inference");
+    expect(config.providers.river.catalogUrl).toBe("http://127.0.0.1:9/river/pricing");
+  });
+
+  test("kilocode derives its login origin from the base URL", () => {
+    const withoutMount = fromFile(
+      JSON.stringify({ providers: { kilocode: { baseUrl: "http://127.0.0.1:9/gateway" } } }),
+    );
+
+    const withMount = fromFile(
+      JSON.stringify({
+        providers: { kilocode: { baseUrl: "http://127.0.0.1:9/api/openrouter" } },
+      }),
+    );
+
+    expect(withoutMount.providers.kilocode.authUrl).toBe("http://127.0.0.1:9");
+    expect(withMount.providers.kilocode.authUrl).toBe("http://127.0.0.1:9");
+  });
+
+  test("the file labels each provider field", () => {
+    const report = reportOf(
+      { BANDAR_RIVER_API: "http://127.0.0.1:9/river" },
+      "production",
+      JSON.stringify({
+        providers: { kilocode: { catalogUrl: "https://kilo.example.test/models" } },
+      }),
+    );
+
+    expect(sourcesOf(report, "providers.")).toEqual({
+      "providers.kilocode.baseUrl": "default",
+      "providers.kilocode.catalogUrl": "config",
+      "providers.tokenharbor.baseUrl": "default",
+      "providers.yeta.baseUrl": "default",
+      "providers.river.baseUrl": "environment",
+      "providers.river.catalogUrl": "default",
+      "providers.nous.baseUrl": "default",
+      "providers.nous.authUrl": "default",
+      "providers.hyper.baseUrl": "default",
+      "providers.opencode.baseUrl": "default",
+    });
+  });
+
+  test("a provider URL in the file must be http or https", () => {
+    const attempt = () => fromFile('{"providers":{"hyper":{"baseUrl":"javascript:alert(1)"}}}');
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("providers.hyper.baseUrl");
+    expect(attempt).toThrow("must be an http or https URL");
+  });
+
+  test("an unknown kind or an unknown field fails the boot", () => {
+    for (const json of [
+      '{"providers":{"nope":{}}}',
+      '{"providers":{"kilocode":{"authUrl":"https://x.test"}}}',
+      '{"providers":{"hyper":{"catalogUrl":"https://x.test"}}}',
+    ]) {
+      const attempt = () => fromFile(json);
+
+      expect(attempt).toThrow(ConfigError);
+      expect(attempt).toThrow("invalid configuration");
+    }
   });
 });

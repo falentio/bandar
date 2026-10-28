@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
+import { BUILT_IN_PROVIDER_KINDS, type BuiltInProviderKind } from "../shared/providers";
 import {
   authUrlForPort,
   DEFAULT_API_PORT,
@@ -11,6 +12,14 @@ import {
   MAX_PORT,
   MIN_PORT,
 } from "../shared/topology";
+import {
+  endpointSpecsFor,
+  providerEndpoint,
+  withMount,
+  type EndpointField,
+  type ProviderEndpoint,
+  type ProviderEndpoints,
+} from "./providers/endpoints";
 import {
   HttpUrlSchema,
   OriginSchema,
@@ -28,6 +37,7 @@ export type Config = {
   readonly authUrl: string;
   readonly authSecret: string;
   readonly trustedOrigins: readonly string[];
+  readonly providers: ProviderEndpoints;
 };
 
 export type RunMode = "development" | "production";
@@ -50,6 +60,7 @@ type ConfigSources = {
 type BuiltConfig = {
   readonly config: Config;
   readonly sources: ConfigSources;
+  readonly providerRows: readonly ConfigRow[];
 };
 
 export type ConfigReport = {
@@ -71,8 +82,6 @@ export class ConfigError extends Error {
     this.summary = summary;
   }
 }
-
-const ProviderUrlSchema = v.pipe(v.string(), v.trim(), v.url());
 
 const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "bandar");
 
@@ -118,17 +127,6 @@ const ConfigSchema = v.object({
   BANDAR_AUTH_URL: v.optional(HttpUrlSchema),
   BANDAR_AUTH_SECRET: v.optional(v.pipe(v.string(), v.minLength(1))),
   BANDAR_TRUSTED_ORIGINS: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
-  // Providers read these at request time, so the shape is checked here instead.
-  BANDAR_KILOCODE_API: v.optional(ProviderUrlSchema),
-  BANDAR_KILOCODE_MODELS_URL: v.optional(ProviderUrlSchema),
-  BANDAR_TOKENHARBOR_API: v.optional(ProviderUrlSchema),
-  BANDAR_YETA_API: v.optional(ProviderUrlSchema),
-  BANDAR_RIVER_API: v.optional(ProviderUrlSchema),
-  BANDAR_RIVER_PRICING_URL: v.optional(ProviderUrlSchema),
-  BANDAR_NOUS_API: v.optional(ProviderUrlSchema),
-  BANDAR_NOUS_PORTAL: v.optional(ProviderUrlSchema),
-  BANDAR_HYPER_API: v.optional(ProviderUrlSchema),
-  BANDAR_OPENCODE_API: v.optional(ProviderUrlSchema),
 });
 
 /**
@@ -145,11 +143,24 @@ function resolveHome(env: Record<string, string | undefined>, mode: RunMode): st
 
 type Environment = v.InferOutput<typeof ConfigSchema>;
 
+type EndpointEnvValue = {
+  readonly kind: BuiltInProviderKind;
+  readonly field: EndpointField;
+  readonly value: string;
+};
+
+type ParsedEnvironment = {
+  readonly environment: Environment;
+  readonly endpoints: readonly EndpointEnvValue[];
+};
+
+const ENDPOINT_FIELDS: readonly EndpointField[] = ["baseUrl", "catalogUrl", "authUrl"];
+
 /**
- * The environment, parsed once. A rejected value fails here, before the settings read writes the
- * schema into the data directory.
+ * The environment, parsed once. Every rejected value is collected before the throw, so one line
+ * names all of them, and the throw lands before the settings read writes into the data directory.
  */
-function parseEnv(env: Record<string, string | undefined>): Environment {
+function parseEnvironment(env: Record<string, string | undefined>): ParsedEnvironment {
   // A blank value means "unset" for every variable but BANDAR_CONFIG_DIR: install.sh writes its
   // manifest under the config directory it was given, so a blank one has to fail, not fall back.
   const given = Object.fromEntries(
@@ -159,18 +170,136 @@ function parseEnv(env: Record<string, string | undefined>): Environment {
   );
 
   const parsed = v.safeParse(ConfigSchema, given);
+  const endpointIssues: string[] = [];
+  const endpoints = endpointValues(env, endpointIssues);
 
-  if (!parsed.success) {
-    const issues = parsed.issues.map((issue) => {
-      const path = issue.path?.map((item) => String(item.key)).join(".") ?? "";
+  if (!parsed.success || endpointIssues.length > 0) {
+    const environmentIssues = parsed.success
+      ? []
+      : parsed.issues.map((issue) => {
+          const path = issue.path?.map((item) => String(item.key)).join(".") ?? "";
 
-      return `${path || "environment"}: ${issue.message}`;
-    });
+          return `${path || "environment"}: ${issue.message}`;
+        });
 
-    throw new ConfigError(issues);
+    throw new ConfigError([...environmentIssues, ...endpointIssues]);
   }
 
-  return parsed.output;
+  return { environment: parsed.output, endpoints };
+}
+
+/**
+ * The provider variables are origins rather than full base URLs, so each one is validated before a
+ * mount completes it. A rejected value names the settings key it would fill, because the file holds
+ * the same value under that key.
+ */
+function endpointValues(
+  env: Record<string, string | undefined>,
+  issues: string[],
+): readonly EndpointEnvValue[] {
+  const values: EndpointEnvValue[] = [];
+
+  for (const kind of BUILT_IN_PROVIDER_KINDS) {
+    const specs = endpointSpecsFor(kind);
+
+    for (const field of ENDPOINT_FIELDS) {
+      const spec = specs[field];
+
+      if (spec === undefined) continue;
+
+      const raw = env[spec.env]?.trim();
+
+      if (raw === undefined || raw === "") continue;
+
+      const parsed = v.safeParse(HttpUrlSchema, raw);
+
+      if (parsed.success) values.push({ kind, field, value: parsed.output });
+      else
+        issues.push(
+          `providers.${kind}.${field}: ${spec.env}: ${parsed.issues[0]?.message ?? "invalid URL"}`,
+        );
+    }
+  }
+
+  return values;
+}
+
+type EndpointSettings = {
+  readonly baseUrl?: string;
+  readonly catalogUrl?: string;
+  readonly authUrl?: string;
+};
+
+function endpointOf(
+  kind: BuiltInProviderKind,
+  file: EndpointSettings | undefined,
+  environment: readonly EndpointEnvValue[],
+  rows: ConfigRow[],
+): ProviderEndpoint {
+  const specs = endpointSpecsFor(kind);
+
+  const environmentValue = (field: EndpointField): string | undefined =>
+    environment.find((entry) => entry.kind === kind && entry.field === field)?.value;
+
+  const baseOrigin = environmentValue("baseUrl");
+
+  const base = resolve(
+    file?.baseUrl,
+    baseOrigin === undefined ? undefined : withMount(kind, baseOrigin),
+    specs.baseUrl.default,
+  );
+
+  rows.push({ key: `providers.${kind}.baseUrl`, value: base.value, source: base.source });
+
+  const catalog =
+    specs.catalogUrl === undefined
+      ? null
+      : resolve(file?.catalogUrl, environmentValue("catalogUrl"), specs.catalogUrl.default);
+
+  const auth =
+    specs.authUrl === undefined
+      ? null
+      : resolve(file?.authUrl, environmentValue("authUrl"), specs.authUrl.default);
+
+  if (catalog !== null)
+    rows.push({
+      key: `providers.${kind}.catalogUrl`,
+      value: catalog.value,
+      source: catalog.source,
+    });
+
+  if (auth !== null)
+    rows.push({ key: `providers.${kind}.authUrl`, value: auth.value, source: auth.source });
+
+  return providerEndpoint(kind, base.value, catalog?.value ?? null, auth?.value ?? null);
+}
+
+type ProviderSites = {
+  readonly endpoints: ProviderEndpoints;
+  readonly rows: readonly ConfigRow[];
+};
+
+function resolveProviders(
+  settings: Settings,
+  environment: readonly EndpointEnvValue[],
+): ProviderSites {
+  const rows: ConfigRow[] = [];
+
+  const endpoint = (kind: BuiltInProviderKind): ProviderEndpoint =>
+    endpointOf(kind, settings.providers?.[kind], environment, rows);
+
+  return {
+    endpoints: {
+      kilocode: endpoint("kilocode"),
+      tokenharbor: endpoint("tokenharbor"),
+      yeta: endpoint("yeta"),
+      river: endpoint("river"),
+      nous: endpoint("nous"),
+      hyper: endpoint("hyper"),
+      opencode: endpoint("opencode"),
+    },
+    rows,
+  };
 }
 
 /**
@@ -184,8 +313,10 @@ function buildConfig(
   home: string,
   mode: RunMode,
   settings: Settings,
+  endpointEnvironment: readonly EndpointEnvValue[],
 ): BuiltConfig {
   const server = settings.server;
+  const providers = resolveProviders(settings, endpointEnvironment);
 
   const environmentOrigins =
     environment.BANDAR_TRUSTED_ORIGINS === undefined
@@ -213,6 +344,7 @@ function buildConfig(
       authUrl: authUrl.value,
       authSecret: environment.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
       trustedOrigins: trustedOrigins.value,
+      providers: providers.endpoints,
     },
     sources: {
       host: host.source,
@@ -220,6 +352,7 @@ function buildConfig(
       authUrl: authUrl.source,
       trustedOrigins: trustedOrigins.source,
     },
+    providerRows: providers.rows,
   };
 }
 
@@ -320,7 +453,9 @@ export function parseConfig(
 ): Config {
   const home = resolveHome(env, mode);
 
-  return buildConfig(parseEnv(env), home, mode, {}).config;
+  const { environment, endpoints } = parseEnvironment(env);
+
+  return buildConfig(environment, home, mode, {}, endpoints).config;
 }
 
 /**
@@ -335,17 +470,18 @@ export function loadConfigReport(
   mode: RunMode = detectRunMode(),
 ): ConfigReport {
   const home = resolveHome(env, mode);
-  const environment = parseEnv(env);
+  const { environment, endpoints } = parseEnvironment(env);
   const report = loadSettings(home, io);
 
   if (report.kind === "invalid")
     throw new ConfigError([`${report.path}: ${report.reason}`], "invalid configuration");
 
-  const { config, sources } = buildConfig(
+  const { config, sources, providerRows } = buildConfig(
     environment,
     home,
     mode,
     report.kind === "ok" ? report.settings : {},
+    endpoints,
   );
 
   return {
@@ -353,7 +489,7 @@ export function loadConfigReport(
     mode,
     settingsPath: report.path,
     settingsFound: report.kind === "ok",
-    rows: serverRows(config, sources),
+    rows: [...serverRows(config, sources), ...providerRows],
   };
 }
 

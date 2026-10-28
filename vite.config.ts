@@ -3,7 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite-plus";
 import { loadConfig } from "./src/server/config";
-import { settingsIo } from "./src/server/settings-io";
+import { settingsReadIo } from "./src/server/settings-io";
 import { loopbackOrigin } from "./src/shared/topology";
 
 const ignored = [
@@ -14,7 +14,7 @@ const ignored = [
   "tools/oxlint/anti-slop/**",
 ];
 
-const config = loadConfig(process.env, settingsIo, "development");
+const config = loadConfig(process.env, settingsReadIo, "development");
 
 // Vendored from https://github.com/dmmulroy/anti-slop. Rules are local policy; edit them here.
 const antiSlopRules = {

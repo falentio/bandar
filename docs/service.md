@@ -33,7 +33,7 @@ stderr: which files it wrote, and which ones it kept.
 The data directory comes from `--data-dir`, else `XDG_DATA_HOME` or `~/.local/share/bandar` for
 user scope and `/var/lib/bandar` for system scope. The unit pins a port only when `--port` names
 one, so a port in `config.json` is picked up on the next start. A `BANDAR_PORT` in the shell is not
-written into the unit. A pinned `--port` writes `BANDAR_PORT` into the unit, which is the fallback
+written into the unit. Passing `--port` writes `BANDAR_PORT` into the unit, which is the fallback
 tier: a `server.port` in the file still wins over it, so leave that key out of the file when the
 unit should own the port.
 

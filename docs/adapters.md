@@ -300,7 +300,8 @@ bundles its adapter with whatever else the provider has: a catalog for all seven
 an `OAuthConnector` for Kilo Code and Nous Portal, and a `CredentialRenewer` for
 Nous Portal. The endpoints are not part of the definition: seeding reads the
 resolved config's `baseUrl` for the kind and updates the row in place when it
-changed, so an edit reaches the seeded row on the next listing. Built-in rows
+changed. The gateway reads the resolved endpoint directly, so an edit reaches it
+on the next request, and the seeded row catches up on the next listing. Built-in rows
 cannot be created through the provider API, edited in Settings, or removed; they
 reappear on the next listing if deleted directly.
 

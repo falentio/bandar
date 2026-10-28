@@ -259,9 +259,10 @@ are secrets for `bandar update`; and the installer's inputs.
 
 Behind a reverse proxy, set `server.authUrl` to the public URL, such as
 `https://llm.example.com`. Its origin joins the default trusted origins, so sign-in links
-and the browser's origin check agree with that one key, and `server.trustedOrigins` is
-for extra origins only. `authSecret` is not a settings key: the data directory is
-world-readable, while the service env file is mode 600.
+and the browser's origin check agree with that one key. A file that sets
+`server.trustedOrigins` replaces the whole default list, so repeat every origin the
+browser uses, the auth URL's included. `authSecret` is not a settings key: the data
+directory is world-readable, while the service env file is mode 600.
 
 Run `bandar config` to write the schema, point the file at it, and print what it
 resolved and where each value came from:
@@ -289,7 +290,8 @@ update.apiUrl                  none (default)
 ```
 
 `bandar` reads the file on every start, so a restart applies an edit to a server key. A
-provider endpoint edit also reaches the seeded built-in row on the next provider listing.
+provider endpoint edit also reaches the gateway on the next request and the seeded built-in
+row on the next provider listing.
 `bandar install-service --port` writes `BANDAR_PORT` into the unit, which is the
 fallback tier: a `server.port` in the file outranks it, so leave `server.port` out
 of the file when the unit should own the port. Read

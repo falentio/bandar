@@ -53,6 +53,7 @@ import {
   updateProviderModel,
   type ProviderDeps,
 } from "./providers";
+import { endpointFor } from "./providers/endpoints";
 import { probeProviderCredential } from "./providers/probe";
 import { UpstreamError } from "./providers/types";
 import { createTag, listTags, removeTag, setTagModels, TagRuleError } from "./tags";
@@ -248,14 +249,15 @@ export function createApi(deps: ApiDeps) {
       }
 
       const oauth = definitionFor(provider.kind).oauth;
+      const endpoint = endpointFor(deps.providers.endpoints, provider.kind);
 
-      if (oauth === undefined) {
+      if (oauth === undefined || endpoint?.authUrl == null) {
         set.status = 400;
 
         return failure("unsupported", `${provider.kind} does not use a device login`);
       }
 
-      const login = await oauth.start(request.signal);
+      const login = await oauth.start({ signal: request.signal, authUrl: endpoint.authUrl });
 
       pendingLogins.set(loginKey(caller.userId, id), {
         code: login.code,
@@ -284,8 +286,9 @@ export function createApi(deps: ApiDeps) {
       }
 
       const oauth = definitionFor(provider.kind).oauth;
+      const endpoint = endpointFor(deps.providers.endpoints, provider.kind);
 
-      if (oauth === undefined) {
+      if (oauth === undefined || endpoint?.authUrl == null) {
         set.status = 400;
 
         return failure("unsupported", `${provider.kind} does not use a device login`);
@@ -307,7 +310,10 @@ export function createApi(deps: ApiDeps) {
         return failure("invalid_request", "the login code expired; start again");
       }
 
-      const result = await oauth.poll(login.code, request.signal);
+      const result = await oauth.poll(login.code, {
+        signal: request.signal,
+        authUrl: endpoint.authUrl,
+      });
 
       if (result.state === "pending") {
         return v.parse(ProviderOAuthPollSchema, { state: "pending" });
@@ -526,6 +532,7 @@ export function createApi(deps: ApiDeps) {
 
       const models = await catalog({
         baseUrl: provider.baseUrl,
+        catalogUrl: endpointFor(deps.providers.endpoints, provider.kind)?.catalogUrl ?? null,
         credential: () => readFirstCredential(deps.providers, id),
         signal: request.signal,
       });

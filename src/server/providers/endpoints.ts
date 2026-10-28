@@ -1,4 +1,9 @@
-import type { BuiltInProviderKind } from "../../shared/providers";
+import {
+  BUILT_IN_PROVIDER_KINDS,
+  BUILT_IN_PROVIDERS,
+  type BuiltInProviderKind,
+  type ProviderKind,
+} from "../../shared/providers";
 
 export type EndpointSpec = {
   readonly env: string;
@@ -14,11 +19,15 @@ export type EndpointSpecs = {
 
 export type EndpointField = keyof EndpointSpecs;
 
-const baseUrl = (env: string, value: string): EndpointSpec => ({
-  env,
-  default: value,
-  description: `The full API base URL, including the mount. Defaults to ${value}.`,
-});
+const baseUrl = (kind: BuiltInProviderKind, env: string): EndpointSpec => {
+  const value = BUILT_IN_PROVIDERS[kind].baseUrl;
+
+  return {
+    env,
+    default: value,
+    description: `The full API base URL, including the mount. Defaults to ${value}.`,
+  };
+};
 
 const catalogUrl = (env: string, value: string): EndpointSpec => ({
   env,
@@ -34,31 +43,31 @@ const authUrl = (env: string, value: string): EndpointSpec => ({
 
 export const PROVIDER_ENDPOINT_SPECS = {
   kilocode: {
-    baseUrl: baseUrl("BANDAR_KILOCODE_API", "https://api.kilo.ai/api/openrouter"),
+    baseUrl: baseUrl("kilocode", "BANDAR_KILOCODE_API"),
     catalogUrl: catalogUrl("BANDAR_KILOCODE_MODELS_URL", "https://api.kilo.ai/api/gateway/models"),
   },
   tokenharbor: {
-    baseUrl: baseUrl("BANDAR_TOKENHARBOR_API", "https://tokenharbor.ai/v1"),
+    baseUrl: baseUrl("tokenharbor", "BANDAR_TOKENHARBOR_API"),
   },
   yeta: {
-    baseUrl: baseUrl("BANDAR_YETA_API", "https://platform.yeta.ai/v1"),
+    baseUrl: baseUrl("yeta", "BANDAR_YETA_API"),
   },
   river: {
-    baseUrl: baseUrl("BANDAR_RIVER_API", "https://api.river.ai/v1"),
+    baseUrl: baseUrl("river", "BANDAR_RIVER_API"),
     catalogUrl: catalogUrl(
       "BANDAR_RIVER_PRICING_URL",
       "https://console.river.ai/api/public/pricing",
     ),
   },
   nous: {
-    baseUrl: baseUrl("BANDAR_NOUS_API", "https://inference-api.nousresearch.com/v1"),
+    baseUrl: baseUrl("nous", "BANDAR_NOUS_API"),
     authUrl: authUrl("BANDAR_NOUS_PORTAL", "https://portal.nousresearch.com"),
   },
   hyper: {
-    baseUrl: baseUrl("BANDAR_HYPER_API", "https://hyper.charm.land/v1"),
+    baseUrl: baseUrl("hyper", "BANDAR_HYPER_API"),
   },
   opencode: {
-    baseUrl: baseUrl("BANDAR_OPENCODE_API", "https://opencode.ai/inference"),
+    baseUrl: baseUrl("opencode", "BANDAR_OPENCODE_API"),
   },
 } satisfies Record<BuiltInProviderKind, EndpointSpecs>;
 
@@ -109,6 +118,15 @@ export function providerEndpoint(
     authUrl: authUrl ?? (kind === "kilocode" ? authUrlFor(baseUrl, PROVIDER_MOUNTS[kind]) : null),
   };
 }
+
+export const isBuiltInProviderKind = (kind: ProviderKind): kind is BuiltInProviderKind =>
+  BUILT_IN_PROVIDER_KINDS.some((builtIn) => builtIn === kind);
+
+/** The endpoint of a provider row: generic kinds have none. */
+export const endpointFor = (
+  endpoints: ProviderEndpoints,
+  kind: ProviderKind,
+): ProviderEndpoint | null => (isBuiltInProviderKind(kind) ? endpoints[kind] : null);
 
 const defaultEndpoint = (kind: BuiltInProviderKind): ProviderEndpoint => {
   const specs = endpointSpecsFor(kind);

@@ -30,7 +30,7 @@ export async function fetchRiverCatalog(
 }
 
 async function readPricing(request: CatalogRequest): Promise<readonly ModelCatalogEntry[]> {
-  const url = Bun.env.BANDAR_RIVER_PRICING_URL ?? RIVER_PRICING_URL;
+  const url = request.catalogUrl ?? RIVER_PRICING_URL;
 
   const response = await fetch(url, { signal: request.signal }).catch((error: Error) => {
     throw new UpstreamError(`could not read the river pricing: ${error.message}`, "network");

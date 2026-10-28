@@ -3,26 +3,40 @@ import type { ProviderKind } from "../../shared/providers";
 import { availableSlug, slugify } from "../../shared/slugs";
 import type { Db } from "../db/client";
 import { providers } from "../db/schema";
+import type { ProviderDeps } from ".";
 import { builtInProviders, definitionFor, reservedProviderSlugs } from "./registry";
 
-export async function ensureBuiltInProviders(db: Db, userId: string): Promise<void> {
-  const rows = await db
+export async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promise<void> {
+  const rows = await deps.db
     .select({
+      id: providers.id,
       kind: providers.kind,
       name: providers.name,
       origin: providers.origin,
       slug: providers.slug,
+      baseUrl: providers.baseUrl,
     })
     .from(providers)
     .where(eq(providers.userId, userId));
 
-  const present = new Set(rows.filter((row) => row.origin === "builtin").map((row) => row.kind));
+  const seeded = new Map(
+    rows.filter((row) => row.origin === "builtin").map((row) => [row.kind, row]),
+  );
+
   const names = new Set(rows.map((row) => row.name));
   const slugs = new Set(rows.flatMap((row) => (row.slug === "" ? [] : [row.slug])));
   const now = new Date();
 
   for (const definition of builtInProviders) {
-    if (present.has(definition.kind)) continue;
+    const baseUrl = deps.endpoints[definition.kind].baseUrl;
+    const current = seeded.get(definition.kind);
+
+    if (current !== undefined) {
+      if (current.baseUrl !== baseUrl)
+        deps.db.update(providers).set({ baseUrl }).where(eq(providers.id, current.id)).run();
+
+      continue;
+    }
 
     // A custom row can already hold a slug that has since become reserved.
     const name = availableName(definition.builtIn.name, names);
@@ -31,14 +45,15 @@ export async function ensureBuiltInProviders(db: Db, userId: string): Promise<vo
     names.add(name);
     slugs.add(slug);
 
-    db.insert(providers)
+    deps.db
+      .insert(providers)
       .values({
         id: crypto.randomUUID(),
         userId,
         name,
         slug,
         kind: definition.kind,
-        baseUrl: definition.builtIn.baseUrl(),
+        baseUrl,
         origin: "builtin",
         createdAt: now,
       })

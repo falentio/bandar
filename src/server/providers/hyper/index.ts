@@ -1,5 +1,4 @@
 import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
-import { apiBaseUrl } from "../env";
 import { bearerAdapter } from "../openai/compatible";
 import { always, type BuiltInProviderDefinition } from "../types";
 import { fetchHyperCatalog } from "./catalog";
@@ -12,7 +11,6 @@ export const hyper: BuiltInProviderDefinition<"hyper"> = {
   builtIn: {
     name: settings.name,
     slug: settings.slug,
-    baseUrl: () => apiBaseUrl("BANDAR_HYPER_API", settings.baseUrl),
   },
   routes: { chat: { adapter: bearerAdapter("hyper", "hyper") } },
   defaultCompat: always("chat"),

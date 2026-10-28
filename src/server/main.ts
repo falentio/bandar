@@ -61,7 +61,18 @@ async function startServer(env: Env): Promise<void> {
   const auth = createAuth(db, config);
   const sealer = await createSealer(config.authSecret);
 
-  const app = createApp({ db, sqlite, duck, sealer, client, migration, duckMigration, auth });
+  const app = createApp({
+    db,
+    sqlite,
+    duck,
+    sealer,
+    client,
+    migration,
+    duckMigration,
+    auth,
+    endpoints: config.providers,
+  });
+
   const server = Bun.serve({ hostname: config.host, port: config.port, fetch: app.handle });
 
   console.log(

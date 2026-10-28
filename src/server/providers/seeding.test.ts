@@ -8,6 +8,7 @@ import { openDatabase } from "../db/client";
 import { applyMigrations, type Migration } from "../db/migrate";
 import { createSealer } from "../seal";
 import { listProviders, type ProviderDeps } from ".";
+import { DEFAULT_PROVIDER_ENDPOINTS, type ProviderEndpoints } from "./endpoints";
 
 const DRIZZLE = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 
@@ -18,7 +19,9 @@ afterEach(() => {
   open = [];
 });
 
-async function freshDb(): Promise<{ readonly sqlite: Database; readonly deps: ProviderDeps }> {
+async function freshDb(
+  endpoints: ProviderEndpoints = DEFAULT_PROVIDER_ENDPOINTS,
+): Promise<{ readonly sqlite: Database; readonly deps: ProviderDeps }> {
   const { sqlite, db } = openDatabase(":memory:");
 
   open.push(sqlite);
@@ -26,7 +29,7 @@ async function freshDb(): Promise<{ readonly sqlite: Database; readonly deps: Pr
   sqlite.exec("PRAGMA foreign_keys = OFF");
   applyMigrations(sqlite, migrationsFromDisk());
 
-  return { sqlite, deps: { db, sealer: await createSealer("seeding-test") } };
+  return { sqlite, deps: { db, sealer: await createSealer("seeding-test"), endpoints } };
 }
 
 function migrationsFromDisk(): readonly Migration[] {
@@ -75,6 +78,51 @@ describe("built-in seeding", () => {
     sqlite.query("DELETE FROM providers WHERE user_id = 'user-3' AND kind = 'tokenharbor'").run();
 
     expect(await kinds("user-3")).toEqual(expected);
+  });
+
+  test("a built-in row is seeded with the endpoint the config resolved", async () => {
+    const { deps } = await freshDb({
+      ...DEFAULT_PROVIDER_ENDPOINTS,
+      hyper: { baseUrl: "https://hyper.example.test/v1", catalogUrl: null, authUrl: null },
+    });
+
+    const hyper = (await listProviders(deps, "user-4")).providers.find(
+      (provider) => provider.kind === "hyper",
+    );
+
+    expect(hyper?.baseUrl).toBe("https://hyper.example.test/v1");
+  });
+
+  test("a changed endpoint updates the row on the next list", async () => {
+    const { deps } = await freshDb();
+
+    await listProviders(deps, "user-5");
+
+    const moved: ProviderDeps = {
+      ...deps,
+      endpoints: {
+        ...deps.endpoints,
+        hyper: { baseUrl: "http://127.0.0.1:9/hyper/v1", catalogUrl: null, authUrl: null },
+      },
+    };
+
+    const hyper = (await listProviders(moved, "user-5")).providers.find(
+      (provider) => provider.kind === "hyper",
+    );
+
+    expect(hyper?.baseUrl).toBe("http://127.0.0.1:9/hyper/v1");
+  });
+
+  test("a custom row keeps the base URL it was given", async () => {
+    const { sqlite, deps } = await freshDb();
+
+    insertCustomProvider(sqlite, "My Gateway", "my-gateway");
+
+    const custom = (await listProviders(deps, "user-1")).providers.find(
+      (provider) => provider.id === "custom-1",
+    );
+
+    expect(custom?.baseUrl).toBe("https://example.test/v1");
   });
 
   test("seeding on every read adds no second row", async () => {

@@ -12,6 +12,7 @@ import { cooldownEvents, providerCredentials, providerModels, providers } from "
 import { DuckDb, type QueryRow } from "../duck/client";
 import { applyDuckMigrations } from "../duck/migrate";
 import { addProviderModel, createProvider, type ProviderDeps } from "../providers";
+import { DEFAULT_PROVIDER_ENDPOINTS } from "../providers/endpoints";
 import { createSealer } from "../seal";
 import { createTag, setTagModels } from "../tags";
 import { runChat, type ChatDeps, type ChatInput } from "./chat";
@@ -492,7 +493,12 @@ async function freshHarness(
   applyDuckMigrations(duck, duckMigrations());
 
   const sealer = await createSealer("test-secret");
-  const providers = { db: database.db, sealer } satisfies ProviderDeps;
+
+  const providers = {
+    db: database.db,
+    sealer,
+    endpoints: DEFAULT_PROVIDER_ENDPOINTS,
+  } satisfies ProviderDeps;
 
   cleanup.push(
     () => upstream.stop(),

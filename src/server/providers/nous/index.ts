@@ -1,5 +1,4 @@
 import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
-import { apiBaseUrl } from "../env";
 import { bearerAdapter } from "../openai/compatible";
 import { always, type BuiltInProviderDefinition } from "../types";
 import { fetchNousCatalog } from "./catalog";
@@ -15,7 +14,6 @@ export const nous: BuiltInProviderDefinition<"nous"> = {
   builtIn: {
     name: settings.name,
     slug: settings.slug,
-    baseUrl: () => apiBaseUrl("BANDAR_NOUS_API", settings.baseUrl),
   },
   routes: { chat: { adapter: bearerAdapter("nous", "nous portal") } },
   defaultCompat: always("chat"),

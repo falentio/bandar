@@ -25,9 +25,10 @@ const KiloCatalogSchema = v.object({
 });
 
 export async function fetchKilocodeCatalog({
+  catalogUrl,
   signal,
 }: CatalogRequest): Promise<readonly ModelCatalogEntry[]> {
-  const url = Bun.env.BANDAR_KILOCODE_MODELS_URL ?? KILO_MODELS_URL;
+  const url = catalogUrl ?? KILO_MODELS_URL;
 
   const response = await fetch(url, { signal }).catch((error: Error) => {
     throw new UpstreamError(`could not read the kilo code catalog: ${error.message}`, "network");

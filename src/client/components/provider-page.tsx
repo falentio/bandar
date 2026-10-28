@@ -5,6 +5,7 @@ import {
   BoxesIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
+  PencilIcon,
   PlusIcon,
   SlidersHorizontalIcon,
   TrashIcon,
@@ -22,7 +23,6 @@ import {
   COMPAT_LABELS,
   GENERIC_PROVIDER_KINDS,
   PROVIDER_KIND_LABELS,
-  parseCompat,
   type Compat,
   type Provider,
   type ProviderAuthMode,
@@ -42,11 +42,12 @@ import {
 import { providerApi } from "../api";
 import { describeError, isError } from "../errors";
 import { useProviderDetail } from "../use-provider-detail";
-import { useProviders } from "../use-providers";
+import { type Providers, useProviders } from "../use-providers";
 import { useRequests } from "../use-requests";
 import { useTags } from "../use-tags";
 import { CredentialsCard } from "./credentials-card";
 import { HealthBadge } from "./health-badge";
+import { EditModelDialog } from "./model-edit-dialog";
 import { ProviderLogo } from "./provider-logo";
 
 const RANGES = [7, 30, 90] as const;
@@ -500,6 +501,7 @@ function ModelsCard({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshed, setRefreshed] = useState<ProviderModelRefresh | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const tags = useTags();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -597,7 +599,7 @@ function ModelsCard({
           </Button>
         </form>
 
-        {providers.error === null ? null : (
+        {providers.error === null || editingModelId !== null ? null : (
           <p className="text-sm text-destructive">{providers.error}</p>
         )}
         {refreshError === null ? null : <p className="text-xs text-destructive">{refreshError}</p>}
@@ -623,15 +625,14 @@ function ModelsCard({
             {provider.models.map((model) => (
               <ModelRow
                 key={model.id}
+                providerId={provider.id}
                 model={model}
                 compats={provider.compats}
                 pending={providers.pending}
                 tags={tagsOf(tags.tags, model.id)}
-                onCompat={(compat) => {
-                  void providers.setModelCompat(provider.id, model.id, compat).then((saved) => {
-                    if (saved) onChanged();
-                  });
-                }}
+                providers={providers}
+                onChanged={onChanged}
+                onEditingChange={(editing) => setEditingModelId(editing ? model.id : null)}
                 onRemove={() => {
                   void providers.removeModel(provider.id, model.id).then(onChanged);
                 }}
@@ -654,31 +655,48 @@ function tagsOf(tags: readonly Tag[], modelId: string): readonly ModelTag[] {
   });
 }
 
-function compatLabelOf(model: ProviderModel): string {
-  if (model.defaultCompat === null) return "Provider default (no wire)";
-
-  return `Provider default (${COMPAT_LABELS[model.defaultCompat]})`;
-}
-
 function ModelRow({
+  providerId,
   model,
   compats,
   pending,
   tags,
-  onCompat,
+  providers,
+  onChanged,
+  onEditingChange,
   onRemove,
 }: {
+  providerId: string;
   model: ProviderModel;
   compats: readonly Compat[];
   pending: boolean;
   tags: readonly ModelTag[];
-  onCompat: (compat: Compat | null) => void;
+  providers: Providers;
+  onChanged: () => void;
+  onEditingChange: (editing: boolean) => void;
   onRemove: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+
+  const openEditor = (next: boolean) => {
+    setEditing(next);
+    onEditingChange(next);
+  };
+
+  const priced = model.inputPricePerMtok !== null || model.outputPricePerMtok !== null;
+
   return (
     <li className="group/model flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-      <code className="truncate font-medium">{model.alias}</code>
-      <code className="truncate font-mono text-xs text-muted-foreground">{model.ref}</code>
+      <button
+        type="button"
+        onClick={() => openEditor(true)}
+        disabled={pending}
+        aria-label={`Edit ${model.alias}`}
+        className="flex min-w-0 items-baseline gap-2 rounded text-left transition-colors duration-150 ease-out hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50"
+      >
+        <span className="truncate font-medium">{model.alias}</span>
+        <code className="truncate font-mono text-xs text-muted-foreground">{model.ref}</code>
+      </button>
       {model.shadowed ? (
         <span className="text-xs text-muted-foreground">an alias with this name wins</span>
       ) : null}
@@ -692,41 +710,54 @@ function ModelRow({
           <span className="ms-1 text-muted-foreground">#{tag.priority}</span>
         </span>
       ))}
-      {model.inputPricePerMtok === null && model.outputPricePerMtok === null ? null : (
-        <span className="text-xs text-muted-foreground">
-          {formatUsd(model.inputPricePerMtok)} in / {formatUsd(model.outputPricePerMtok)} out per M
-        </span>
-      )}
-      <select
-        aria-label={`Compatibility for ${model.alias}`}
-        value={model.compat ?? ""}
-        onChange={(event) => onCompat(parseCompat(event.target.value))}
-        disabled={pending}
-        className="max-w-56 rounded-md border bg-background px-1.5 py-0.5 text-xs text-muted-foreground transition-colors duration-150 ease-out hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+      <span
+        className={priced ? "text-xs text-muted-foreground" : "text-xs text-muted-foreground/60"}
       >
-        <option value="">{compatLabelOf(model)}</option>
-        {model.compat === null || compats.includes(model.compat) ? null : (
-          <option value={model.compat}>{COMPAT_LABELS[model.compat]} (unavailable)</option>
-        )}
-        {compats.map((compat) => (
-          <option key={compat} value={compat}>
-            {COMPAT_LABELS[compat]}
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        aria-label={`Remove ${model.alias}`}
-        disabled={pending}
-        onClick={() => {
-          if (window.confirm(`Remove the alias ${model.alias}?`)) onRemove();
-        }}
-        className="ms-auto rounded p-1 text-muted-foreground opacity-0 transition-[opacity,background-color,transform] duration-150 ease-out group-hover/model:opacity-100 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
-      >
-        <TrashIcon className="size-3.5" />
-      </button>
+        {priced
+          ? `${formatUsd(model.inputPricePerMtok)} in / ${formatUsd(model.outputPricePerMtok)} out per M`
+          : "unpriced"}
+      </span>
+      <span className="rounded-full border px-1.5 py-0.5 text-xs text-muted-foreground">
+        {COMPAT_LABELS[compatOf(model)]}
+      </span>
+      <div className="ms-auto flex items-center gap-0.5 opacity-0 transition-opacity duration-150 ease-out group-hover/model:opacity-100 focus-within:opacity-100">
+        <button
+          type="button"
+          aria-label={`Edit ${model.alias}`}
+          disabled={pending}
+          onClick={() => openEditor(true)}
+          className="rounded p-1 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
+        >
+          <PencilIcon className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          aria-label={`Remove ${model.alias}`}
+          disabled={pending}
+          onClick={() => {
+            if (window.confirm(`Remove the alias ${model.alias}?`)) onRemove();
+          }}
+          className="rounded p-1 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
+        >
+          <TrashIcon className="size-3.5" />
+        </button>
+      </div>
+      <EditModelDialog
+        providerId={providerId}
+        model={model}
+        compats={compats}
+        providers={providers}
+        onSaved={onChanged}
+        open={editing}
+        onOpenChange={openEditor}
+      />
     </li>
   );
+}
+
+// The wire the router will actually use, so an unset model shows its inherited one.
+function compatOf(model: ProviderModel): Compat {
+  return model.compat ?? model.defaultCompat ?? "chat";
 }
 
 function RequestsCard({ providerId, providerName }: { providerId: string; providerName: string }) {

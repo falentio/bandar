@@ -9,6 +9,7 @@ import {
   type ProviderInput,
   type ProviderKind,
   type ProviderList,
+  type ProviderModelEditInput,
   type ProviderModelInput,
 } from "../../shared/providers";
 import { availableSlug, providerRefOf, slugify, TAG_REF_PREFIX } from "../../shared/slugs";
@@ -371,19 +372,41 @@ export async function updateProviderModel(
   userId: string,
   providerId: string,
   modelId: string,
-  compat: Compat | null,
+  edit: ProviderModelEditInput,
 ): Promise<Provider | null> {
   const provider = await findProvider(deps, userId, providerId);
 
   if (provider === null) return null;
 
-  if (compat !== null && !provider.compats.includes(compat)) {
-    throw new ProviderRuleError(`${provider.kind} does not speak the ${compat} wire`, "validation");
+  if (edit.compat !== null && !provider.compats.includes(edit.compat)) {
+    throw new ProviderRuleError(
+      `${provider.kind} does not speak the ${edit.compat} wire`,
+      "validation",
+    );
+  }
+
+  if (edit.alias.startsWith(TAG_REF_PREFIX)) {
+    throw new ProviderRuleError(`an alias cannot start with ${TAG_REF_PREFIX}`, "validation");
+  }
+
+  const clash = await deps.db
+    .select({ id: providerModels.id })
+    .from(providerModels)
+    .where(and(eq(providerModels.userId, userId), eq(providerModels.alias, edit.alias)))
+    .limit(1);
+
+  if (clash[0] !== undefined && clash[0].id !== modelId) {
+    throw new ProviderRuleError(`the alias ${edit.alias} is taken`, "conflict");
   }
 
   const updated = await deps.db
     .update(providerModels)
-    .set({ compat })
+    .set({
+      alias: edit.alias,
+      compat: edit.compat,
+      inputPricePerMtok: edit.inputPricePerMtok,
+      outputPricePerMtok: edit.outputPricePerMtok,
+    })
     .where(and(eq(providerModels.id, modelId), eq(providerModels.providerId, providerId)))
     .returning({ id: providerModels.id });
 

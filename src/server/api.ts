@@ -12,7 +12,7 @@ import {
   ProviderCredentialOrderInputSchema,
   ProviderCredentialParamsSchema,
   ProviderCredentialProbeSchema,
-  ProviderModelCompatInputSchema,
+  ProviderModelEditInputSchema,
   ProviderModelRefreshSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
@@ -474,7 +474,7 @@ export function createApi(deps: ApiDeps) {
 
       const { id, modelId } = parseInput(ProviderModelParamsSchema, params);
       // SAFETY: Elysia parses the JSON body before the handler runs; anything else is a 400.
-      const input = parseInput(ProviderModelCompatInputSchema, body as ParseableInput);
+      const input = parseInput(ProviderModelEditInputSchema, body as ParseableInput);
 
       try {
         const provider = await updateProviderModel(
@@ -482,7 +482,7 @@ export function createApi(deps: ApiDeps) {
           caller.userId,
           id,
           modelId,
-          input.compat,
+          input,
         );
 
         if (provider === null) {

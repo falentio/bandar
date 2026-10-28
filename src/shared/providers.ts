@@ -171,8 +171,11 @@ export const ProviderModelInputSchema = v.pipe(
   ),
 );
 
-export const ProviderModelCompatInputSchema = v.object({
+export const ProviderModelEditInputSchema = v.object({
+  alias: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100)),
   compat: v.nullable(CompatSchema),
+  inputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
+  outputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
 });
 
 export const ProviderInputSchema = v.object({
@@ -299,7 +302,7 @@ export type ProviderModelRefresh = v.InferOutput<typeof ProviderModelRefreshSche
 
 export type ProviderModel = v.InferOutput<typeof ProviderModelSchema>;
 
-export type ProviderModelCompatInput = v.InferOutput<typeof ProviderModelCompatInputSchema>;
+export type ProviderModelEditInput = v.InferOutput<typeof ProviderModelEditInputSchema>;
 
 export type Provider = v.InferOutput<typeof ProviderSchema>;
 

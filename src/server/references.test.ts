@@ -220,7 +220,12 @@ describe("provider models", () => {
 
     const modelId = withModel?.models.find((model) => model.alias === "fast")?.id ?? "";
 
-    await updateProviderModel(deps, "user-1", provider.id, modelId, "responses");
+    await updateProviderModel(deps, "user-1", provider.id, modelId, {
+      alias: "fast",
+      compat: "responses",
+      inputPricePerMtok: null,
+      outputPricePerMtok: null,
+    });
 
     await updateProvider(deps, "user-1", provider.id, {
       name: "Custom",
@@ -235,6 +240,66 @@ describe("provider models", () => {
     expect(after?.compats).toEqual(["messages"]);
     expect(after?.models[0]?.compat).toBe("responses");
     expect(after?.models[0]?.defaultCompat).toBe("messages");
+  });
+
+  test("an edit renames a model and sets its prices", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Custom",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const withModel = await addProviderModel(deps, "user-1", provider.id, {
+      upstreamModel: "gpt-4o-mini",
+    });
+
+    const modelId = withModel?.models[0]?.id ?? "";
+
+    const edited = await updateProviderModel(deps, "user-1", provider.id, modelId, {
+      alias: "gpt-4o-mini-fast",
+      compat: null,
+      inputPricePerMtok: 0.15,
+      outputPricePerMtok: 0.6,
+    });
+
+    expect(edited?.models[0]?.alias).toBe("gpt-4o-mini-fast");
+    expect(edited?.models[0]?.inputPricePerMtok).toBe(0.15);
+    expect(edited?.models[0]?.outputPricePerMtok).toBe(0.6);
+    expect(edited?.models[0]?.upstreamModel).toBe("gpt-4o-mini");
+  });
+
+  test("an edit refuses an alias another model holds", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Custom",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "one", alias: "first" });
+
+    const withSecond = await addProviderModel(deps, "user-1", provider.id, {
+      upstreamModel: "two",
+      alias: "second",
+    });
+
+    const secondId = withSecond?.models.find((model) => model.alias === "second")?.id ?? "";
+
+    await expect(
+      updateProviderModel(deps, "user-1", provider.id, secondId, {
+        alias: "first",
+        compat: null,
+        inputPricePerMtok: null,
+        outputPricePerMtok: null,
+      }),
+    ).rejects.toThrow(ProviderRuleError);
   });
 
   test("deleting a model renumbers the remaining tag priorities", async () => {

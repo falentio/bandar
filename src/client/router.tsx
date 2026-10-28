@@ -12,6 +12,7 @@ import * as v from "valibot";
 import { ApiKeysPanel } from "./components/api-keys-panel";
 import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
+import { CliToolsPanel } from "./components/cli-tools-panel";
 import { ErrorsPanel } from "./components/errors-panel";
 import { OverviewPanel } from "./components/overview-panel";
 import { ModelRowHarness } from "./components/model-row-harness";
@@ -24,7 +25,15 @@ import { isViewPath } from "./views";
 
 const loginSearch = v.object({
   redirect: v.optional(
-    v.picklist(["/overview", "/providers", "/tags", "/requests", "/errors", "/api-keys"]),
+    v.picklist([
+      "/overview",
+      "/providers",
+      "/tags",
+      "/requests",
+      "/errors",
+      "/api-keys",
+      "/cli-tools",
+    ]),
     "/overview",
   ),
 });
@@ -122,6 +131,12 @@ const apiKeysRoute = createRoute({
   component: ApiKeysPanel,
 });
 
+const cliToolsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/cli-tools",
+  component: CliToolsPanel,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -134,6 +149,7 @@ const routeTree = rootRoute.addChildren([
     requestsRoute,
     errorsRoute,
     apiKeysRoute,
+    cliToolsRoute,
   ]),
 ]);
 

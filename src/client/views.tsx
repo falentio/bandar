@@ -4,6 +4,7 @@ import {
   ScrollTextIcon,
   ServerIcon,
   TagsIcon,
+  TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 
@@ -14,6 +15,7 @@ export const views = [
   { to: "/requests", label: "Requests", icon: ScrollTextIcon },
   { to: "/errors", label: "Errors", icon: TriangleAlertIcon },
   { to: "/api-keys", label: "API keys", icon: KeyRoundIcon },
+  { to: "/cli-tools", label: "CLI tools", icon: TerminalIcon },
 ] as const;
 
 export type View = (typeof views)[number];

@@ -31,7 +31,10 @@ describe("settings", () => {
       });
     };
 
-    expect(reasonOf(readSettings(home, read))).toContain("EACCES: permission denied");
+    const report = readSettings(home, read);
+
+    expect(report).toHaveProperty("path", "/home/andrew/.bandar/config.json");
+    expect(reasonOf(report)).toContain("EACCES: permission denied");
   });
 
   test("a file without a server section is ok", () => {

@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
-import { readSettings, settingsPath, type Settings } from "./settings";
+import { readSettings, type Settings } from "./settings";
 
 export type Config = {
   readonly host: string;
@@ -85,8 +85,8 @@ const ConfigSchema = v.object({
 });
 
 /**
- * The home directory decides where the settings file lives, so it is resolved before that file is
- * read, and parseConfig takes the result instead of validating BANDAR_HOME a second time.
+ * The home directory decides where the settings file lives, and both the file read and the config
+ * build need it, so it is resolved once, before either runs.
  */
 function resolveHome(env: Record<string, string | undefined>): string {
   const home = (env.BANDAR_HOME ?? DEFAULT_HOME_DIR).trim();
@@ -96,17 +96,23 @@ function resolveHome(env: Record<string, string | undefined>): string {
   return home;
 }
 
+export function parseConfig(
+  env: Record<string, string | undefined>,
+  settings: Settings = {},
+): Config {
+  return buildConfig(env, settings, resolveHome(env));
+}
+
 /**
  * Fills the config from the environment first, then the settings file, then the built-in default.
  * It stays silent: backup, update, and install-service parse the environment without starting a
  * session, so the warning about a generated secret belongs to loadConfig.
  */
-export function parseConfig(
+function buildConfig(
   env: Record<string, string | undefined>,
-  settings: Settings = {},
+  settings: Settings,
+  home: string,
 ): Config {
-  const home = resolveHome(env);
-
   // A blank value means "unset" for every variable but BANDAR_CONFIG_DIR: install.sh writes its
   // manifest under the config directory it was given, so a blank one has to fail, not fall back.
   const given = Object.fromEntries(
@@ -156,9 +162,9 @@ export function loadConfig(
   const report = readSettings(home, read);
 
   if (report.kind === "invalid")
-    throw new ConfigError([`${settingsPath(home)}: ${report.reason}`], "invalid configuration");
+    throw new ConfigError([`${report.path}: ${report.reason}`], "invalid configuration");
 
-  const config = parseConfig(env, report.kind === "ok" ? report.settings : {});
+  const config = buildConfig(env, report.kind === "ok" ? report.settings : {}, home);
 
   if ((env.BANDAR_AUTH_SECRET ?? "") === "") console.warn(UNSET_SECRET_WARNING);
 

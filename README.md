@@ -179,15 +179,20 @@ typo never falls back to a default.
 
 `bandar` writes `config.schema.json` beside the settings on every read, and adds
 `"$schema": "./config.schema.json"` to a `config.json` that lacks the key, so an editor
-completes and checks the file offline. The schema is generated from the running binary, so
-it cannot lag it, and a `$schema` you wrote yourself is left alone. Neither write is
-required: a data directory that is not writable only costs the editor completion.
+completes and checks the file offline. The schema file is written by the running binary, so the
+copy beside the settings always matches the version that wrote it, and a `$schema` you
+wrote yourself is left alone. Adding the key changes nothing else in the file. Neither
+write is required: a data directory that is not writable only costs the editor completion.
 
 The default trusted origins start with the auth URL's own origin. They then follow the
 resolved port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
 `http://<host>:<port>` when `server.host` names an address rather than `0.0.0.0` or
 `::`. Only a development run adds the web dev server at `http://localhost:5173` and
 `http://127.0.0.1:5173`.
+
+A `server.port` of 0 asks the OS for an ephemeral port. The server binds one, but the
+derived auth URL and trusted origins name port 0 and reach nothing, so set
+`server.authUrl` and `server.trustedOrigins` yourself when the port is 0.
 
 An environment variable wins over the file, and the file wins over the default. A blank
 environment variable counts as unset. The dev proxy in `vite.config.ts` takes the API port

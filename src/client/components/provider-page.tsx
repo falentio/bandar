@@ -705,6 +705,9 @@ function ModelRow({
         className="max-w-56 rounded-md border bg-background px-1.5 py-0.5 text-xs text-muted-foreground transition-colors duration-150 ease-out hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
       >
         <option value="">{compatLabelOf(model)}</option>
+        {model.compat === null || compats.includes(model.compat) ? null : (
+          <option value={model.compat}>{COMPAT_LABELS[model.compat]} (unavailable)</option>
+        )}
         {compats.map((compat) => (
           <option key={compat} value={compat}>
             {COMPAT_LABELS[compat]}

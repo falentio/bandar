@@ -505,7 +505,10 @@ kind no longer declares is treated as absent, so a row that outlives its wire
 degrades to the default instead of failing the request. `parseCompat` reads the raw
 column, so a value this build does not name comes back as `null`: the row shows
 "Provider default" and answers there, and the next `PUT` overwrites the stored
-value with one the build knows.
+value with one the build knows. A value this build does name but the kind no
+longer declares is a different case: it stays in the row as a wire the provider
+cannot serve, so the select lists it as unavailable instead of showing the
+default.
 
 The `Provider` value carries both sides of the decision per model, so the dashboard
 never recomputes it:

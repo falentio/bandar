@@ -79,6 +79,6 @@ describe("opencode go model table", () => {
     const undocumented = gapMessage("undocumented", "omen-alpha");
 
     expect(undocumented).toContain("omen-alpha");
-    expect(undocumented).not.toContain("responses");
+    expect(undocumented).toContain("docs do not name a wire");
   });
 });

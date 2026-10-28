@@ -25,6 +25,7 @@ import {
   removeProvider,
   removeProviderModel,
   updateProvider,
+  updateProviderModel,
   type ProviderDeps,
 } from "./providers";
 import { assignProviderSlugs } from "./providers/seeding";
@@ -199,6 +200,41 @@ describe("provider models", () => {
     await expect(
       addProviderModel(deps, "user-1", provider.id, { upstreamModel: "same", alias: "two" }),
     ).rejects.toThrow(ProviderRuleError);
+  });
+
+  test("a kind change keeps an override the new kind cannot serve", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Custom",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const withModel = await addProviderModel(deps, "user-1", provider.id, {
+      upstreamModel: "gpt-4o",
+      alias: "fast",
+    });
+
+    const modelId = withModel?.models.find((model) => model.alias === "fast")?.id ?? "";
+
+    await updateProviderModel(deps, "user-1", provider.id, modelId, "responses");
+
+    await updateProvider(deps, "user-1", provider.id, {
+      name: "Custom",
+      kind: "anthropic",
+      baseUrl: "https://example.com",
+    });
+
+    const after = (await listProviders(deps, "user-1")).providers.find(
+      (entry) => entry.id === provider.id,
+    );
+
+    expect(after?.compats).toEqual(["messages"]);
+    expect(after?.models[0]?.compat).toBe("responses");
+    expect(after?.models[0]?.defaultCompat).toBe("messages");
   });
 
   test("deleting a model renumbers the remaining tag priorities", async () => {

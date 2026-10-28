@@ -18,7 +18,7 @@ import {
   type ProviderTarget,
   type UpstreamErrorKind,
 } from "../providers/types";
-import { completionResponse, openAiError, usageBody } from "./wire";
+import { openAiWire, type ChatWire } from "./wire";
 
 export type ChatDeps = {
   readonly duck: DuckDb;
@@ -32,6 +32,7 @@ export type ChatInput = {
   readonly request: CanonicalRequest;
   readonly stream: boolean;
   readonly signal: AbortSignal;
+  readonly wire?: ChatWire;
 };
 
 type EventBase = {
@@ -76,23 +77,24 @@ const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
 ]);
 
 export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Response> {
+  const wire = input.wire ?? openAiWire;
   const plan = await resolvePlan(deps.providers, input.userId, input.ref);
 
   if (plan.attempts.length === 0) {
     return plan.tag === null
-      ? openAiError(404, `model ${input.ref} is not configured`, "model_not_found")
-      : openAiError(404, `tag ${plan.tag} has no enabled models`, "model_not_found");
+      ? wire.error(404, `model ${input.ref} is not configured`, "model_not_found")
+      : wire.error(404, `tag ${plan.tag} has no enabled models`, "model_not_found");
   }
 
   const startedAt = new Date();
-  const id = `chatcmpl-${crypto.randomUUID()}`;
+  const id = crypto.randomUUID();
   const created = Math.floor(startedAt.getTime() / 1000);
   const start = performance.now();
   const attempts = attemptPlan(deps.providers, plan, input.userId, startedAt);
 
-  if (!input.stream) return complete(deps, input, plan, attempts, id, created);
+  if (!input.stream) return complete(deps, input, plan, attempts, wire, id, created);
 
-  return streamResponse(deps, { input, plan, attempts, id, created, start });
+  return streamResponse(deps, { input, plan, attempts, wire, id, created, start });
 }
 
 async function complete(
@@ -100,6 +102,7 @@ async function complete(
   input: ChatInput,
   plan: ResolvedPlan,
   attempts: AttemptPlan,
+  wire: ChatWire,
   id: string,
   created: number,
 ): Promise<Response> {
@@ -123,7 +126,7 @@ async function complete(
 
       attempts.succeeded(attempt);
 
-      const response = completionResponse({ id, created, model: plan.ref, result });
+      const response = wire.complete({ id, created, model: plan.ref, result });
 
       recordSafe(deps, base, {
         status: "success",
@@ -155,13 +158,13 @@ async function complete(
       });
 
       if (aborted) {
-        return openAiError(400, "request aborted", "aborted", "upstream_error");
+        return wire.error(400, "request aborted", "aborted", "upstream_error");
       }
 
       attempts.failed(attempt, failed.kind, failed.message, new Date());
 
       if (!RETRYABLE.has(failed.kind)) {
-        return openAiError(statusFor(failed), failed.message, failed.kind, "upstream_error");
+        return wire.error(statusFor(failed), failed.message, failed.kind, "upstream_error");
       }
 
       lastFailure = failed;
@@ -169,7 +172,7 @@ async function complete(
   }
 
   if (lastFailure !== null) {
-    return openAiError(
+    return wire.error(
       statusFor(lastFailure),
       lastFailure.message,
       lastFailure.kind,
@@ -177,20 +180,21 @@ async function complete(
     );
   }
 
-  return openAiError(502, "no upstream answered", "unavailable", "upstream_error");
+  return wire.error(502, "no upstream answered", "unavailable", "upstream_error");
 }
 
 type StreamInput = {
   readonly input: ChatInput;
   readonly plan: ResolvedPlan;
   readonly attempts: AttemptPlan;
+  readonly wire: ChatWire;
   readonly id: string;
   readonly created: number;
   readonly start: number;
 };
 
 function streamResponse(deps: ChatDeps, context: StreamInput): Response {
-  const { input, plan, attempts } = context;
+  const { input, plan, attempts, wire } = context;
   const abort = new AbortController();
   const onAbort = () => abort.abort();
   const detach = () => input.signal.removeEventListener("abort", onAbort);
@@ -213,12 +217,13 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         if (!cancelled) controller.close();
       };
 
-      const fail = (message: string, code: string) => {
-        detach();
-        send(`data: ${JSON.stringify({ error: { message, type: "upstream_error", code } })}\n\n`);
-        send("data: [DONE]\n\n");
-        close();
-      };
+      const writerOf = () =>
+        wire.stream({
+          id: context.id,
+          created: context.created,
+          model: plan.ref,
+          sink: { send, close },
+        });
 
       let lastFailure: UpstreamError | null = null;
 
@@ -228,30 +233,10 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         const startedAt = new Date();
         const started = performance.now();
         const base = eventBase(input, plan.ref, attempt, startedAt);
+        const writer = writerOf();
 
-        let chunksSent = 0;
-        let roleSent = false;
         let usage: CanonicalUsage = { inputTokens: null, outputTokens: null };
         let finishReason: string | null = null;
-
-        const enqueue = (payload: string) => {
-          if (cancelled) return;
-
-          controller.enqueue(encoder.encode(payload));
-          chunksSent += 1;
-        };
-
-        const delta = (content: Record<string, string>, finish: string | null) => {
-          enqueue(
-            `data: ${JSON.stringify({
-              id: context.id,
-              object: "chat.completion.chunk",
-              created: context.created,
-              model: plan.ref,
-              choices: [{ index: 0, delta: content, finish_reason: finish }],
-            })}\n\n`,
-          );
-        };
 
         try {
           const target = await targetOf(deps.providers, attempt);
@@ -267,12 +252,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
 
                 if (ttftMs === null) ttftMs = performance.now() - context.start;
 
-                if (!roleSent) {
-                  delta({ role: "assistant" }, null);
-                  roleSent = true;
-                }
-
-                delta({ content: event.text }, null);
+                writer.text(event.text);
                 break;
               }
 
@@ -294,27 +274,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             }
           }
 
-          if (!roleSent) delta({ role: "assistant" }, null);
-
-          delta({}, finishReason);
-
-          const usageChunk = usageBody(usage);
-
-          if (usageChunk !== null) {
-            enqueue(
-              `data: ${JSON.stringify({
-                id: context.id,
-                object: "chat.completion.chunk",
-                created: context.created,
-                model: plan.ref,
-                choices: [],
-                usage: usageChunk,
-              })}\n\n`,
-            );
-          }
-
-          send("data: [DONE]\n\n");
-          close();
+          writer.finish(finishReason, usage);
 
           attempts.succeeded(attempt);
 
@@ -348,15 +308,15 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
           });
 
           if (aborted) {
-            fail("request aborted", "aborted");
+            writer.fail("request aborted", "aborted");
 
             return;
           }
 
           attempts.failed(attempt, failed.kind, failed.message, new Date());
 
-          if (chunksSent > 0 || !RETRYABLE.has(failed.kind)) {
-            fail(failed.message, failed.kind);
+          if (writer.started || !RETRYABLE.has(failed.kind)) {
+            writer.fail(failed.message, failed.kind);
 
             return;
           }
@@ -366,12 +326,12 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
       }
 
       if (lastFailure !== null) {
-        fail(lastFailure.message, lastFailure.kind);
+        writerOf().fail(lastFailure.message, lastFailure.kind);
 
         return;
       }
 
-      fail("no upstream answered", "unavailable");
+      writerOf().fail("no upstream answered", "unavailable");
     },
     cancel() {
       cancelled = true;

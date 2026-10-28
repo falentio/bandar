@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vite-plus/test";
-import { ConfigError, detectRunMode, parseConfig } from "./config";
+import { describe, expect, test, vi } from "vite-plus/test";
+import { DEFAULT_API_PORT } from "../shared/topology";
+import { ConfigError, detectRunMode, loadConfig, parseConfig } from "./config";
 
 const MODE_HOMES = [
   ["development", ".bandar_dev"],
@@ -101,6 +102,91 @@ describe("config", () => {
 
       expect(attempt).toThrow(ConfigError);
       expect(attempt).toThrow("BANDAR_HOME: must be an absolute path");
+    }
+  });
+});
+
+describe("the settings file", () => {
+  const home = "/srv/bandar";
+
+  const file = JSON.stringify({ server: { host: "127.0.0.1", port: 4000 } });
+
+  const fromFile = (json: string, env: Record<string, string | undefined> = {}) =>
+    loadConfig({ BANDAR_HOME: home, ...env }, () => json, "production");
+
+  const missingFile = (): string => {
+    throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+  };
+
+  test("the file supplies the host and the port", () => {
+    const config = fromFile(file);
+
+    expect(config.host).toBe("127.0.0.1");
+    expect(config.port).toBe(4000);
+    expect(config.authUrl).toBe("http://localhost:4000");
+  });
+
+  test("the environment overrides the file", () => {
+    const config = fromFile(file, { BANDAR_HOST: "10.0.0.5", BANDAR_PORT: "5000" });
+
+    expect(config.host).toBe("10.0.0.5");
+    expect(config.port).toBe(5000);
+  });
+
+  test("a blank environment value falls through to the file", () => {
+    const config = fromFile(file, { BANDAR_HOST: "", BANDAR_PORT: "" });
+
+    expect(config.host).toBe("127.0.0.1");
+    expect(config.port).toBe(4000);
+  });
+
+  test("loadConfig reads config.json under BANDAR_HOME", () => {
+    const asked: string[] = [];
+
+    loadConfig({ BANDAR_HOME: home }, (path) => {
+      asked.push(path);
+
+      return "{}";
+    });
+
+    expect(asked).toEqual(["/srv/bandar/config.json"]);
+  });
+
+  test("a missing file leaves the defaults", () => {
+    const config = loadConfig({ BANDAR_HOME: home }, missingFile);
+
+    expect(config.host).toBe("0.0.0.0");
+    expect(config.port).toBe(DEFAULT_API_PORT);
+  });
+
+  test("an invalid file fails the boot, naming the file and the field", () => {
+    const attempt = () => loadConfig({ BANDAR_HOME: home }, () => '{"server":{"port":70000}}');
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("invalid configuration");
+    expect(attempt).toThrow("/srv/bandar/config.json: server.port");
+  });
+
+  test("a blank BANDAR_HOME fails before the file is read", () => {
+    const attempt = () => loadConfig({ BANDAR_HOME: "" }, missingFile);
+
+    expect(attempt).toThrow("BANDAR_HOME: must be an absolute path");
+  });
+
+  test("the auth-secret warning fires once a boot, and only while the secret is unset", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      loadConfig({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set" }, missingFile);
+      expect(warn).not.toHaveBeenCalled();
+
+      loadConfig({ BANDAR_HOME: home }, missingFile);
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      loadConfig({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "" }, missingFile);
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
     }
   });
 });

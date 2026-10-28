@@ -33,6 +33,7 @@ import {
   ProviderCredentialBulkInputSchema,
   ProviderCredentialInputSchema,
   ProviderCredentialOrderInputSchema,
+  ProviderCredentialProbeSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
   ProviderListSchema,
@@ -45,6 +46,7 @@ import {
   type Provider,
   type ProviderCreateInput,
   type ProviderCredentialInput,
+  type ProviderCredentialProbe,
   type ProviderDetail,
   type ProviderInput,
   type ProviderList,
@@ -107,6 +109,10 @@ export const providerApi = {
     }),
   removeCredential: (id: string, credentialId: string): Promise<Provider> =>
     request(providerPaths.credential(id, credentialId), ProviderSchema, { method: "DELETE" }),
+  testCredential: (id: string, credentialId: string): Promise<ProviderCredentialProbe> =>
+    request(providerPaths.credentialTest(id, credentialId), ProviderCredentialProbeSchema, {
+      method: "POST",
+    }),
   addModel: (id: string, input: ProviderModelInput): Promise<Provider> =>
     request(providerPaths.models(id), ProviderSchema, {
       method: "POST",

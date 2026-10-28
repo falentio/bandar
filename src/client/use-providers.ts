@@ -3,6 +3,7 @@ import type {
   Provider,
   ProviderCreateInput,
   ProviderCredentialInput,
+  ProviderCredentialProbe,
   ProviderModelInput,
 } from "../shared/providers";
 import { providerApi } from "./api";
@@ -24,6 +25,10 @@ export type Providers = {
   readonly addCredentials: (id: string, apiKeys: readonly string[]) => Promise<boolean>;
   readonly reorderCredentials: (id: string, credentialIds: readonly string[]) => Promise<boolean>;
   readonly removeCredential: (id: string, credentialId: string) => Promise<boolean>;
+  readonly testCredential: (
+    id: string,
+    credentialId: string,
+  ) => Promise<ProviderCredentialProbe | null>;
 };
 
 export function useProviders(): Providers {
@@ -158,6 +163,20 @@ export function useProviders(): Providers {
     [mutate],
   );
 
+  // The row that asked owns its own in-flight state, so a test never blocks the card.
+  const testCredential = useCallback(
+    async (id: string, credentialId: string): Promise<ProviderCredentialProbe | null> => {
+      try {
+        return await providerApi.testCredential(id, credentialId);
+      } catch (error) {
+        setError(isError(error) ? describeError(error) : String(error));
+
+        return null;
+      }
+    },
+    [],
+  );
+
   const apply = useCallback((provider: Provider) => replace(provider), []);
 
   return {
@@ -174,5 +193,6 @@ export function useProviders(): Providers {
     addCredentials,
     reorderCredentials,
     removeCredential,
+    testCredential,
   };
 }

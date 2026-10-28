@@ -71,6 +71,13 @@
       "when": 1793128458203,
       "tag": "0009_remarkable_ronan",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793165086144,
+      "tag": "0010_cooldown_error_message",
+      "breakpoints": true
     }
   ]
 }

@@ -84,6 +84,88 @@ The gateway does not read provider JSON. It sees text, usage, finish, or a throw
 `UpstreamError`. That boundary is the extension point: a new wire format changes
 one provider directory.
 
+## Ingress
+
+Two ingress wires reach the canonical shape. `POST /v1/chat/completions` speaks
+the OpenAI chat shape and `POST /v1/messages` speaks the Anthropic Messages
+shape. Both run `runChat`, so model references, tags with failover, credential
+order, cooldowns, and analytics behave the same on either route. A wire owns its
+error envelope, its completed response, and its stream frames:
+`src/server/router/wire.ts` holds `openAiWire` and
+`src/server/router/anthropic-wire.ts` holds `anthropicWire`. Both satisfy
+`ChatWire` and a caller passes one as `ChatInput.wire`; the default is
+`openAiWire`.
+
+### Anthropic Messages ingress
+
+`POST /v1/messages` accepts these fields:
+
+| Field                                                  | Meaning                                                                      |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `model`                                                | An alias, `tags/<slug>`, or `<provider>/<model>`, resolved by `resolvePlan`  |
+| `messages`                                             | `user` and `assistant` turns; content is a string or an array of text blocks |
+| `system`                                               | A string or an array of text blocks; becomes the leading system message      |
+| `stream`                                               | `true` answers SSE, `false` or absent answers one message                    |
+| `max_tokens`, `temperature`, `top_p`, `stop_sequences` | Passed through as `maxTokens`, `temperature`, `topP`, `stop`                 |
+
+Every other field is ignored, including `metadata`, `thinking`, `top_k`,
+`tools`, and `tool_choice`. Multiple text blocks in one message join with a
+newline, and multiple `system` blocks join the same way.
+
+bandar is a text gateway, so a block whose type is not `text` is a rejection,
+never a silent drop. A `tool_use`, `tool_result`, `image`, or `document`
+block anywhere in `messages` or `system` answers 422 and names the block type
+and its position:
+
+```text
+messages[1].content[0]: tool_use blocks are not supported by this text gateway
+```
+
+Because `tools` is ignored, a client such as Claude Code connects and receives
+text only. It gets no tool calls back.
+
+A completed answer is an Anthropic message object: `type: "message"`,
+`role: "assistant"`, one `text` block, `stop_reason`, and
+`usage: {input_tokens, output_tokens}`. `stop_reason` maps from the canonical
+reason: `stop` becomes `end_turn`, `length` becomes `max_tokens`,
+`tool_calls` becomes `tool_use`, and `content_filter` becomes `refusal`.
+
+A streaming answer is SSE, and every frame has an `event:` line and a `data:`
+line. The order is fixed:
+
+```text
+message_start
+content_block_start
+content_block_delta   (one per text delta)
+content_block_stop
+message_delta         (stop_reason and usage)
+message_stop
+```
+
+The canonical stream reports usage when the upstream finishes, so
+`message_start` carries `input_tokens: 0` and `message_delta` carries the
+final `input_tokens` and `output_tokens`. An Anthropic client that reads usage
+from `message_delta` sees the real numbers.
+
+An upstream failure answers the Anthropic error envelope with the status bandar
+uses for that kind:
+`{"type":"error","error":{"type":"authentication_error","message":"..."}}`.
+The status is 400 for an invalid request, 404 for a missing model or route, 429
+for a rate limit, and 502 for an auth, network, protocol, or unavailable
+failure. A missing or unknown gateway key is 401 with
+`type: "authentication_error"`. A stream that fails after its first frame sends
+one `event: error` frame with the same envelope and then closes, because the
+status line is already sent.
+
+### Token count
+
+`POST /v1/messages/count_tokens` returns `{"input_tokens": n}`. It does not
+call the upstream. `n` is `ceil(total characters / CHARS_PER_TOKEN)`, with
+`CHARS_PER_TOKEN = 4` exported from `src/server/router/anthropic-wire.ts`. The
+count covers `system` and every message joined with a newline. It is a
+character estimate for client budgeting, not a tokenizer, and it can differ from
+the provider count.
+
 ## Registry
 
 Each provider is a directory under `src/server/providers/<kind>/`. Its

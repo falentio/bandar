@@ -68,7 +68,14 @@ export function ErrorsPanel() {
                       </td>
                       <td className="py-2 pr-3">{event.providerName}</td>
                       <td className="py-2 pr-3 font-mono text-xs">{event.modelAlias}</td>
-                      <td className="py-2 pr-3 font-mono text-xs">{event.errorKind}</td>
+                      <td className="py-2 pr-3 font-mono text-xs">
+                        {event.errorKind}
+                        {event.errorMessage === null ? null : (
+                          <span className="mt-0.5 block max-w-64 font-sans text-[0.7rem] break-words text-muted-foreground">
+                            {event.errorMessage}
+                          </span>
+                        )}
+                      </td>
                       <td className="py-2 pr-3 whitespace-nowrap tabular-nums">
                         {formatCooldown(event.cooldownMs)}
                       </td>

@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
 import * as v from "valibot";
 import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
@@ -10,6 +11,7 @@ import {
   ProviderCredentialInputSchema,
   ProviderCredentialOrderInputSchema,
   ProviderCredentialParamsSchema,
+  ProviderCredentialProbeSchema,
   ProviderModelRefreshSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
@@ -23,6 +25,7 @@ import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
+import { createBackup } from "./backup";
 import type { MigrationResult } from "./db/migrate";
 import { readCooldowns } from "./cooldowns";
 import type { DuckDb } from "./duck/client";
@@ -48,6 +51,7 @@ import {
   updateProvider,
   type ProviderDeps,
 } from "./providers";
+import { probeProviderCredential } from "./providers/probe";
 import { UpstreamError } from "./providers/types";
 import { createTag, listTags, removeTag, setTagModels, TagRuleError } from "./tags";
 import { InputError, parseInput, type ParseableInput } from "./validation";
@@ -55,6 +59,7 @@ import { InputError, parseInput, type ParseableInput } from "./validation";
 export type ApiDeps = {
   readonly auth: Auth;
   readonly duck: DuckDb;
+  readonly sqlite: Database;
   readonly providers: ProviderDeps;
   readonly migration: MigrationResult;
   readonly duckMigration: { readonly current: string | null };
@@ -115,6 +120,26 @@ export function createApi(deps: ApiDeps) {
     })
     .all("/auth/*", ({ request }) => deps.auth.handler(request))
     .get("/health", health(deps.migration, deps.duckMigration), { response: HealthSchema })
+    .get("/backup", async ({ request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const archive = await createBackup({
+        sqlite: deps.sqlite,
+        duck: deps.duck,
+        sqliteTag: deps.migration.current,
+        duckdbTag: deps.duckMigration.current,
+      });
+
+      return new Response(archive.bytes, {
+        headers: {
+          "content-type": "application/zip",
+          "content-disposition": `attachment; filename="${archive.name}"`,
+          "content-length": String(archive.bytes.byteLength),
+        },
+      });
+    })
     .get("/providers", async ({ request }) => {
       const caller = await authenticate(deps.auth, request);
 
@@ -373,6 +398,35 @@ export function createApi(deps: ApiDeps) {
       );
 
       return result.kind === "ok" ? result.provider : credentialFailure(result, id, credentialId);
+    })
+    .post("/providers/:id/credentials/:credentialId/test", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id, credentialId } = parseInput(ProviderCredentialParamsSchema, params);
+      const provider = await readProvider(deps.providers, caller.userId, id);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      const probe = await probeProviderCredential(
+        deps.providers,
+        provider,
+        credentialId,
+        request.signal,
+      );
+
+      if (probe === null) {
+        set.status = 404;
+
+        return failure("not_found", `credential ${credentialId} not found`);
+      }
+
+      return v.parse(ProviderCredentialProbeSchema, probe);
     })
     .post("/providers/:id/models", async ({ body, params, request, set }) => {
       const caller = await authenticate(deps.auth, request);

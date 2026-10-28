@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import * as v from "valibot";
+import { MAX_PORT, MIN_PORT } from "../shared/topology";
 
 export const SETTINGS_FILE = "config.json";
 
@@ -11,7 +12,7 @@ export const ServerSettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
     host: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
-    port: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(65535))),
+    port: v.optional(v.pipe(v.number(), v.integer(), v.minValue(MIN_PORT), v.maxValue(MAX_PORT))),
   }),
 );
 

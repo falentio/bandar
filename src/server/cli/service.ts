@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
+import { MAX_PORT, MIN_PORT } from "../../shared/topology";
 import { parseConfig } from "../config";
 import type { Commands, Env } from "./command";
 
@@ -25,8 +26,6 @@ const KNOWN_FLAGS = new Set(["--scope", "--data-dir", "--port", "--binary", "--p
 const DIRECTORY_MODE = 0o755;
 const UNIT_FILE_MODE = 0o644;
 const ENV_FILE_MODE = 0o600;
-const MIN_PORT = 0;
-const MAX_PORT = 65535;
 const PREFIX = "bandar: ";
 
 // A value systemd or a shell reads back verbatim: no quoting, no expansions.

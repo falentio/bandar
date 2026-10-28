@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
-import { DEFAULT_API_PORT, DEFAULT_WEB_PORT } from "../shared/topology";
+import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
 import { readSettings, settingsPath, type Settings } from "./settings";
 
 export type Config = {
@@ -57,8 +57,8 @@ const ConfigSchema = v.object({
       v.transform(Number),
       v.number(),
       v.integer(),
-      v.minValue(0),
-      v.maxValue(65535),
+      v.minValue(MIN_PORT),
+      v.maxValue(MAX_PORT),
     ),
   ),
   BANDAR_CONFIG_DIR: v.optional(

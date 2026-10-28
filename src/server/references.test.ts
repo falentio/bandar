@@ -5,11 +5,13 @@ import { asc, eq } from "drizzle-orm";
 import * as v from "valibot";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { ChatCompletionRequestSchema } from "../shared/chat";
-import type { Provider } from "../shared/providers";
+import { ProviderModelInputSchema, type Provider } from "../shared/providers";
 import {
   MAX_MODEL_REF_LENGTH,
   MAX_SLUG_LENGTH,
   MAX_UPSTREAM_MODEL_LENGTH,
+  ModelSlugSchema,
+  defaultModelSlug,
   providerRefOf,
 } from "../shared/slugs";
 import { user } from "./db/auth-schema";
@@ -76,6 +78,42 @@ describe("model refs", () => {
     });
 
     expect(rejected.success).toBe(false);
+  });
+
+  test("the longest default address is accepted and one character more is refused", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Long",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const providerSlug = "p".repeat(MAX_SLUG_LENGTH);
+
+    await updateProvider(deps, "user-1", provider.id, {
+      name: "Long",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      slug: providerSlug,
+    });
+
+    const upstreamModel = "m".repeat(MAX_UPSTREAM_MODEL_LENGTH);
+    const address = defaultModelSlug(providerSlug, upstreamModel);
+
+    expect(address).toHaveLength(MAX_MODEL_REF_LENGTH);
+
+    const added = await addProviderModel(deps, "user-1", provider.id, { upstreamModel });
+
+    expect(added?.models.map((model) => model.slug)).toEqual([address]);
+    expect(v.safeParse(ModelSlugSchema, address).success).toBe(true);
+    expect(v.safeParse(ModelSlugSchema, address + "x").success).toBe(false);
+    expect(v.safeParse(ProviderModelInputSchema, { upstreamModel }).success).toBe(true);
+    expect(
+      v.safeParse(ProviderModelInputSchema, { upstreamModel: upstreamModel + "x" }).success,
+    ).toBe(false);
   });
 });
 

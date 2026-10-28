@@ -1,10 +1,10 @@
 import * as v from "valibot";
-import { SlugSchema } from "./slugs";
+import { MAX_MODEL_REF_LENGTH, SlugSchema } from "./slugs";
 
 export const ANALYTICS_FILTER_DIMENSIONS = ["providerKind", "providerId", "model", "tag"] as const;
 
 const AnalyticsFilterValuesSchema = v.pipe(
-  v.array(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(200))),
+  v.array(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH))),
   v.maxLength(50),
 );
 

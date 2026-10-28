@@ -1,5 +1,11 @@
 import * as v from "valibot";
 import { describe, expect, test } from "vite-plus/test";
+import {
+  MAX_MODEL_REF_LENGTH,
+  MAX_SLUG_LENGTH,
+  MAX_UPSTREAM_MODEL_LENGTH,
+  defaultModelSlug,
+} from "../shared/slugs";
 import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
 
 function parse(search: string) {
@@ -58,5 +64,17 @@ describe("AnalyticsFiltersInputSchema", () => {
   test("caps a dimension at fifty values", () => {
     expect(parse(repeated(50)).success).toBe(true);
     expect(parse(repeated(51)).success).toBe(false);
+  });
+
+  test("accepts the longest model address and refuses one character more", () => {
+    const providerSlug = "p".repeat(MAX_SLUG_LENGTH);
+    const address = defaultModelSlug(providerSlug, "m".repeat(MAX_UPSTREAM_MODEL_LENGTH));
+
+    expect(address).toHaveLength(MAX_MODEL_REF_LENGTH);
+    expect(parse("model=" + address).success).toBe(true);
+    expect(
+      parse("model=" + defaultModelSlug(providerSlug, "m".repeat(MAX_UPSTREAM_MODEL_LENGTH + 1)))
+        .success,
+    ).toBe(false);
   });
 });

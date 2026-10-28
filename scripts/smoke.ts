@@ -2176,7 +2176,7 @@ try {
     );
   });
 
-  await check("the longest provider ref is callable", async () => {
+  await check("the longest provider ref and default address are callable", async () => {
     const created = await postJson(
       providerPaths.list,
       {
@@ -2224,6 +2224,26 @@ try {
     const list = v.parse(ModelListSchema, await models.json());
 
     assert.ok(list.data.some((model) => model.id === ref));
+
+    const defaulted = await postJson(
+      providerPaths.models(created.id),
+      { upstreamModel: "n".repeat(200) },
+      ProviderSchema,
+      201,
+    );
+
+    const address =
+      defaulted.models.find((model) => model.upstreamModel === "n".repeat(200))?.slug ?? "";
+
+    assert.equal(address.length, 241);
+
+    const filtered = await getJson(
+      `${analyticsPaths.analytics}?days=30&model=${encodeURIComponent(address)}`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(filtered.summary.requests, 0);
   });
 
   await check(

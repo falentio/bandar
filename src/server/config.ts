@@ -15,6 +15,8 @@ export type Config = {
   readonly trustedOrigins: readonly string[];
 };
 
+export type RunMode = "development" | "production";
+
 export class ConfigError extends Error {
   readonly issues: readonly string[];
 
@@ -34,7 +36,16 @@ const ProviderUrlSchema = v.pipe(v.string(), v.trim(), v.url());
 
 const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "bandar");
 
-const DEFAULT_HOME_DIR = join(homedir(), ".bandar");
+const HOME_DIRS = {
+  development: join(homedir(), ".bandar_dev"),
+  production: join(homedir(), ".bandar"),
+} satisfies Record<RunMode, string>;
+
+// Bun bakes NODE_ENV into a compiled binary at build time, so NODE_ENV cannot separate a dev run
+// from an installed one.
+export function detectRunMode(): RunMode {
+  return Bun.isStandaloneExecutable ? "production" : "development";
+}
 
 const DATABASE_FILE = "bandar.db";
 
@@ -78,7 +89,10 @@ const ConfigSchema = v.object({
   BANDAR_OPENCODE_API: v.optional(ProviderUrlSchema),
 });
 
-export function parseConfig(env: Record<string, string | undefined>): Config {
+export function parseConfig(
+  env: Record<string, string | undefined>,
+  mode: RunMode = detectRunMode(),
+): Config {
   // A blank value means "unset" for every variable but the two directories: install.sh writes its
   // manifest under the config directory it was given, and a blank home would move the databases to
   // the working directory, so a blank one has to fail, not fall back.
@@ -92,7 +106,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
 
   // Filled in here rather than as a schema default: v.optional checks its default against the
   // input type, so a default that went through trim and check would fail on the leading space.
-  given.BANDAR_HOME ??= DEFAULT_HOME_DIR;
+  given.BANDAR_HOME ??= HOME_DIRS[mode];
 
   const parsed = v.safeParse(ConfigSchema, given);
 

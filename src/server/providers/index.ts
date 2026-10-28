@@ -12,7 +12,7 @@ import {
   type ProviderModelEditInput,
   type ProviderModelInput,
 } from "../../shared/providers";
-import { availableSlug, providerRefOf, slugify, TAG_REF_PREFIX } from "../../shared/slugs";
+import { availableSlug, defaultModelSlug, providerRefOf, slugify } from "../../shared/slugs";
 import { parseCredential, type Credential } from "../credential";
 import type { Db } from "../db/client";
 import { providerCredentials, providerModels, providers } from "../db/schema";
@@ -95,7 +95,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
     credentials.set(row.providerId, list);
   }
 
-  const enabledAliases = new Set(modelRows.filter((row) => row.enabled).map((row) => row.alias));
+  const enabledSlugs = new Set(modelRows.filter((row) => row.enabled).map((row) => row.slug));
   const providerSlugs = new Map(providerRows.map((row) => [row.id, row.slug]));
   const providerKinds = new Map(providerRows.map((row) => [row.id, row.kind]));
 
@@ -108,9 +108,10 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
     list.push({
       id: row.id,
       upstreamModel: row.upstreamModel,
+      slug: row.slug,
       alias: row.alias,
       ref,
-      shadowed: enabledAliases.has(ref),
+      shadowed: enabledSlugs.has(ref),
       compat: parseCompat(row.compat),
       defaultCompat: defaultCompatOf(providerKinds.get(row.providerId), row.upstreamModel),
       inputPricePerMtok: row.inputPricePerMtok,
@@ -269,7 +270,9 @@ export async function addProviderModel(
   providerId: string,
   model: ProviderModelInput,
 ): Promise<Provider | null> {
-  if ((await findProvider(deps, userId, providerId)) === null) return null;
+  const providerSlug = await providerSlugOf(deps, userId, providerId);
+
+  if (providerSlug === null) return null;
 
   const duplicate = await deps.db
     .select({ id: providerModels.id })
@@ -291,7 +294,20 @@ export async function addProviderModel(
 
   deps.db
     .insert(providerModels)
-    .values(modelRow(userId, providerId, model, new Date(), 0))
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      providerId,
+      slug: model.slug ?? defaultModelSlug(providerSlug, model.upstreamModel),
+      alias: model.alias ?? null,
+      upstreamModel: model.upstreamModel,
+      compat: null,
+      inputPricePerMtok: model.inputPricePerMtok ?? null,
+      cacheInputPricePerMtok: model.cacheInputPricePerMtok ?? null,
+      outputPricePerMtok: model.outputPricePerMtok ?? null,
+      enabled: true,
+      createdAt: new Date(),
+    })
     .run();
 
   return findProvider(deps, userId, providerId);
@@ -303,39 +319,42 @@ export async function syncProviderModels(
   providerId: string,
   models: readonly ModelCatalogEntry[],
 ): Promise<Provider | null> {
-  if ((await findProvider(deps, userId, providerId)) === null) return null;
+  const providerSlug = await providerSlugOf(deps, userId, providerId);
+
+  if (providerSlug === null) return null;
 
   const existing = await deps.db
-    .select()
+    .select({ upstreamModel: providerModels.upstreamModel })
     .from(providerModels)
     .where(eq(providerModels.providerId, providerId));
 
   const takenUpstream = new Set(existing.map((row) => row.upstreamModel));
 
-  const takenAlias = new Set(
-    deps.db
-      .select({ alias: providerModels.alias })
-      .from(providerModels)
-      .where(eq(providerModels.userId, userId))
-      .all()
-      .map((row) => row.alias),
+  const takenSlugs = new Set(
+    (
+      await deps.db
+        .select({ slug: providerModels.slug })
+        .from(providerModels)
+        .where(eq(providerModels.userId, userId))
+    ).map((row) => row.slug),
   );
 
   const now = new Date();
 
   const missing = models.flatMap((model, index) => {
-    if (model.alias.startsWith(TAG_REF_PREFIX)) return [];
+    const slug = defaultModelSlug(providerSlug, model.upstreamModel);
 
-    if (takenUpstream.has(model.upstreamModel) || takenAlias.has(model.alias)) return [];
+    if (takenUpstream.has(model.upstreamModel) || takenSlugs.has(slug)) return [];
 
-    takenAlias.add(model.alias);
+    takenSlugs.add(slug);
 
     return [
       {
         id: crypto.randomUUID(),
         userId,
         providerId,
-        alias: model.alias,
+        slug,
+        alias: model.label === model.upstreamModel ? null : model.label,
         upstreamModel: model.upstreamModel,
         inputPricePerMtok: model.inputPricePerMtok,
         cacheInputPricePerMtok: model.cacheInputPricePerMtok,
@@ -387,23 +406,20 @@ export async function updateProviderModel(
     );
   }
 
-  if (edit.alias.startsWith(TAG_REF_PREFIX)) {
-    throw new ProviderRuleError(`an alias cannot start with ${TAG_REF_PREFIX}`, "validation");
-  }
-
   const clash = await deps.db
     .select({ id: providerModels.id })
     .from(providerModels)
-    .where(and(eq(providerModels.userId, userId), eq(providerModels.alias, edit.alias)))
+    .where(and(eq(providerModels.userId, userId), eq(providerModels.slug, edit.slug)))
     .limit(1);
 
   if (clash[0] !== undefined && clash[0].id !== modelId) {
-    throw new ProviderRuleError(`the alias ${edit.alias} is taken`, "conflict");
+    throw new ProviderRuleError(`the address ${edit.slug} is taken`, "conflict");
   }
 
   const updated = await deps.db
     .update(providerModels)
     .set({
+      slug: edit.slug,
       alias: edit.alias,
       compat: edit.compat,
       inputPricePerMtok: edit.inputPricePerMtok,
@@ -496,24 +512,16 @@ async function findProvider(
   return list.providers.find((provider) => provider.id === id) ?? null;
 }
 
-function modelRow(
+async function providerSlugOf(
+  deps: ProviderDeps,
   userId: string,
   providerId: string,
-  model: ProviderModelInput,
-  now: Date,
-  index: number,
-) {
-  return {
-    id: crypto.randomUUID(),
-    userId,
-    providerId,
-    alias: model.alias ?? model.upstreamModel,
-    upstreamModel: model.upstreamModel,
-    compat: null,
-    inputPricePerMtok: model.inputPricePerMtok ?? null,
-    cacheInputPricePerMtok: model.cacheInputPricePerMtok ?? null,
-    outputPricePerMtok: model.outputPricePerMtok ?? null,
-    enabled: true,
-    createdAt: new Date(now.getTime() + index),
-  };
+): Promise<string | null> {
+  const rows = await deps.db
+    .select({ slug: providers.slug })
+    .from(providers)
+    .where(and(eq(providers.id, providerId), eq(providers.userId, userId)))
+    .limit(1);
+
+  return rows[0]?.slug ?? null;
 }

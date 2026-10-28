@@ -45,7 +45,6 @@ export async function fetchKilocodeCatalog({
 
   if (!parsed.success) throw new UpstreamError("kilo code catalog is not readable", "protocol");
 
-  const aliases = new Set<string>();
   const ids = new Set<string>();
 
   return parsed.output.data.flatMap((model) => {
@@ -53,15 +52,10 @@ export async function fetchKilocodeCatalog({
 
     ids.add(model.id);
 
-    const base = aliasFor(model.id);
-    const alias = aliases.has(base) ? model.id : base;
-
-    aliases.add(alias);
-
     return [
       {
         upstreamModel: model.id,
-        alias,
+        label: labelFor(model.id),
         inputPricePerMtok: fromPerToken(model.pricing?.prompt),
         cacheInputPricePerMtok: fromPerToken(model.pricing?.input_cache_read),
         outputPricePerMtok: fromPerToken(model.pricing?.completion),
@@ -70,6 +64,6 @@ export async function fetchKilocodeCatalog({
   });
 }
 
-function aliasFor(upstreamModel: string): string {
+function labelFor(upstreamModel: string): string {
   return upstreamModel.replace(/:free$/, "");
 }

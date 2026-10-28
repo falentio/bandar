@@ -76,7 +76,7 @@ export function optionalPrices<T>(read: Promise<T>, signal: AbortSignal): Promis
 export function entryOf(upstreamModel: string, prices: ModelPrices = NO_PRICE): ModelCatalogEntry {
   return {
     upstreamModel,
-    alias: upstreamModel,
+    label: upstreamModel,
     inputPricePerMtok: prices.inputPricePerMtok,
     cacheInputPricePerMtok: prices.cacheInputPricePerMtok ?? null,
     outputPricePerMtok: prices.outputPricePerMtok,

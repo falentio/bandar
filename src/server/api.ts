@@ -22,6 +22,7 @@ import {
   ProviderOAuthStartSchema,
   ProviderParamsSchema,
 } from "../shared/providers";
+import { defaultModelSlug } from "../shared/slugs";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
@@ -459,9 +460,12 @@ export function createApi(deps: ApiDeps) {
         }
 
         if (error instanceof Error && isUniqueViolation(error)) {
+          const provider = await readProvider(deps.providers, caller.userId, id);
+          const slug = input.slug ?? defaultModelSlug(provider?.slug ?? "", input.upstreamModel);
+
           set.status = 409;
 
-          return failure("conflict", `the alias ${input.alias ?? input.upstreamModel} is taken`);
+          return failure("conflict", `the address ${slug} is taken`);
         }
 
         throw error;

@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { ProviderUsageSchema } from "./analytics";
-import { MAX_UPSTREAM_MODEL_LENGTH, SlugSchema, TAG_REF_PREFIX } from "./slugs";
+import { MAX_UPSTREAM_MODEL_LENGTH, ModelSlugSchema, SlugSchema } from "./slugs";
 
 // Generic wires are the kinds a user can add as a custom provider.
 export const GENERIC_PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
@@ -106,7 +106,8 @@ export const ProviderOriginSchema = v.picklist(PROVIDER_ORIGINS);
 export const ProviderModelSchema = v.object({
   id: v.string(),
   upstreamModel: v.string(),
-  alias: v.string(),
+  slug: v.string(),
+  alias: v.nullable(v.string()),
   ref: v.string(),
   shadowed: v.boolean(),
   compat: v.nullable(CompatSchema),
@@ -117,6 +118,14 @@ export const ProviderModelSchema = v.object({
   failures: v.number(),
   flaggedUntil: v.nullable(v.string()),
 });
+
+/** A model is named by its label. Shared so the server and the client cannot disagree. */
+export function modelLabelOf(model: {
+  readonly alias: string | null;
+  readonly upstreamModel: string;
+}): string {
+  return model.alias ?? model.upstreamModel;
+}
 
 export const ProviderCredentialSchema = v.object({
   id: v.string(),
@@ -154,27 +163,25 @@ export const ProviderDetailSchema = v.object({
   usage: ProviderUsageSchema,
 });
 
-export const ProviderModelInputSchema = v.pipe(
-  v.object({
-    upstreamModel: v.pipe(
-      v.string(),
-      v.trim(),
-      v.minLength(1),
-      v.maxLength(MAX_UPSTREAM_MODEL_LENGTH),
-    ),
-    alias: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100))),
-    inputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-    cacheInputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-    outputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-  }),
-  v.check(
-    (input) => !(input.alias ?? input.upstreamModel).startsWith(TAG_REF_PREFIX),
-    `an alias cannot start with ${TAG_REF_PREFIX}`,
+const ModelLabelSchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100));
+
+export const ProviderModelInputSchema = v.object({
+  upstreamModel: v.pipe(
+    v.string(),
+    v.trim(),
+    v.minLength(1),
+    v.maxLength(MAX_UPSTREAM_MODEL_LENGTH),
   ),
-);
+  slug: v.optional(ModelSlugSchema),
+  alias: v.optional(v.nullable(ModelLabelSchema)),
+  inputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+  cacheInputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+  outputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+});
 
 export const ProviderModelEditInputSchema = v.object({
-  alias: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100)),
+  slug: ModelSlugSchema,
+  alias: v.nullable(ModelLabelSchema),
   compat: v.nullable(CompatSchema),
   inputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
   cacheInputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),

@@ -224,6 +224,7 @@ describe("provider models", () => {
       alias: "fast",
       compat: "responses",
       inputPricePerMtok: null,
+      cacheInputPricePerMtok: null,
       outputPricePerMtok: null,
     });
 
@@ -263,6 +264,7 @@ describe("provider models", () => {
       alias: "gpt-4o-mini-fast",
       compat: null,
       inputPricePerMtok: 0.15,
+      cacheInputPricePerMtok: 0.0031,
       outputPricePerMtok: 0.6,
     });
 
@@ -297,6 +299,7 @@ describe("provider models", () => {
         alias: "first",
         compat: null,
         inputPricePerMtok: null,
+        cacheInputPricePerMtok: null,
         outputPricePerMtok: null,
       }),
     ).rejects.toThrow(ProviderRuleError);
@@ -866,6 +869,7 @@ describe("provider credentials", () => {
       "0009_remarkable_ronan",
       "0010_cooldown_error_message",
       "0011_petite_leopardon",
+      "0012_tiresome_amphibian",
     ]);
 
     const rows = handle.sqlite

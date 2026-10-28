@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   BoxesIcon,
+  CircleDollarSignIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
   PencilIcon,
@@ -34,6 +35,7 @@ import {
   formatExactTokens,
   formatMs,
   formatPercent,
+  formatRate,
   formatTokens,
   formatTps,
   formatUsd,
@@ -688,8 +690,6 @@ export function ModelRow({
     onEditingChange(false);
   };
 
-  const priced = model.inputPricePerMtok !== null || model.outputPricePerMtok !== null;
-  const price = priced ? priceSummary(model) : "unpriced";
   const wire = COMPAT_LABELS[compatOf(model)];
 
   const actions = (
@@ -737,10 +737,8 @@ export function ModelRow({
         {tags.map((tag) => (
           <TagChip key={tag.slug} tag={tag} />
         ))}
-        <span
-          className={priced ? "text-xs text-muted-foreground" : "text-xs text-muted-foreground/60"}
-        >
-          {price}
+        <span className="text-xs text-muted-foreground">
+          <PriceTiers model={model} />
         </span>
         <span className="rounded-full border px-1.5 py-0.5 text-xs text-muted-foreground">
           {wire}
@@ -772,9 +770,7 @@ export function ModelRow({
         <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] text-muted-foreground">
           <span className="text-foreground/80">{wire}</span>
           <span aria-hidden="true">·</span>
-          <span className={priced ? undefined : "text-muted-foreground/70"}>
-            {priced ? priceSummary(model) : "unpriced"}
-          </span>
+          <PriceTiers model={model} />
           {model.shadowed ? <span>· shadowed by an alias</span> : null}
           <HealthBadge failures={model.failures} flaggedUntil={model.flaggedUntil} />
         </p>
@@ -801,18 +797,18 @@ export function ModelRow({
   );
 }
 
-// A half-priced model reads as the one number it has, not a dash for the other.
-function priceSummary(model: ProviderModel): string {
-  const input = model.inputPricePerMtok;
-  const output = model.outputPricePerMtok;
+// Every tier always shows, in input / cache-input / output order, so a row's
+// prices line up down the list and a gap reads as unset rather than missing.
+function PriceTiers({ model }: { model: ProviderModel }) {
+  const tiers = [model.inputPricePerMtok, model.cacheInputPricePerMtok, model.outputPricePerMtok];
 
-  if (input !== null && output !== null) {
-    return `${formatUsd(input)} in / ${formatUsd(output)} out per M`;
-  }
-
-  if (input !== null) return `${formatUsd(input)} in per M`;
-
-  return `${formatUsd(output)} out per M`;
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap tabular-nums">
+      <CircleDollarSignIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
+      <span className="sr-only">USD per million tokens:</span>
+      <span>{tiers.map((tier) => formatRate(tier)).join(" / ")}</span>
+    </span>
+  );
 }
 
 function shortRef(model: ProviderModel): string {

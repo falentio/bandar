@@ -6,6 +6,8 @@ const ModelIdsSchema = v.object({ data: v.array(v.object({ id: v.string() })) })
 
 export type ModelPrices = {
   readonly inputPricePerMtok: number | null;
+  /** Absent when the catalog quotes no cached-read tier. */
+  readonly cacheInputPricePerMtok?: number | null;
   readonly outputPricePerMtok: number | null;
 };
 
@@ -72,7 +74,13 @@ export function optionalPrices<T>(read: Promise<T>, signal: AbortSignal): Promis
 }
 
 export function entryOf(upstreamModel: string, prices: ModelPrices = NO_PRICE): ModelCatalogEntry {
-  return { upstreamModel, alias: upstreamModel, ...prices };
+  return {
+    upstreamModel,
+    alias: upstreamModel,
+    inputPricePerMtok: prices.inputPricePerMtok,
+    cacheInputPricePerMtok: prices.cacheInputPricePerMtok ?? null,
+    outputPricePerMtok: prices.outputPricePerMtok,
+  };
 }
 
 export function fromPerToken(value: string | number | undefined): number | null {

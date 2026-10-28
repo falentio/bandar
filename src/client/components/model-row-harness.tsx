@@ -35,6 +35,7 @@ function model(overrides: Partial<ProviderModel>): ProviderModel {
     compat: null,
     defaultCompat: "chat",
     inputPricePerMtok: null,
+    cacheInputPricePerMtok: null,
     outputPricePerMtok: null,
     failures: 0,
     flaggedUntil: null,

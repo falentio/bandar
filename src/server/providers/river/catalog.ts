@@ -12,6 +12,7 @@ const PricingSchema = v.object({
     v.object({
       model: v.string(),
       input: v.optional(AmountSchema),
+      cache: v.optional(AmountSchema),
       output: v.optional(AmountSchema),
     }),
   ),
@@ -57,6 +58,7 @@ async function readPricing(request: CatalogRequest): Promise<readonly ModelCatal
     return [
       entryOf(row.model, {
         inputPricePerMtok: fromPerMtok(row.input),
+        cacheInputPricePerMtok: fromPerMtok(row.cache),
         outputPricePerMtok: fromPerMtok(row.output),
       }),
     ];

@@ -112,6 +112,7 @@ export const ProviderModelSchema = v.object({
   compat: v.nullable(CompatSchema),
   defaultCompat: v.nullable(CompatSchema),
   inputPricePerMtok: v.nullable(v.number()),
+  cacheInputPricePerMtok: v.nullable(v.number()),
   outputPricePerMtok: v.nullable(v.number()),
   failures: v.number(),
   flaggedUntil: v.nullable(v.string()),
@@ -163,6 +164,7 @@ export const ProviderModelInputSchema = v.pipe(
     ),
     alias: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100))),
     inputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+    cacheInputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
     outputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
   }),
   v.check(
@@ -175,6 +177,7 @@ export const ProviderModelEditInputSchema = v.object({
   alias: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100)),
   compat: v.nullable(CompatSchema),
   inputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
+  cacheInputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
   outputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
 });
 

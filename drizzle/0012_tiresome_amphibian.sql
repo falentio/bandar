@@ -1,0 +1,1 @@
+ALTER TABLE `provider_models` ADD `cache_input_price_per_mtok` real;

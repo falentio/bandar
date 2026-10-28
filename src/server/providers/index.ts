@@ -114,6 +114,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       compat: parseCompat(row.compat),
       defaultCompat: defaultCompatOf(providerKinds.get(row.providerId), row.upstreamModel),
       inputPricePerMtok: row.inputPricePerMtok,
+      cacheInputPricePerMtok: row.cacheInputPricePerMtok,
       outputPricePerMtok: row.outputPricePerMtok,
       failures: row.failures,
       flaggedUntil: row.flaggedUntil?.toISOString() ?? null,
@@ -337,6 +338,7 @@ export async function syncProviderModels(
         alias: model.alias,
         upstreamModel: model.upstreamModel,
         inputPricePerMtok: model.inputPricePerMtok,
+        cacheInputPricePerMtok: model.cacheInputPricePerMtok,
         outputPricePerMtok: model.outputPricePerMtok,
         enabled: true,
         createdAt: new Date(now.getTime() + index),
@@ -405,6 +407,7 @@ export async function updateProviderModel(
       alias: edit.alias,
       compat: edit.compat,
       inputPricePerMtok: edit.inputPricePerMtok,
+      cacheInputPricePerMtok: edit.cacheInputPricePerMtok,
       outputPricePerMtok: edit.outputPricePerMtok,
     })
     .where(and(eq(providerModels.id, modelId), eq(providerModels.providerId, providerId)))
@@ -508,6 +511,7 @@ function modelRow(
     upstreamModel: model.upstreamModel,
     compat: null,
     inputPricePerMtok: model.inputPricePerMtok ?? null,
+    cacheInputPricePerMtok: model.cacheInputPricePerMtok ?? null,
     outputPricePerMtok: model.outputPricePerMtok ?? null,
     enabled: true,
     createdAt: new Date(now.getTime() + index),

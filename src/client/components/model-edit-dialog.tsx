@@ -55,24 +55,36 @@ export function EditModelDialog({
   const [alias, setAlias] = useState(model.alias);
   const [compat, setCompat] = useState<Compat | null>(model.compat);
   const [inputPrice, setInputPrice] = useState(priceText(model.inputPricePerMtok));
+  const [cachePrice, setCachePrice] = useState(priceText(model.cacheInputPricePerMtok));
   const [outputPrice, setOutputPrice] = useState(priceText(model.outputPricePerMtok));
 
   const reset = () => {
     setAlias(model.alias);
     setCompat(model.compat);
     setInputPrice(priceText(model.inputPricePerMtok));
+    setCachePrice(priceText(model.cacheInputPricePerMtok));
     setOutputPrice(priceText(model.outputPricePerMtok));
   };
 
   const parsedInput = parsePrice(inputPrice);
+  const parsedCache = parsePrice(cachePrice);
   const parsedOutput = parsePrice(outputPrice);
-  const pricesValid = parsedInput !== undefined && parsedOutput !== undefined;
+
+  const pricesValid =
+    parsedInput !== undefined && parsedCache !== undefined && parsedOutput !== undefined;
+
   const aliasValid = alias.trim() !== "" && !alias.trim().startsWith("tags/");
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!pricesValid || !aliasValid || parsedInput === undefined || parsedOutput === undefined) {
+    if (
+      !pricesValid ||
+      !aliasValid ||
+      parsedInput === undefined ||
+      parsedCache === undefined ||
+      parsedOutput === undefined
+    ) {
       return;
     }
 
@@ -80,6 +92,7 @@ export function EditModelDialog({
       alias: alias.trim(),
       compat,
       inputPricePerMtok: parsedInput,
+      cacheInputPricePerMtok: parsedCache,
       outputPricePerMtok: parsedOutput,
     };
 
@@ -152,7 +165,7 @@ export function EditModelDialog({
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <div className="grid gap-2">
               <Label htmlFor="model-edit-input-price">Input price</Label>
               <Input
@@ -166,6 +179,21 @@ export function EditModelDialog({
                 placeholder="unset"
                 disabled={providers.pending}
                 aria-invalid={parsedInput === undefined}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="model-edit-cache-price">Cache input price</Label>
+              <Input
+                id="model-edit-cache-price"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="any"
+                value={cachePrice}
+                onChange={(event) => setCachePrice(event.target.value)}
+                placeholder="unset"
+                disabled={providers.pending}
+                aria-invalid={parsedCache === undefined}
               />
             </div>
             <div className="grid gap-2">

@@ -32,7 +32,19 @@ export function formatPercent(value: number): string {
 export function formatUsd(value: number | null): string {
   if (value === null) return "—";
 
-  return value === 0 ? "$0" : `$${value.toFixed(4)}`;
+  return value === 0 ? "$0" : `${value.toFixed(4)}`;
+}
+
+/**
+ * A USD rate per million tokens, at most four decimals with trailing zeros cut.
+ * The dollar sign is an icon at the call site, so this returns the number alone.
+ */
+export function formatRate(value: number | null): string {
+  if (value === null) return "—";
+
+  const fixed = value.toFixed(4);
+
+  return fixed.includes(".") ? fixed.replace(/0+$/, "").replace(/\.$/, "") : fixed;
 }
 
 export function formatWhen(value: string): string {

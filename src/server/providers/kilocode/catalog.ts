@@ -15,6 +15,7 @@ const KiloCatalogSchema = v.object({
         v.nullable(
           v.object({
             prompt: v.optional(PriceSchema),
+            input_cache_read: v.optional(PriceSchema),
             completion: v.optional(PriceSchema),
           }),
         ),
@@ -62,6 +63,7 @@ export async function fetchKilocodeCatalog({
         upstreamModel: model.id,
         alias,
         inputPricePerMtok: fromPerToken(model.pricing?.prompt),
+        cacheInputPricePerMtok: fromPerToken(model.pricing?.input_cache_read),
         outputPricePerMtok: fromPerToken(model.pricing?.completion),
       },
     ];

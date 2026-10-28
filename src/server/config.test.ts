@@ -1,13 +1,32 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, vi } from "vite-plus/test";
-import { DEFAULT_API_PORT } from "../shared/topology";
-import { ConfigError, detectRunMode, loadConfig, parseConfig } from "./config";
+import { DEFAULT_API_PORT, DEFAULT_WEB_PORT } from "../shared/topology";
+import {
+  ConfigError,
+  detectRunMode,
+  loadConfig,
+  loadConfigReport,
+  parseConfig,
+  type RunMode,
+} from "./config";
 
 const MODE_HOMES = [
   ["development", ".bandar_dev"],
   ["production", ".bandar"],
 ] as const;
+
+const home = "/srv/bandar";
+
+const missingFile = (): string => {
+  throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+};
+
+const reportOf = (
+  env: Record<string, string | undefined> = {},
+  mode: RunMode = "production",
+  json = "{}",
+) => loadConfigReport({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set", ...env }, () => json, mode);
 
 describe("config", () => {
   test("a provider origin that is not a URL fails at boot", () => {
@@ -107,16 +126,10 @@ describe("config", () => {
 });
 
 describe("the settings file", () => {
-  const home = "/srv/bandar";
-
   const file = JSON.stringify({ server: { host: "127.0.0.1", port: 4000 } });
 
   const fromFile = (json: string, env: Record<string, string | undefined> = {}) =>
     loadConfig({ BANDAR_HOME: home, ...env }, () => json, "production");
-
-  const missingFile = (): string => {
-    throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
-  };
 
   test("the file supplies the host and the port", () => {
     const config = fromFile(file);
@@ -138,6 +151,38 @@ describe("the settings file", () => {
 
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(4000);
+  });
+
+  test("the file supplies the auth URL and the trusted origins", () => {
+    const config = fromFile(
+      JSON.stringify({
+        server: {
+          authUrl: "https://llm.example.com",
+          trustedOrigins: ["https://LLM.example.com/", "https://alt.example.com"],
+        },
+      }),
+    );
+
+    expect(config.authUrl).toBe("https://llm.example.com");
+    expect(config.trustedOrigins).toEqual(["https://llm.example.com", "https://alt.example.com"]);
+  });
+
+  test("the environment overrides the auth URL and the trusted origins", () => {
+    const config = fromFile(
+      JSON.stringify({
+        server: {
+          authUrl: "https://file.example.com",
+          trustedOrigins: ["https://file.example.com"],
+        },
+      }),
+      {
+        BANDAR_AUTH_URL: "https://env.example.com",
+        BANDAR_TRUSTED_ORIGINS: " https://one.example.com , https://two.example.com ,",
+      },
+    );
+
+    expect(config.authUrl).toBe("https://env.example.com");
+    expect(config.trustedOrigins).toEqual(["https://one.example.com", "https://two.example.com"]);
   });
 
   test("loadConfig reads config.json under BANDAR_HOME", () => {
@@ -188,5 +233,143 @@ describe("the settings file", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("the derived defaults", () => {
+  test("the auth URL follows the resolved port", () => {
+    expect(reportOf({ BANDAR_PORT: "4000" }).config.authUrl).toBe("http://localhost:4000");
+  });
+
+  test("a production run trusts the loopback on the API port", () => {
+    expect(reportOf().config.trustedOrigins).toEqual([
+      `http://localhost:${DEFAULT_API_PORT}`,
+      `http://127.0.0.1:${DEFAULT_API_PORT}`,
+    ]);
+  });
+
+  test("a development run adds the web dev server origins", () => {
+    expect(reportOf({}, "development").config.trustedOrigins).toEqual([
+      `http://localhost:${DEFAULT_API_PORT}`,
+      `http://127.0.0.1:${DEFAULT_API_PORT}`,
+      `http://localhost:${DEFAULT_WEB_PORT}`,
+      `http://127.0.0.1:${DEFAULT_WEB_PORT}`,
+    ]);
+  });
+
+  test("a wildcard host adds no host origin", () => {
+    for (const host of ["0.0.0.0", "::"]) {
+      expect(reportOf({ BANDAR_HOST: host }).config.trustedOrigins).toEqual([
+        `http://localhost:${DEFAULT_API_PORT}`,
+        `http://127.0.0.1:${DEFAULT_API_PORT}`,
+      ]);
+    }
+  });
+
+  test("a loopback host does not repeat a derived origin", () => {
+    expect(
+      reportOf({ BANDAR_HOST: "127.0.0.1", BANDAR_PORT: "4000" }).config.trustedOrigins,
+    ).toEqual(["http://localhost:4000", "http://127.0.0.1:4000"]);
+  });
+
+  test("a LAN host joins the derived origins", () => {
+    expect(
+      reportOf({ BANDAR_HOST: "10.0.0.5", BANDAR_PORT: "8080" }).config.trustedOrigins,
+    ).toEqual(["http://localhost:8080", "http://127.0.0.1:8080", "http://10.0.0.5:8080"]);
+  });
+
+  test("an IPv6 host is bracketed", () => {
+    expect(reportOf({ BANDAR_HOST: "::1" }).config.trustedOrigins).toEqual([
+      `http://localhost:${DEFAULT_API_PORT}`,
+      `http://127.0.0.1:${DEFAULT_API_PORT}`,
+      `http://[::1]:${DEFAULT_API_PORT}`,
+    ]);
+  });
+});
+
+describe("the config report", () => {
+  test("a missing file reports the path, no file, and every default", () => {
+    const report = loadConfigReport(
+      { BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set" },
+      missingFile,
+      "production",
+    );
+
+    expect(report.settingsPath).toBe("/srv/bandar/config.json");
+    expect(report.settingsFound).toBe(false);
+    expect(report.sources).toEqual({
+      host: "default",
+      port: "default",
+      authUrl: "default",
+      trustedOrigins: "default",
+    });
+  });
+
+  test("a file labels every value it supplies", () => {
+    const report = reportOf(
+      {},
+      "production",
+      JSON.stringify({
+        server: {
+          host: "127.0.0.1",
+          port: 4000,
+          authUrl: "https://llm.example.com",
+          trustedOrigins: ["https://llm.example.com"],
+        },
+      }),
+    );
+
+    expect(report.settingsFound).toBe(true);
+    expect(report.sources).toEqual({
+      host: "config",
+      port: "config",
+      authUrl: "config",
+      trustedOrigins: "config",
+    });
+  });
+
+  test("the environment labels the values it supplies, and a blank one falls through", () => {
+    const report = reportOf({
+      BANDAR_HOST: "10.0.0.5",
+      BANDAR_PORT: "5000",
+      BANDAR_AUTH_URL: "https://llm.example.com",
+      BANDAR_TRUSTED_ORIGINS: "https://llm.example.com",
+    });
+
+    expect(report.sources).toEqual({
+      host: "environment",
+      port: "environment",
+      authUrl: "environment",
+      trustedOrigins: "environment",
+    });
+
+    const blank = reportOf({
+      BANDAR_HOST: "",
+      BANDAR_PORT: "",
+      BANDAR_AUTH_URL: "",
+      BANDAR_TRUSTED_ORIGINS: "",
+    });
+
+    expect(blank.sources).toEqual({
+      host: "default",
+      port: "default",
+      authUrl: "default",
+      trustedOrigins: "default",
+    });
+  });
+
+  test("each value keeps its own label", () => {
+    const report = reportOf(
+      { BANDAR_AUTH_URL: "https://llm.example.com" },
+      "production",
+      JSON.stringify({ server: { host: "127.0.0.1", port: 4000 } }),
+    );
+
+    expect(report.sources).toEqual({
+      host: "config",
+      port: "config",
+      authUrl: "environment",
+      trustedOrigins: "default",
+    });
   });
 });

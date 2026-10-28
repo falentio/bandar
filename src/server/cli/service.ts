@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
-import { basename, dirname, join, parse, resolve } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { parseConfig } from "../config";
 import type { Commands, Env } from "./command";
 
@@ -12,6 +12,10 @@ export const ENV_FILE_NAME = "bandar.env";
 export const SYSTEM_UNIT_DIR = "/etc/systemd/system";
 
 export const SYSTEM_DATA_DIR = "/var/lib/bandar";
+
+const DATABASE_FILE = "bandar.db";
+
+const DUCKDB_FILE = "bandar.duckdb";
 
 // StateDirectory= names a directory under /var/lib, so the name and the default data dir agree.
 const STATE_DIRECTORY = "bandar";
@@ -107,8 +111,7 @@ export function renderUnit(options: UnitOptions): string {
     "Type=simple",
     `ExecStart=${unitValue(options.binary)} serve`,
     `WorkingDirectory=${unitValue(options.dataDir)}`,
-    `Environment=${unitValue(`BANDAR_DB=${options.databasePath}`)}`,
-    `Environment=${unitValue(`BANDAR_DUCKDB=${options.duckdbPath}`)}`,
+    `Environment=${unitValue(`BANDAR_HOME=${options.dataDir}`)}`,
     `Environment=${unitValue(`BANDAR_PORT=${String(options.port)}`)}`,
     // Last, so a value in the env file overrides the one baked in here.
     `EnvironmentFile=-${unitValue(options.envFile)}`,
@@ -206,8 +209,8 @@ export function planService(input: ServiceInput): ServicePlan {
     scope,
     binary,
     dataDir,
-    databasePath: join(dataDir, basename(config.databasePath)),
-    duckdbPath: join(dataDir, basename(config.duckdbPath)),
+    databasePath: join(dataDir, DATABASE_FILE),
+    duckdbPath: join(dataDir, DUCKDB_FILE),
     port: input.flags.port ?? config.port,
     user: operatorUser(input.env, input.currentUser),
     envFile: join(config.configDir, ENV_FILE_NAME),

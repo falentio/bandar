@@ -63,13 +63,15 @@ describe("config", () => {
     expect(config.duckdbPath).toBe("/srv/bandar/bandar.duckdb");
   });
 
-  test("a relative BANDAR_DB lands inside BANDAR_HOME, an absolute one is kept", () => {
-    expect(parseConfig({ BANDAR_HOME: "/srv/bandar", BANDAR_DB: "other.db" }).databasePath).toBe(
-      "/srv/bandar/other.db",
-    );
-    expect(parseConfig({ BANDAR_HOME: "/srv/bandar", BANDAR_DB: "/data/x.db" }).databasePath).toBe(
-      "/data/x.db",
-    );
+  test("BANDAR_DB and BANDAR_DUCKDB no longer move a database", () => {
+    const config = parseConfig({
+      BANDAR_HOME: "/srv/bandar",
+      BANDAR_DB: "/data/x.db",
+      BANDAR_DUCKDB: "/data/x.duckdb",
+    });
+
+    expect(config.databasePath).toBe("/srv/bandar/bandar.db");
+    expect(config.duckdbPath).toBe("/srv/bandar/bandar.duckdb");
   });
 
   test("a blank or relative BANDAR_HOME fails at boot", () => {

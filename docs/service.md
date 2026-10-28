@@ -30,8 +30,8 @@ stderr: which files it wrote, and which ones it kept.
 | `--port`     | `BANDAR_PORT`, else 3000                                             |
 | `--binary`   | the executable running the command                                   |
 
-Defaults for the port and the data paths come from the same parser `bandar serve` reads, so a
-`BANDAR_PORT` or `BANDAR_DB` in the shell lands in the unit.
+Defaults for the port and the data directory come from the same parser `bandar serve` reads, so a
+`BANDAR_PORT` or `BANDAR_HOME` in the shell lands in the unit.
 
 ## What the unit holds
 
@@ -46,8 +46,7 @@ Wants=network-online.target
 Type=simple
 ExecStart=/home/andrew/.local/bin/bandar serve
 WorkingDirectory=/home/andrew/.local/share/bandar
-Environment=BANDAR_DB=/home/andrew/.local/share/bandar/bandar.db
-Environment=BANDAR_DUCKDB=/home/andrew/.local/share/bandar/bandar.duckdb
+Environment=BANDAR_HOME=/home/andrew/.local/share/bandar
 Environment=BANDAR_PORT=3000
 EnvironmentFile=-/home/andrew/.config/bandar/bandar.env
 Restart=on-failure
@@ -57,9 +56,8 @@ RestartSec=5
 WantedBy=default.target
 ```
 
-The unit names both database paths in full instead of leaving them to whichever directory systemd
-happens to start in. A `BANDAR_DB` or `BANDAR_DUCKDB` keeps only its file name: the unit puts that
-name under the data directory, so `--data-dir` moves both files with the unit.
+The unit points the binary at its data directory through `BANDAR_HOME`, so the databases land there
+whatever directory systemd happens to start in, and `--data-dir` moves both files with the unit.
 
 The install creates every directory the unit names: the unit directory, the data directory, and
 the config directory that holds the env file. `WorkingDirectory=` is not optional to systemd — a

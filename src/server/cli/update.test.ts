@@ -980,8 +980,7 @@ describe("bandar update --archive", () => {
     const recorded = runOf(fixture, {
       env: {
         BANDAR_CONFIG_DIR: fixture.configDir,
-        BANDAR_DB: join(databases, "bandar.db"),
-        BANDAR_DUCKDB: join(databases, "bandar.duckdb"),
+        BANDAR_HOME: databases,
       },
       argv: ["--archive", fixture.archive],
     });

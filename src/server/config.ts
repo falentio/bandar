@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_API_PORT, DEFAULT_WEB_PORT } from "../shared/topology";
 
@@ -36,6 +36,10 @@ const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "bandar");
 
 const DEFAULT_HOME_DIR = join(homedir(), ".bandar");
 
+const DATABASE_FILE = "bandar.db";
+
+const DUCKDB_FILE = "bandar.duckdb";
+
 // v.optional validates its default against the input type, so the port default is the string form.
 const ConfigSchema = v.object({
   BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1)), "0.0.0.0"),
@@ -51,8 +55,6 @@ const ConfigSchema = v.object({
     String(DEFAULT_API_PORT),
   ),
   BANDAR_HOME: v.pipe(v.string(), v.trim(), v.check(isAbsolute, "must be an absolute path")),
-  BANDAR_DB: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
-  BANDAR_DUCKDB: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   BANDAR_CONFIG_DIR: v.optional(
     v.pipe(v.string(), v.trim(), v.check(isAbsolute, "must be an absolute path")),
     DEFAULT_CONFIG_DIR,
@@ -115,8 +117,8 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   return {
     host: values.BANDAR_HOST,
     port: values.BANDAR_PORT,
-    databasePath: resolve(values.BANDAR_HOME, values.BANDAR_DB ?? "bandar.db"),
-    duckdbPath: resolve(values.BANDAR_HOME, values.BANDAR_DUCKDB ?? "bandar.duckdb"),
+    databasePath: join(values.BANDAR_HOME, DATABASE_FILE),
+    duckdbPath: join(values.BANDAR_HOME, DUCKDB_FILE),
     configDir: values.BANDAR_CONFIG_DIR,
     authUrl: values.BANDAR_AUTH_URL ?? `http://localhost:${values.BANDAR_PORT}`,
     authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),

@@ -321,9 +321,7 @@ throw `UpstreamError` with a kind the gateway maps to an HTTP status.
 | `BANDAR_HOST`                | `0.0.0.0`                                     | Bind address for the API and the compiled binary.                                          |
 | `BANDAR_PORT`                | `3000`                                        | API port. `0` picks a free port and the boot line reports it.                              |
 | `BANDAR_WEB_PORT`            | `5173`                                        | Vite dev port. Not read by the compiled binary.                                            |
-| `BANDAR_HOME`                | `~/.bandar`                                   | Directory holding both databases. Must be absolute.                                        |
-| `BANDAR_DB`                  | `<BANDAR_HOME>/bandar.db`                     | SQLite metadata path. A relative name lands in `BANDAR_HOME`. Created on first boot.       |
-| `BANDAR_DUCKDB`              | `<BANDAR_HOME>/bandar.duckdb`                 | DuckDB analytics path. A relative name lands in `BANDAR_HOME`. Created on first boot.      |
+| `BANDAR_HOME`                | `~/.bandar`                                   | Holds `bandar.db` and `bandar.duckdb`. Must be absolute.                                   |
 | `BANDAR_CONFIG_DIR`          | `~/.config/bandar`                            | Holds `install.json`: how this copy was installed, its version, and its binary path.       |
 | `BANDAR_AUTH_URL`            | `http://localhost:<BANDAR_PORT>`              | better-auth base URL. In dev, set it to the Vite origin.                                   |
 | `BANDAR_AUTH_SECRET`         | random per boot                               | Signs sessions and derives the credential encryption key. Set it in production.            |
@@ -468,8 +466,8 @@ before running the command: only one process may open DuckDB for writing, and a
 checkpoint needs that. To restore, unzip and point the binary at the copies:
 
 ```sh
-unzip nightly.zip -d /srv/bandar
-BANDAR_DB=/srv/bandar/bandar.db BANDAR_DUCKDB=/srv/bandar/bandar.duckdb bandar serve
+unzip nightly.zip -d ~/.bandar
+bandar serve
 ```
 
 ## Commands

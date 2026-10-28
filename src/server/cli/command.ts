@@ -3,7 +3,8 @@ export type Env = Record<string, string | undefined>;
 export type Command = {
   readonly name: string;
   readonly summary: string;
-  readonly run: (env: Env) => Promise<number>;
+  readonly takesArguments?: boolean;
+  readonly run: (env: Env, args: readonly string[]) => Promise<number>;
 };
 
 export type Cli = {

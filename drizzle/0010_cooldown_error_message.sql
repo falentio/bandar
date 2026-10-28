@@ -1,0 +1,1 @@
+ALTER TABLE `cooldown_events` ADD `error_message` text;

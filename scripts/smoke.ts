@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inflateRawSync } from "node:zlib";
 import * as v from "valibot";
 import { BINARY } from "./binary";
 import {
@@ -11,11 +13,17 @@ import {
   type Analytics,
   type RequestEvent,
 } from "../src/shared/analytics";
-import { ApiErrorBodySchema, HealthSchema } from "../src/shared/api";
+import {
+  ApiErrorBodySchema,
+  BackupManifestSchema,
+  HealthSchema,
+  apiPaths,
+} from "../src/shared/api";
 import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
 import { AuthResultSchema } from "../src/shared/auth";
 import { CooldownListSchema, cooldownPaths } from "../src/shared/cooldowns";
 import {
+  ProviderCredentialProbeSchema,
   ProviderDetailSchema,
   ProviderListSchema,
   ProviderModelRefreshSchema,
@@ -25,6 +33,7 @@ import {
   providerPaths,
   type Provider,
 } from "../src/shared/providers";
+import { CHARS_PER_TOKEN } from "../src/server/router/anthropic-wire";
 import { TagListSchema, tagPaths } from "../src/shared/tags";
 
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
@@ -43,6 +52,7 @@ type Journal = { readonly entries: readonly { readonly idx: number; readonly tag
 type Booted = {
   readonly origin: string;
   readonly log: () => string;
+  readonly errors: () => string;
   readonly stop: () => Promise<void>;
 };
 
@@ -75,6 +85,43 @@ const OpenAiErrorSchema = v.object({
   }),
 });
 
+const MessageSchema = v.object({
+  type: v.literal("message"),
+  role: v.literal("assistant"),
+  model: v.string(),
+  content: v.array(v.object({ type: v.literal("text"), text: v.string() })),
+  stop_reason: v.string(),
+  usage: v.object({ input_tokens: v.number(), output_tokens: v.number() }),
+});
+
+const MessageErrorSchema = v.object({
+  type: v.literal("error"),
+  error: v.object({ type: v.string(), message: v.string() }),
+});
+
+const TokenCountSchema = v.object({ input_tokens: v.number() });
+
+const MessageEventSchema = v.object({
+  type: v.string(),
+  delta: v.optional(
+    v.object({
+      type: v.optional(v.string()),
+      text: v.optional(v.nullable(v.string())),
+      stop_reason: v.optional(v.nullable(v.string())),
+    }),
+  ),
+  usage: v.optional(
+    v.object({
+      input_tokens: v.optional(v.number()),
+      output_tokens: v.optional(v.number()),
+    }),
+  ),
+});
+
+const UpstreamChatSchema = v.object({
+  messages: v.array(v.object({ role: v.string(), content: v.string() })),
+});
+
 const StreamChunkSchema = v.object({
   choices: v.optional(
     v.array(
@@ -101,6 +148,7 @@ const duckPath = join(workDir, "smoke.duckdb");
 const authEmail = `${Date.now()}@smoke.test`;
 const authPassword = "smoke-password-1";
 
+const upstreamChats: v.InferOutput<typeof UpstreamChatSchema>[] = [];
 const upstream = startUpstream();
 const upstreamOrigin = `http://127.0.0.1:${upstream.port}`;
 const kilocode = startKilocode();
@@ -129,6 +177,7 @@ const riverProvider: ProviderSlot = { provider: null, modelId: "" };
 const nousProvider: ProviderSlot = { provider: null, modelId: "" };
 const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
 const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
+const wireProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -1387,6 +1436,7 @@ try {
     assert.equal(event.providerName, "Dead");
     assert.equal(event.modelAlias, "dead-model");
     assert.equal(event.credentialName, "");
+    assert.equal(event.errorMessage, "bad openai key");
   });
 
   await check("GET /v1/models and GET /api/tags list the tag in priority order", async () => {
@@ -1497,6 +1547,108 @@ try {
 
     assert.deepEqual(rows.map((request) => request.status).sort(), ["error", "success"]);
     assert.equal(rows.find((request) => request.status === "error")?.errorKind, "auth");
+  });
+
+  await check("POST /api/providers/:id/credentials/:credentialId/test probes one key", async () => {
+    const provider = await postJson(
+      providerPaths.list,
+      {
+        name: "Probing",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "openai-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    await postJson(
+      providerPaths.models(provider.id),
+      { upstreamModel: "fake-openai-model", alias: "probing" },
+      ProviderSchema,
+      201,
+    );
+
+    const good = provider.credentials[0];
+
+    if (good === undefined) throw new Error("the Probing provider has no credential");
+
+    const withBad = await postJson(
+      providerPaths.credentials(provider.id),
+      { label: "expired", apiKey: "wrong-key" },
+      ProviderSchema,
+      201,
+    );
+
+    const bad = withBad.credentials.find((credential) => credential.label === "expired");
+
+    if (bad === undefined) throw new Error("the expired credential is missing");
+
+    const passed = await postJson(
+      providerPaths.credentialTest(provider.id, good.id),
+      {},
+      ProviderCredentialProbeSchema,
+      200,
+    );
+
+    assert.equal(passed.ok, true);
+    assert.equal(passed.error, null);
+    assert.ok(passed.latencyMs >= 0);
+
+    const failed = await postJson(
+      providerPaths.credentialTest(provider.id, bad.id),
+      {},
+      ProviderCredentialProbeSchema,
+      200,
+    );
+
+    assert.equal(failed.ok, false);
+    assert.equal(failed.status, 401);
+    assert.equal(failed.error, "bad openai key");
+
+    const detail = await getJson(
+      providerPaths.detail(provider.id) + "?days=30",
+      ProviderDetailSchema,
+      200,
+    );
+
+    assert.deepEqual(
+      detail.provider.credentials.map((credential) => credential.failures),
+      [0, 0],
+      "the probe flagged a credential for cooldown",
+    );
+
+    const cooldowns = await getJson(cooldownPaths.list, CooldownListSchema, 200);
+
+    assert.equal(
+      cooldowns.events.some((event) => event.providerName === "Probing"),
+      false,
+      "the probe wrote a cooldown event",
+    );
+
+    assert.equal((await referenceRows("probing")).length, 0, "the probe wrote an analytics row");
+
+    const list = await getJson(providerPaths.list, ProviderListSchema, 200);
+    const other = list.providers.find((entry) => entry.id !== provider.id && entry.credentials[0]);
+
+    if (other?.credentials[0] === undefined) throw new Error("no second provider has a credential");
+
+    const foreign = await post(
+      providerPaths.credentialTest(provider.id, other.credentials[0].id),
+      {},
+    );
+
+    const absent = await post(providerPaths.credentialTest(provider.id, "no-such-credential"), {});
+
+    assert.equal(foreign.status, 404);
+    assert.equal(absent.status, 404);
+
+    const anonymous = await fetch(
+      new URL(providerPaths.credentialTest(provider.id, good.id), origin),
+      { method: "POST" },
+    );
+
+    assert.equal(anonymous.status, 401);
   });
 
   await check(
@@ -1948,6 +2100,212 @@ try {
     assert.ok(list.data.some((model) => model.id === ref));
   });
 
+  await check(
+    "POST /v1/messages answers an Anthropic message with a leading system turn",
+    async () => {
+      const provider = await postJson(
+        providerPaths.list,
+        {
+          name: "Wire OpenAI",
+          kind: "openai",
+          baseUrl: `${upstreamOrigin}/openai`,
+          apiKey: "openai-key",
+        },
+        ProviderSchema,
+        201,
+      );
+
+      const withModel = await postJson(
+        providerPaths.models(provider.id),
+        { upstreamModel: "wire-upstream-model", alias: "wire-openai" },
+        ProviderSchema,
+        201,
+      );
+
+      wireProvider.provider = provider;
+      wireProvider.modelId = withModel.models[0]?.id ?? "";
+
+      const response = await postMessages(
+        messageRequest("wire-openai", false, [
+          { type: "text", text: "be" },
+          { type: "text", text: "brief" },
+        ]),
+      );
+
+      assert.equal(response.status, 200);
+
+      const body = v.parse(MessageSchema, await response.json());
+
+      assert.equal(body.model, "wire-openai");
+      assert.equal(body.content[0]?.text, "Hello from OpenAI");
+      assert.equal(body.stop_reason, "end_turn");
+      assert.deepEqual(body.usage, { input_tokens: 11, output_tokens: 7 });
+
+      const upstreamBody = upstreamChats.at(-1);
+
+      if (upstreamBody === undefined) throw new Error("the fake OpenAI upstream saw no chat");
+
+      assert.deepEqual(upstreamBody.messages[0], { role: "system", content: "be\nbrief" });
+
+      const providerRef = await postMessages(
+        messageRequest("wire-openai/wire-upstream-model", false),
+      );
+
+      assert.equal(providerRef.status, 200);
+    },
+  );
+
+  await check("POST /v1/messages streams the Anthropic event order", async () => {
+    const response = await postMessages(messageRequest("claude", true));
+
+    assert.equal(response.status, 200);
+    assert.match(contentType(response), /text\/event-stream/);
+
+    const stream = await readMessageStream(response);
+
+    assert.deepEqual(stream.events, [
+      "message_start",
+      "content_block_start",
+      "content_block_delta",
+      "content_block_delta",
+      "content_block_stop",
+      "message_delta",
+      "message_stop",
+    ]);
+    assert.equal(stream.text, "Hello from Anthropic");
+    assert.equal(stream.stopReason, "end_turn");
+    assert.equal(stream.inputTokens, 9);
+    assert.equal(stream.outputTokens, 5);
+  });
+
+  await check("POST /v1/messages falls through a tag to the next model", async () => {
+    const dead = await postJson(
+      providerPaths.list,
+      {
+        name: "Dead Wire",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "wrong-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    const withModel = await postJson(
+      providerPaths.models(dead.id),
+      { upstreamModel: "dead-wire-model", alias: "dead-wire" },
+      ProviderSchema,
+      201,
+    );
+
+    const deadModel = withModel.models.find((model) => model.alias === "dead-wire");
+    const wireModelId = wireProvider.modelId;
+
+    if (deadModel === undefined) throw new Error("the dead wire model is missing");
+
+    if (wireModelId === "") throw new Error("the wire model is missing");
+
+    const created = await postJson(tagPaths.create, { slug: "wire" }, TagListSchema, 201);
+    const tag = created.tags.find((entry) => entry.slug === "wire");
+
+    if (tag === undefined) throw new Error("the wire tag is missing");
+
+    await putJson(
+      tagPaths.models(tag.id),
+      { modelIds: [deadModel.id, wireModelId] },
+      TagListSchema,
+      200,
+    );
+
+    const response = await postMessages(messageRequest("tags/wire", false));
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(MessageSchema, await response.json());
+
+    assert.equal(body.content[0]?.text, "Hello from OpenAI");
+
+    const rows = await waitForRequests(
+      "tags/wire",
+      (requests) =>
+        requests.some((request) => request.status === "error") &&
+        requests.some((request) => request.status === "success"),
+      "both Anthropic-wire attempts",
+    );
+
+    assert.equal(rows.find((request) => request.status === "error")?.model, "dead-wire");
+    assert.equal(rows.find((request) => request.status === "success")?.model, "wire-openai");
+  });
+
+  await check("POST /v1/messages rejects a tool_use block with 422", async () => {
+    const response = await postMessages({
+      model: "wire-openai",
+      max_tokens: 64,
+      messages: [
+        { role: "user", content: "hello" },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "let me look" },
+            { type: "tool_use", id: "toolu_1", name: "look", input: {} },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(response.status, 422);
+
+    const body = v.parse(MessageErrorSchema, await response.json());
+
+    assert.equal(body.error.type, "invalid_request_error");
+    assert.match(body.error.message, /tool_use/);
+    assert.match(body.error.message, /messages\[1\]\.content\[1\]/);
+  });
+
+  await check(
+    "POST /v1/messages answers an upstream failure in the Anthropic envelope",
+    async () => {
+      const response = await postMessages(messageRequest("dead-model", false));
+
+      assert.equal(response.status, 502);
+
+      const body = v.parse(MessageErrorSchema, await response.json());
+
+      assert.equal(body.error.type, "authentication_error");
+    },
+  );
+
+  await check("POST /v1/messages without a key is an Anthropic 401", async () => {
+    const response = await postMessages(messageRequest("wire-openai", false), {});
+
+    assert.equal(response.status, 401);
+
+    const body = v.parse(MessageErrorSchema, await response.json());
+
+    assert.equal(body.error.type, "authentication_error");
+  });
+
+  await check("POST /v1/messages/count_tokens estimates from the divisor", async () => {
+    const system = "be brief";
+    const text = "hello from count";
+
+    const response = await fetch(new URL("/v1/messages/count_tokens", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...bearer() },
+      body: JSON.stringify({
+        model: "wire-openai",
+        system,
+        messages: [{ role: "user", content: text }],
+      }),
+    });
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(TokenCountSchema, await response.json());
+
+    assert.equal(body.input_tokens, Math.ceil((system.length + 1 + text.length) / CHARS_PER_TOKEN));
+  });
+
   await check("GET /api/providers/:id hides another account's provider", async () => {
     const response = await fetch(
       new URL(`${providerPaths.detail("00000000-0000-0000-0000-000000000000")}?days=30`, origin),
@@ -1955,6 +2313,78 @@ try {
     );
 
     assert.equal(response.status, 404);
+  });
+
+  await check("GET /api/backup returns a zip of both databases", async () => {
+    const leftovers = readdirSync(tmpdir()).filter((name) => name.startsWith("bandar-backup-"));
+    const health = await getJson("/api/health", HealthSchema, 200);
+    const anonymous = await fetch(new URL(apiPaths.backup, origin));
+
+    assert.equal(anonymous.status, 401);
+
+    const response = await fetch(new URL(apiPaths.backup, origin), { headers: sessionHeaders() });
+
+    if (response.status !== 200) {
+      const body = await response.text();
+
+      // The cause lands on the server stderr; give the reader a moment to collect it.
+      await Bun.sleep(250);
+
+      throw new Error(
+        `the route answered ${String(response.status)}: ${body}\n` +
+          `server stderr: ${first.errors().slice(-1500)}`,
+      );
+    }
+
+    assert.match(contentType(response), /^application\/zip/);
+    assert.match(
+      response.headers.get("content-disposition") ?? "",
+      /^attachment; filename="bandar-backup-[0-9.]+-[0-9]{8}T[0-9]{6}Z[.]zip"$/u,
+    );
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const archive = join(workDir, "backup.zip");
+
+    writeFileSync(archive, bytes);
+
+    const members = unzip(bytes);
+
+    assert.deepEqual(
+      members.map((member) => member.name),
+      ["bandar.db", "bandar.duckdb", "manifest.json"],
+    );
+
+    const manifest = v.parse(
+      BackupManifestSchema,
+      JSON.parse(new TextDecoder().decode(unzipMember(members, "manifest.json"))),
+    );
+
+    assert.equal(manifest.sqliteTag, health.migration);
+    assert.equal(manifest.duckdbTag, health.duckMigration);
+
+    for (const recorded of manifest.members) {
+      const data = unzipMember(members, recorded.name);
+
+      assert.equal(data.byteLength, recorded.size);
+      assert.equal(createHash("sha256").update(data).digest("hex"), recorded.sha256);
+    }
+
+    assert.equal(
+      new TextDecoder().decode(unzipMember(members, "bandar.db").subarray(0, 15)),
+      "SQLite format 3",
+    );
+
+    assert.deepEqual(
+      readdirSync(tmpdir()).filter((name) => name.startsWith("bandar-backup-")),
+      leftovers,
+      "a temporary copy outlived the response",
+    );
+
+    if (Bun.which("unzip") !== null) {
+      const checked = Bun.spawnSync(["unzip", "-t", archive], { stdout: "pipe", stderr: "pipe" });
+
+      assert.equal(checked.exitCode, 0, checked.stderr.toString());
+    }
   });
 
   await check("POST /api/auth/sign-out ends the session", async () => {
@@ -2097,45 +2527,21 @@ async function boot(port = 0, timeoutMs = BOOT_TIMEOUT_MS): Promise<Booted> {
     stderr: "pipe",
   });
 
-  const decoder = new TextDecoder();
-  let log = "";
-  let stderrLog = "";
-
-  const stderrDrained = (async () => {
-    const reader = proc.stderr.getReader();
-
-    for (;;) {
-      const { value, done } = await reader.read();
-
-      if (done) return;
-      stderrLog += decoder.decode(value, { stream: true });
-    }
-  })().catch(() => {});
-
-  const drained = (async () => {
-    const reader = proc.stdout.getReader();
-
-    for (;;) {
-      const { value, done } = await reader.read();
-
-      if (done) return;
-      log += decoder.decode(value, { stream: true });
-    }
-  })().catch(() => {});
+  const log = collect(proc.stdout);
+  const errors = collect(proc.stderr);
 
   const deadline = started + timeoutMs;
 
   while (Date.now() < deadline) {
-    const found = log.match(/listening on (http:\/\/\S+)/)?.[1];
+    const found = log.text().match(/listening on (http:\/\/\S+)/)?.[1];
 
-    if (found) return { origin: found, log: () => log, stop: () => stop(proc) };
+    if (found) return { origin: found, log: log.text, errors: errors.text, stop: () => stop(proc) };
 
     if (proc.exitCode !== null) {
-      await Promise.race([stderrDrained, Bun.sleep(1_000)]);
+      await Promise.race([errors.done, Bun.sleep(1_000)]);
 
-      throw new Error(`the binary exited with ${proc.exitCode}\n${stderrLog}`);
+      throw new Error(`the binary exited with ${proc.exitCode}\n${errors.text()}`);
     }
-
     await Bun.sleep(25);
   }
 
@@ -2146,13 +2552,28 @@ async function boot(port = 0, timeoutMs = BOOT_TIMEOUT_MS): Promise<Booted> {
   // races the kill reports an empty stderr for a child that did print. A descendant that inherited
   // the pipes can hold them open, so each read is bounded and the message reports what arrived.
   await proc.exited;
-  await Promise.race([drained, Bun.sleep(1_000)]);
-  await Promise.race([stderrDrained, Bun.sleep(1_000)]);
+  await Promise.race([log.done, Bun.sleep(1_000)]);
+  await Promise.race([errors.done, Bun.sleep(1_000)]);
 
   throw new Error(
     `the binary never reported a port on ${String(port)} after ${String(waited)}ms ` +
-      `(exit ${String(proc.exitCode)})\nstdout:\n${log}\nstderr:\n${stderrLog}`,
+      `(exit ${String(proc.exitCode)})\nstdout:\n${log.text()}\nstderr:\n${errors.text()}`,
   );
+}
+
+type Collected = { readonly text: () => string; readonly done: Promise<string> };
+
+function collect(stream: ReadableStream<Uint8Array>): Collected {
+  let text = "";
+  const decoder = new TextDecoder();
+
+  const done = (async () => {
+    for await (const chunk of stream) text += decoder.decode(chunk, { stream: true });
+
+    return text;
+  })();
+
+  return { text: () => text, done };
 }
 
 async function stop(proc: Bun.Subprocess): Promise<void> {
@@ -2226,6 +2647,74 @@ async function putJson<T>(
   }
 
   return v.parse(schema, await response.json());
+}
+
+function messageRequest(model: string, stream: boolean, system?: Json): Json {
+  const body = {
+    model,
+    stream,
+    max_tokens: 64,
+    thinking: { type: "enabled", budget_tokens: 1024 },
+    metadata: { user_id: "smoke" },
+    top_k: 5,
+    messages: [{ role: "user", content: `hello from ${model}` }],
+  };
+
+  return system === undefined ? body : { ...body, system };
+}
+
+function postMessages(
+  body: Json,
+  headers: Readonly<Record<string, string>> = bearer(),
+): Promise<Response> {
+  return fetch(new URL("/v1/messages", origin), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+async function readMessageStream(response: Response): Promise<{
+  events: readonly string[];
+  text: string;
+  stopReason: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+}> {
+  const raw = await response.text();
+  const events: string[] = [];
+  let text = "";
+  let stopReason: string | null = null;
+  let inputTokens: number | null = null;
+  let outputTokens: number | null = null;
+
+  for (const frame of raw.split("\n\n")) {
+    if (frame.trim() === "") continue;
+
+    const lines = frame.split("\n");
+    const name = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length);
+    const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length);
+
+    assert.ok(
+      name !== undefined && data !== undefined,
+      `frame without an event line and a data line: ${frame}`,
+    );
+
+    const event = v.parse(MessageEventSchema, JSON.parse(data));
+
+    assert.equal(event.type, name, "the event line disagrees with the data type");
+    events.push(name);
+
+    if (event.type === "content_block_delta") text += event.delta?.text ?? "";
+
+    if (event.type === "message_delta") {
+      stopReason = event.delta?.stop_reason ?? null;
+      inputTokens = event.usage?.input_tokens ?? null;
+      outputTokens = event.usage?.output_tokens ?? null;
+    }
+  }
+
+  return { events, text, stopReason, inputTokens, outputTokens };
 }
 
 function chatRequest(model: string, stream: boolean): Promise<Response> {
@@ -2308,6 +2797,46 @@ async function openAiError(
   response: Response,
 ): Promise<v.InferOutput<typeof OpenAiErrorSchema>["error"]> {
   return v.parse(OpenAiErrorSchema, await response.json()).error;
+}
+
+type ZipMember = { readonly name: string; readonly data: Uint8Array };
+
+/** Walk the central directory, the record an extractor starts from. */
+function unzip(bytes: Uint8Array): readonly ZipMember[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const end = bytes.byteLength - 22;
+  const count = view.getUint16(end + 10, true);
+  const members: ZipMember[] = [];
+  let directory = view.getUint32(end + 16, true);
+
+  for (let index = 0; index < count; index += 1) {
+    const method = view.getUint16(directory + 10, true);
+    const compressed = view.getUint32(directory + 20, true);
+    const nameLength = view.getUint16(directory + 28, true);
+    const extraLength = view.getUint16(directory + 30, true);
+    const commentLength = view.getUint16(directory + 32, true);
+    const local = view.getUint32(directory + 42, true);
+
+    const name = new TextDecoder().decode(
+      bytes.subarray(directory + 46, directory + 46 + nameLength),
+    );
+
+    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    const payload = bytes.subarray(start, start + compressed);
+
+    members.push({ name, data: method === 8 ? new Uint8Array(inflateRawSync(payload)) : payload });
+    directory += 46 + nameLength + extraLength + commentLength;
+  }
+
+  return members;
+}
+
+function unzipMember(members: readonly ZipMember[], name: string): Uint8Array {
+  const found = members.find((member) => member.name === name);
+
+  if (found === undefined) throw new Error(`${name} is not in the archive`);
+
+  return found.data;
 }
 
 function sessionHeaders(): Record<string, string> {
@@ -2426,7 +2955,8 @@ function startUpstream() {
     port: 0,
     async fetch(request) {
       const url = new URL(request.url);
-      const body = v.safeParse(v.object({ stream: v.optional(v.boolean()) }), await request.json());
+      const raw: unknown = await request.json();
+      const body = v.safeParse(v.object({ stream: v.optional(v.boolean()) }), raw);
       const stream = body.success ? (body.output.stream ?? false) : false;
 
       if (url.pathname === "/openai/chat/completions") {
@@ -2435,6 +2965,10 @@ function startUpstream() {
         }
 
         if (!stream) {
+          const probe = v.safeParse(UpstreamChatSchema, raw);
+
+          if (probe.success) upstreamChats.push(probe.output);
+
           return Response.json({
             choices: [
               {

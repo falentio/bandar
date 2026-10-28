@@ -9,7 +9,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Provider, ProviderAuthMode, ProviderCredential } from "../../shared/providers";
+import type {
+  Provider,
+  ProviderAuthMode,
+  ProviderCredential,
+  ProviderCredentialProbe,
+} from "../../shared/providers";
 import { useProviders } from "../use-providers";
 import { AddCredentialDialog } from "./credential-dialog";
 import { HealthBadge } from "./health-badge";
@@ -32,6 +37,8 @@ export function CredentialsCard({
 }) {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [testing, setTesting] = useState<readonly string[]>([]);
+  const [probes, setProbes] = useState<Readonly<Record<string, ProviderCredentialProbe>>>({});
   const copy = cardCopy(provider);
 
   const current = provider.credentials.map((credential) => credential.id);
@@ -49,6 +56,16 @@ export function CredentialsCard({
 
   const remove = async (credentialId: string) => {
     if (await providers.removeCredential(provider.id, credentialId)) onChanged();
+  };
+
+  const test = async (credentialId: string) => {
+    setTesting((running) => running.concat(credentialId));
+
+    const probe = await providers.testCredential(provider.id, credentialId);
+
+    setTesting((running) => running.filter((id) => id !== credentialId));
+
+    if (probe !== null) setProbes((current) => ({ ...current, [credentialId]: probe }));
   };
 
   return (
@@ -80,55 +97,69 @@ export function CredentialsCard({
           </p>
         ) : (
           <ol className="divide-y rounded-lg border">
-            {provider.credentials.map((credential, index) => (
-              <li key={credential.id} className="px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="w-6 shrink-0 text-xs tabular-nums text-muted-foreground">
-                    #{credential.priority}
-                  </span>
-                  <span className="text-sm font-medium">{nameOf(credential)}</span>
-                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
-                    {AUTH_MODE_LABELS[credential.authMode]}
-                  </span>
-                  <HealthBadge
-                    failures={credential.failures}
-                    flaggedUntil={credential.flaggedUntil}
-                  />
-                  <span className="ms-auto flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={`Move ${nameOf(credential)} up`}
-                      disabled={providers.pending || index === 0}
-                      onClick={() => void move(index, -1)}
-                    >
-                      <ArrowUpIcon />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={`Move ${nameOf(credential)} down`}
-                      disabled={providers.pending || index === provider.credentials.length - 1}
-                      onClick={() => void move(index, 1)}
-                    >
-                      <ArrowDownIcon />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={`Remove ${nameOf(credential)}`}
-                      disabled={providers.pending}
-                      onClick={() => {
-                        if (window.confirm(`Remove ${nameOf(credential)} from ${provider.name}?`))
-                          void remove(credential.id);
-                      }}
-                    >
-                      <XIcon />
-                    </Button>
-                  </span>
-                </div>
-              </li>
-            ))}
+            {provider.credentials.map((credential, index) => {
+              const probe = probes[credential.id];
+              const running = testing.includes(credential.id);
+
+              return (
+                <li key={credential.id} className="px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="w-6 shrink-0 text-xs tabular-nums text-muted-foreground">
+                      #{credential.priority}
+                    </span>
+                    <span className="text-sm font-medium">{nameOf(credential)}</span>
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
+                      {AUTH_MODE_LABELS[credential.authMode]}
+                    </span>
+                    <HealthBadge
+                      failures={credential.failures}
+                      flaggedUntil={credential.flaggedUntil}
+                    />
+                    <span className="ms-auto flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        disabled={running}
+                        onClick={() => void test(credential.id)}
+                      >
+                        {running ? "Testing…" : "Test"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Move ${nameOf(credential)} up`}
+                        disabled={providers.pending || index === 0}
+                        onClick={() => void move(index, -1)}
+                      >
+                        <ArrowUpIcon />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Move ${nameOf(credential)} down`}
+                        disabled={providers.pending || index === provider.credentials.length - 1}
+                        onClick={() => void move(index, 1)}
+                      >
+                        <ArrowDownIcon />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`Remove ${nameOf(credential)}`}
+                        disabled={providers.pending}
+                        onClick={() => {
+                          if (window.confirm(`Remove ${nameOf(credential)} from ${provider.name}?`))
+                            void remove(credential.id);
+                        }}
+                      >
+                        <XIcon />
+                      </Button>
+                    </span>
+                  </div>
+                  {probe === undefined ? null : <ProbeLine probe={probe} />}
+                </li>
+              );
+            })}
           </ol>
         )}
 
@@ -167,6 +198,23 @@ export function CredentialsCard({
         onOpenChange={setAdding}
       />
     </Card>
+  );
+}
+
+function ProbeLine({ probe }: { probe: ProviderCredentialProbe }) {
+  return (
+    <p className="mt-1 ps-8 text-xs">
+      <span className={probe.ok ? "font-medium" : "font-medium text-destructive"}>
+        {probe.ok ? "ok" : "failed"}
+      </span>
+      <span className="text-muted-foreground">
+        {` · ${probe.latencyMs} ms`}
+        {probe.status === null ? "" : ` · ${probe.status}`}
+      </span>
+      {probe.error === null ? null : (
+        <span className="mt-0.5 block break-words text-muted-foreground">{probe.error}</span>
+      )}
+    </p>
   );
 }
 

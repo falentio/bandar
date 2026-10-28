@@ -1,11 +1,21 @@
 import { Elysia } from "elysia";
 import * as v from "valibot";
 import { GatewayRequestSchema, type ModelList } from "../shared/chat";
+import {
+  MessagesRequestSchema,
+  normalizeMessages,
+  promptText,
+  type MessagesRequest,
+  type NormalizedMessages,
+} from "../shared/messages";
 import type { Auth, VerifiedKey } from "./auth";
-import { listModelRefs } from "./router/resolve";
+import type { CanonicalMessage, CanonicalRequest } from "./providers/types";
+import { anthropicError, anthropicWire, estimateInputTokens } from "./router/anthropic-wire";
 import { runChat, type ChatDeps } from "./router/chat";
-import type { CanonicalRequest } from "./providers/types";
+import { listModelRefs } from "./router/resolve";
 import { openAiError } from "./router/wire";
+
+const MESSAGES_PATH = "/v1/messages";
 
 export type GatewayDeps = ChatDeps & {
   readonly auth: Auth;
@@ -14,11 +24,18 @@ export type GatewayDeps = ChatDeps & {
 export function createGateway(deps: GatewayDeps) {
   return new Elysia({ prefix: "/v1" })
     .onError(({ code, error, path }) => {
-      if (code === "NOT_FOUND") return openAiError(404, `no route for ${path}`, "not_found");
+      const anthropic = path.startsWith(MESSAGES_PATH);
+
+      if (code === "NOT_FOUND")
+        return anthropic
+          ? anthropicError(404, `no route for ${path}`)
+          : openAiError(404, `no route for ${path}`, "not_found");
 
       console.error("gateway: unhandled error", error);
 
-      return openAiError(500, "unexpected server error", "internal", "server_error");
+      return anthropic
+        ? anthropicError(500, "unexpected server error")
+        : openAiError(500, "unexpected server error", "internal", "server_error");
     })
     .get("/models", async ({ request }) => {
       const caller = await callerOf(deps.auth, request);
@@ -76,7 +93,72 @@ export function createGateway(deps: GatewayDeps) {
         stream: input.stream,
         signal: request.signal,
       });
+    })
+    .post("/messages", async ({ body, request }) => {
+      const parsed = v.safeParse(MessagesRequestSchema, body);
+
+      if (!parsed.success)
+        return anthropicError(422, parsed.issues[0]?.message ?? "request did not match the schema");
+
+      const caller = await callerOf(deps.auth, request);
+
+      if (caller === null) return anthropicUnauthorized();
+
+      const normalized = normalizeMessages(parsed.output);
+
+      if (!normalized.ok)
+        return anthropicError(normalized.rejection.status, normalized.rejection.message);
+
+      return runChat(deps, {
+        userId: caller.userId,
+        apiKeyId: caller.keyId,
+        ref: parsed.output.model,
+        request: canonicalRequestOf(parsed.output, normalized.value),
+        stream: parsed.output.stream ?? false,
+        signal: request.signal,
+        wire: anthropicWire,
+      });
+    })
+    .post("/messages/count_tokens", async ({ body, request }) => {
+      const parsed = v.safeParse(MessagesRequestSchema, body);
+
+      if (!parsed.success)
+        return anthropicError(422, parsed.issues[0]?.message ?? "request did not match the schema");
+
+      const caller = await callerOf(deps.auth, request);
+
+      if (caller === null) return anthropicUnauthorized();
+
+      const normalized = normalizeMessages(parsed.output);
+
+      if (!normalized.ok)
+        return anthropicError(normalized.rejection.status, normalized.rejection.message);
+
+      return Response.json(
+        { input_tokens: estimateInputTokens(promptText(normalized.value)) },
+        { headers: { "cache-control": "no-store" } },
+      );
     });
+}
+
+function canonicalRequestOf(
+  request: MessagesRequest,
+  normalized: NormalizedMessages,
+): CanonicalRequest {
+  const messages: CanonicalMessage[] = [];
+
+  if (normalized.system !== "") messages.push({ role: "system", content: normalized.system });
+
+  for (const message of normalized.messages)
+    messages.push({ role: message.role, content: message.text });
+
+  return {
+    messages,
+    temperature: request.temperature,
+    topP: request.top_p,
+    maxTokens: request.max_tokens,
+    stop: request.stop_sequences,
+  };
 }
 
 async function callerOf(auth: Auth, request: Request): Promise<VerifiedKey | null> {
@@ -110,4 +192,8 @@ function unauthorized(): Response {
     "unauthorized",
     "authentication_error",
   );
+}
+
+function anthropicUnauthorized(): Response {
+  return anthropicError(401, "send an API key as x-api-key or Authorization: Bearer <key>");
 }

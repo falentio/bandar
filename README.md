@@ -436,6 +436,31 @@ semicolons out of string literals in a migration.
 
 `GET /api/health` reports both current tags.
 
+## Backup
+
+One zip holds both databases and a manifest:
+
+```sh
+bandar backup --out /srv/backups            # a directory takes the default name
+bandar backup --out /srv/backups/nightly.zip
+```
+
+The default name is `bandar-backup-<version>-<YYYYMMDDTHHMMSSZ>.zip` in the
+current directory. `GET /api/backup` streams the same archive to a signed-in
+session or a gateway key, as `application/zip`. Members are `bandar.db`,
+`bandar.duckdb`, and `manifest.json`, which carries the version, the two
+migration tags, and the size and sha256 of each database.
+
+The SQLite member is a `VACUUM INTO` snapshot and the DuckDB member is
+checkpointed first, so both read through their write-ahead logs. Stop the server
+before running the command: only one process may open DuckDB for writing, and a
+checkpoint needs that. To restore, unzip and point the binary at the copies:
+
+```sh
+unzip nightly.zip -d /srv/bandar
+BANDAR_DB=/srv/bandar/bandar.db BANDAR_DUCKDB=/srv/bandar/bandar.duckdb bandar serve
+```
+
 ## Commands
 
 | Script                   | What it does                                                                               |
@@ -451,7 +476,7 @@ semicolons out of string literals in a migration.
 | `bun run check`          | Format, lint, and type-check.                                                              |
 | `bun run check:fix`      | The same with fixes.                                                                       |
 | `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                                 |
-| `bun run smoke`          | Boot the compiled binary and run 71 end-to-end checks against fake upstreams.              |
+| `bun run smoke`          | Boot the compiled binary and run 72 end-to-end checks against fake upstreams.              |
 | `bun run verify`         | `check`, `test`, `build`, `smoke`.                                                         |
 | `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                              |
 | `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                                 |

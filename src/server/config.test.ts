@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { ConfigError, parseConfig } from "./config";
 
@@ -29,5 +31,22 @@ describe("config", () => {
     });
 
     expect(config.port).toBeGreaterThan(0);
+  });
+
+  test("BANDAR_CONFIG_DIR defaults under the home directory", () => {
+    expect(parseConfig({}).configDir).toBe(join(homedir(), ".config", "bandar"));
+  });
+
+  test("BANDAR_CONFIG_DIR is used as given", () => {
+    expect(parseConfig({ BANDAR_CONFIG_DIR: "/srv/bandar" }).configDir).toBe("/srv/bandar");
+  });
+
+  test("a blank or relative BANDAR_CONFIG_DIR fails at boot", () => {
+    for (const value of ["", "bandar", ".config/bandar"]) {
+      const attempt = () => parseConfig({ BANDAR_CONFIG_DIR: value });
+
+      expect(attempt).toThrow(ConfigError);
+      expect(attempt).toThrow("BANDAR_CONFIG_DIR: must be an absolute path");
+    }
   });
 });

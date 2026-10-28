@@ -314,6 +314,7 @@ throw `UpstreamError` with a kind the gateway maps to an HTTP status.
 | `BANDAR_WEB_PORT`            | `5173`                                        | Vite dev port. Not read by the compiled binary.                                            |
 | `BANDAR_DB`                  | `./bandar.db`                                 | SQLite metadata path. Created on first boot.                                               |
 | `BANDAR_DUCKDB`              | `./bandar.duckdb`                             | DuckDB analytics path. Created on first boot.                                              |
+| `BANDAR_CONFIG_DIR`          | `~/.config/bandar`                            | Holds `install.json`: how this copy was installed, its version, and its binary path.       |
 | `BANDAR_AUTH_URL`            | `http://localhost:<BANDAR_PORT>`              | better-auth base URL. In dev, set it to the Vite origin.                                   |
 | `BANDAR_AUTH_SECRET`         | random per boot                               | Signs sessions and derives the credential encryption key. Set it in production.            |
 | `BANDAR_TRUSTED_ORIGINS`     | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated origins allowed to POST to `/api/auth/*`.                                  |

@@ -759,9 +759,7 @@ function quoteArgument(argument: string): string {
 
 function readConfigDirectory(env: Env): ConfigDirectory {
   try {
-    // A random secret and its warning have nothing to do with updating, so hand the parser a
-    // placeholder: it stays the one reader of BANDAR_CONFIG_DIR.
-    const config = parseConfig({ ...env, BANDAR_AUTH_SECRET: "update" });
+    const config = parseConfig(env);
 
     return { kind: "dir", directory: config.configDir };
   } catch (error) {

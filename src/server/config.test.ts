@@ -275,6 +275,31 @@ describe("the settings file", () => {
     expect(attempt).toThrow("BANDAR_HOME: must be an absolute path");
   });
 
+  test("a rejected environment touches nothing in the data directory", () => {
+    const asked: string[] = [];
+    const wrote: string[] = [];
+
+    const attempt = () =>
+      loadConfigReport(
+        { BANDAR_HOME: home, BANDAR_PORT: "99999" },
+        {
+          read: (target) => {
+            asked.push(target);
+
+            return "{}";
+          },
+          write: (target) => {
+            wrote.push(target);
+          },
+        },
+      );
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("BANDAR_PORT");
+    expect(asked).toEqual([]);
+    expect(wrote).toEqual([]);
+  });
+
   test("the auth-secret warning fires once a boot, and only while the secret is unset", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 

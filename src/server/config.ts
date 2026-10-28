@@ -137,18 +137,13 @@ function resolveHome(env: Record<string, string | undefined>, mode: RunMode): st
   return home;
 }
 
+type Environment = v.InferOutput<typeof ConfigSchema>;
+
 /**
- * Fills the config from the environment first, then the settings file, then the built-in default,
- * and reports which of the three each server value came from. It stays silent: backup, update, and
- * install-service parse the environment without starting a session, so the warning about a
- * generated secret belongs to loadConfigReport.
+ * The environment, parsed once. A rejected value fails here, before the settings read writes the
+ * schema into the data directory.
  */
-function buildConfig(
-  env: Record<string, string | undefined>,
-  home: string,
-  mode: RunMode,
-  settings: Settings,
-): BuiltConfig {
+function parseEnv(env: Record<string, string | undefined>): Environment {
   // A blank value means "unset" for every variable but BANDAR_CONFIG_DIR: install.sh writes its
   // manifest under the config directory it was given, so a blank one has to fail, not fall back.
   const given = Object.fromEntries(
@@ -169,18 +164,32 @@ function buildConfig(
     throw new ConfigError(issues);
   }
 
-  const values = parsed.output;
+  return parsed.output;
+}
+
+/**
+ * Fills the config from the environment first, then the settings file, then the built-in default,
+ * and reports which of the three each server value came from. It stays silent: backup, update, and
+ * install-service parse the environment without starting a session, so the warning about a
+ * generated secret belongs to loadConfigReport.
+ */
+function buildConfig(
+  environment: Environment,
+  home: string,
+  mode: RunMode,
+  settings: Settings,
+): BuiltConfig {
   const server = settings.server;
 
   const environmentOrigins =
-    values.BANDAR_TRUSTED_ORIGINS === undefined
+    environment.BANDAR_TRUSTED_ORIGINS === undefined
       ? undefined
-      : parseOrigins(values.BANDAR_TRUSTED_ORIGINS);
+      : parseOrigins(environment.BANDAR_TRUSTED_ORIGINS);
 
-  const host = resolve(values.BANDAR_HOST, server?.host, DEFAULT_HOST);
-  const port = resolve(values.BANDAR_PORT, server?.port, DEFAULT_API_PORT);
+  const host = resolve(environment.BANDAR_HOST, server?.host, DEFAULT_HOST);
+  const port = resolve(environment.BANDAR_PORT, server?.port, DEFAULT_API_PORT);
 
-  const authUrl = resolve(values.BANDAR_AUTH_URL, server?.authUrl, authUrlForPort(port.value));
+  const authUrl = resolve(environment.BANDAR_AUTH_URL, server?.authUrl, authUrlForPort(port.value));
 
   const trustedOrigins = resolve(
     environmentOrigins,
@@ -194,9 +203,9 @@ function buildConfig(
       port: port.value,
       databasePath: join(home, DATABASE_FILE),
       duckdbPath: join(home, DUCKDB_FILE),
-      configDir: values.BANDAR_CONFIG_DIR,
+      configDir: environment.BANDAR_CONFIG_DIR,
       authUrl: authUrl.value,
-      authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
+      authSecret: environment.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
       trustedOrigins: trustedOrigins.value,
     },
     sources: {
@@ -282,7 +291,9 @@ export function parseConfig(
   env: Record<string, string | undefined>,
   mode: RunMode = detectRunMode(),
 ): Config {
-  return buildConfig(env, resolveHome(env, mode), mode, {}).config;
+  const home = resolveHome(env, mode);
+
+  return buildConfig(parseEnv(env), home, mode, {}).config;
 }
 
 /**
@@ -296,13 +307,14 @@ export function loadConfigReport(
   mode: RunMode = detectRunMode(),
 ): ConfigReport {
   const home = resolveHome(env, mode);
+  const environment = parseEnv(env);
   const report = readSettings(home, io);
 
   if (report.kind === "invalid")
     throw new ConfigError([`${report.path}: ${report.reason}`], "invalid configuration");
 
   const { config, sources } = buildConfig(
-    env,
+    environment,
     home,
     mode,
     report.kind === "ok" ? report.settings : {},

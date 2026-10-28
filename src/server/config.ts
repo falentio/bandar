@@ -248,7 +248,7 @@ function parseOrigins(value: string): readonly string[] {
 
 /**
  * The origins a browser can reach a fresh install from: the auth URL's own origin first, since that
- * the public face, then the loopback on the listening port. The dev web server runs on its own port,
+ * is the public face, then the loopback on the listening port. The dev web server runs on its own port,
  * so only a development run can sign in through it.
  */
 function defaultTrustedOrigins(

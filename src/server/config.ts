@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
-import { readSettings, type Settings } from "./settings";
+import { HttpUrlSchema, readSettings, type Settings } from "./settings";
 
 export type Config = {
   readonly host: string;
@@ -92,7 +92,7 @@ const ConfigSchema = v.object({
     v.pipe(v.string(), v.trim(), v.check(isAbsolute, "must be an absolute path")),
     DEFAULT_CONFIG_DIR,
   ),
-  BANDAR_AUTH_URL: v.optional(v.pipe(v.string(), v.trim(), v.url())),
+  BANDAR_AUTH_URL: v.optional(HttpUrlSchema),
   BANDAR_AUTH_SECRET: v.optional(v.pipe(v.string(), v.minLength(1))),
   BANDAR_TRUSTED_ORIGINS: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   // Providers read these at request time, so the shape is checked here instead.

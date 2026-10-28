@@ -7,6 +7,18 @@ export function modelLabelOf(model: {
   return model.alias ?? model.upstreamModel;
 }
 
+export function modelSecondaryOf(model: {
+  readonly slug: string;
+  readonly ref: string;
+  readonly upstreamModel: string;
+  readonly alias: string | null;
+}): string | null {
+  const label = modelLabelOf(model);
+  const secondary = model.slug === model.ref ? model.upstreamModel : model.slug;
+
+  return secondary === label ? null : secondary;
+}
+
 export type ModelLabels = {
   readonly bySlug: ReadonlyMap<string, string>;
   readonly byId: ReadonlyMap<string, string>;

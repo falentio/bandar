@@ -31,7 +31,7 @@ import {
   type ProviderModel,
   type ProviderModelRefresh,
 } from "../../shared/providers";
-import { modelLabelOf, modelLabels } from "../model-labels";
+import { modelLabelOf, modelLabels, modelSecondaryOf } from "../model-labels";
 import { ModelName } from "../model-name";
 import {
   formatExactTokens,
@@ -693,6 +693,8 @@ export function ModelRow({
   };
 
   const wire = COMPAT_LABELS[compatOf(model)];
+  const label = modelLabelOf(model);
+  const secondary = modelSecondaryOf(model);
 
   return (
     <li className="group/model px-3 py-2.5 text-sm">
@@ -701,14 +703,14 @@ export function ModelRow({
           type="button"
           onClick={() => openEditor(true)}
           disabled={pending}
-          aria-label={`Edit ${modelLabelOf(model)}`}
+          aria-label={`Edit ${label}`}
           className="min-w-0 flex-1 rounded py-0.5 text-left transition-colors duration-150 ease-out hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50"
         >
           <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="truncate font-medium">{modelLabelOf(model)}</span>
-            {modelLabelOf(model) === model.upstreamModel ? null : (
+            <span className="truncate font-medium">{label}</span>
+            {secondary === null ? null : (
               <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-                {model.upstreamModel}
+                {secondary}
               </code>
             )}
           </span>
@@ -716,7 +718,7 @@ export function ModelRow({
         <div className="-me-1 flex shrink-0 items-center opacity-100 transition-opacity duration-150 ease-out sm:opacity-0 sm:group-hover/model:opacity-100 sm:focus-within:opacity-100">
           <button
             type="button"
-            aria-label={`Edit ${modelLabelOf(model)}`}
+            aria-label={`Edit ${label}`}
             disabled={pending}
             onClick={() => openEditor(true)}
             className="rounded p-1.5 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
@@ -725,10 +727,10 @@ export function ModelRow({
           </button>
           <button
             type="button"
-            aria-label={`Remove ${modelLabelOf(model)}`}
+            aria-label={`Remove ${label}`}
             disabled={pending}
             onClick={() => {
-              if (window.confirm(`Remove ${modelLabelOf(model)}?`)) onRemove();
+              if (window.confirm(`Remove ${label}?`)) onRemove();
             }}
             className="rounded p-1.5 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
           >

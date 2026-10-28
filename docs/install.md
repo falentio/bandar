@@ -1,27 +1,64 @@
 # Install bandar
 
-bandar ships prebuilt binaries for Linux and Windows on x64 and arm64. The installer
-downloads the asset for the running platform, checks the published sha256, moves the
-binary into place, and records where it came from so `bandar update` can replace it later.
+bandar releases live in a private repository. The installer downloads the asset for the
+running platform, checks the published sha256, moves the binary into place, and records
+where it came from so `bandar update` can replace it later.
+
+A token needs read access to the `falentio/bandar` releases. The installer reads one from
+`BANDAR_GITHUB_TOKEN`, then `GH_TOKEN`, then `GITHUB_TOKEN`. The first variable that is set
+wins, even when a later one holds a better token.
 
 ## One-liner
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | sh
+token=$(gh auth token)
+curl -fsSL -H "Authorization: Bearer $token" \
+  https://raw.githubusercontent.com/falentio/bandar/main/install.sh | BANDAR_GITHUB_TOKEN="$token" sh
 ```
 
-Pin a version, install under your home directory, and register a user service:
+The token appears twice because the repository is private: once to read the installer, once
+to read the release. Any of the three variables works on the right of the pipe:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh \
-  | BANDAR_VERSION=0.1.0 BANDAR_INSTALL_DIR="$HOME/.local/bin" BANDAR_SCOPE=user sh
+# BANDAR_GITHUB_TOKEN
+curl -fsSL -H "Authorization: Bearer $TOKEN" \
+  https://raw.githubusercontent.com/falentio/bandar/main/install.sh | BANDAR_GITHUB_TOKEN="$TOKEN" sh
+
+# GH_TOKEN, filled from the GitHub CLI
+curl -fsSL -H "Authorization: Bearer $(gh auth token)" \
+  https://raw.githubusercontent.com/falentio/bandar/main/install.sh | GH_TOKEN="$(gh auth token)" sh
+
+# GITHUB_TOKEN, as a CI job already exports it
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/falentio/bandar/main/install.sh | GITHUB_TOKEN="$GITHUB_TOKEN" sh
 ```
 
-The script reads no input, so it runs the same from a pipe and from a checkout:
+From a checkout, the pipe is only needed for the token variable:
 
 ```sh
-./install.sh
+BANDAR_GITHUB_TOKEN="$TOKEN" ./install.sh
 ```
+
+## How the installer reaches the release
+
+With a token, the installer reads `GET /repos/falentio/bandar/releases/tags/v<version>`, or
+`/releases/latest` when `BANDAR_VERSION` is unset. It takes the `url` of the matching entry
+in `assets[]` and downloads that URL with `Accept: application/octet-stream`. The API asset
+URL is the route that honours the header for a private repository: the
+`releases/download/<asset>` URL returns 404 with or without a token.
+
+Without a token, the installer tries
+`https://github.com/falentio/bandar/releases/download/v<version>/<asset>`. A 404 prints one
+line that names the private repository and the three variables, then exits 1.
+
+`BANDAR_RELEASE_BASE_URL` replaces both routes with a directory that holds the assets and
+their `.sha256` siblings, and it needs no token. A mirror or a test server can stand in for
+GitHub that way.
+
+The token travels only in the `Authorization` header. It is never printed, never placed in a
+URL, and never written to `install.json`. A curl that advertises `--config` reads the header
+from a mode-600 config file, so the token stays out of the process arguments. An older curl,
+and wget, receive it as a header argument instead.
 
 ## What the installer writes
 
@@ -40,15 +77,18 @@ Nothing is written outside those two directories, and the installer never calls 
 
 ## Environment variables
 
-| Variable                  | Default                                                        | Meaning                                                                                                                 |
-| ------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `BANDAR_VERSION`          | the latest release                                             | Version to install. A leading `v` is allowed.                                                                           |
-| `BANDAR_INSTALL_DIR`      | `/usr/local/bin`                                               | Directory that receives the binary. Created when missing.                                                               |
-| `BANDAR_SCOPE`            | unset                                                          | `user` or `system`. After the install, run `bandar install-service --scope <scope>`.                                    |
-| `BANDAR_CONFIG_DIR`       | `~/.config/bandar`                                             | Directory that receives `install.json`.                                                                                 |
-| `BANDAR_SERVICE_TIMEOUT`  | `30`                                                           | Seconds the service step may run before the installer gives up and exits 0.                                             |
-| `BANDAR_RELEASE_BASE_URL` | the GitHub release for the resolved version                    | Directory that holds the assets and their `.sha256` siblings. Include the version segment when pointing it at a mirror. |
-| `BANDAR_RELEASE_API_URL`  | `https://api.github.com/repos/falentio/bandar/releases/latest` | JSON that names the latest tag. A mirror or an offline test server can replace it.                                      |
+| Variable                  | Default                                                        | Meaning                                                                                                                      |
+| ------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `BANDAR_VERSION`          | the latest release                                             | Version to install. A leading `v` is allowed.                                                                                |
+| `BANDAR_INSTALL_DIR`      | `/usr/local/bin`                                               | Directory that receives the binary. Created when missing.                                                                    |
+| `BANDAR_SCOPE`            | unset                                                          | `user` or `system`. After the install, run `bandar install-service --scope <scope>`.                                         |
+| `BANDAR_CONFIG_DIR`       | `~/.config/bandar`                                             | Directory that receives `install.json`.                                                                                      |
+| `BANDAR_SERVICE_TIMEOUT`  | `30`                                                           | Seconds the service step may run before the installer gives up and exits 0.                                                  |
+| `BANDAR_GITHUB_TOKEN`     | unset                                                          | GitHub token, highest precedence.                                                                                            |
+| `GH_TOKEN`                | unset                                                          | GitHub token, read when `BANDAR_GITHUB_TOKEN` is unset.                                                                      |
+| `GITHUB_TOKEN`            | unset                                                          | GitHub token, read when neither of the others is set.                                                                        |
+| `BANDAR_RELEASE_BASE_URL` | the GitHub release for the resolved version                    | Directory that holds the assets and their `.sha256` siblings. Include the version. Overrides every route and needs no token. |
+| `BANDAR_RELEASE_API_URL`  | `https://api.github.com/repos/falentio/bandar/releases/latest` | Latest-release JSON. The tags endpoint is derived from it by replacing `latest`.                                             |
 
 The platform pair comes from `uname`. Any pair other than Linux or Windows on x64 or
 arm64 exits 1 with one line before anything is downloaded.
@@ -56,24 +96,30 @@ arm64 exits 1 with one line before anything is downloaded.
 ## Verify a download by hand
 
 Assets are named `bandar-<version>-<os>-<arch>`, with `.exe` on Windows only. Each has a
-sibling `.sha256` file whose line is `<hex>  <filename>`.
+sibling `.sha256` file whose line is `<hex>  <filename>`. Download both through the API
+asset URLs that `assets[]` lists, keeping the asset names:
 
 ```sh
-curl -fsSLO https://github.com/falentio/bandar/releases/download/v0.1.0/bandar-0.1.0-linux-x64
-curl -fsSLO https://github.com/falentio/bandar/releases/download/v0.1.0/bandar-0.1.0-linux-x64.sha256
+token=$(gh auth token)
+curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" \
+  -o bandar-0.1.0-linux-x64 <asset url>
+curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" \
+  -o bandar-0.1.0-linux-x64.sha256 <sha256 asset url>
 sha256sum -c bandar-0.1.0-linux-x64.sha256
 ```
 
-On macOS, where `sha256sum` is absent, use `shasum -a 256 -c`. The installer accepts
-either tool and refuses to install when it finds neither.
+On macOS, where `sha256sum` is absent, use `shasum -a 256 -c`. The installer accepts either
+tool and refuses to install when it finds neither.
 
 ## When `/usr/local/bin` is not writable
 
 The installer prints the command to rerun and exits 1 without writing the binary:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh \
-  | sudo BANDAR_INSTALL_DIR="/usr/local/bin" BANDAR_CONFIG_DIR="$HOME/.config/bandar" sh
+curl -fsSL -H "Authorization: Bearer $TOKEN" \
+  https://raw.githubusercontent.com/falentio/bandar/main/install.sh \
+  | sudo BANDAR_INSTALL_DIR="/usr/local/bin" BANDAR_CONFIG_DIR="$HOME/.config/bandar" \
+    BANDAR_GITHUB_TOKEN="$TOKEN" sh
 ```
 
 Pass `BANDAR_CONFIG_DIR` through `sudo` as well. `sudo` sets `HOME` to root's, so a

@@ -22,12 +22,12 @@ import {
   ProviderOAuthStartSchema,
   ProviderParamsSchema,
 } from "../shared/providers";
-import { defaultModelSlug } from "../shared/slugs";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
 import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import { createBackup } from "./backup";
+import { isUniqueViolation } from "./db/client";
 import type { MigrationResult } from "./db/migrate";
 import { readCooldowns } from "./cooldowns";
 import type { DuckDb } from "./duck/client";
@@ -459,15 +459,6 @@ export function createApi(deps: ApiDeps) {
           return failure(error.code, error.message);
         }
 
-        if (error instanceof Error && isUniqueViolation(error)) {
-          const provider = await readProvider(deps.providers, caller.userId, id);
-          const slug = input.slug ?? defaultModelSlug(provider?.slug ?? "", input.upstreamModel);
-
-          set.status = 409;
-
-          return failure("conflict", `the address ${slug} is taken`);
-        }
-
         throw error;
       }
     })
@@ -775,10 +766,6 @@ function providerRuleStatus(error: ProviderRuleError): number {
   if (error.code === "built_in") return 400;
 
   return error.code === "conflict" ? 409 : 422;
-}
-
-function isUniqueViolation(error: Error): boolean {
-  return error.message.includes("UNIQUE constraint failed");
 }
 
 function failure(code: string, message: string, issues: readonly string[] = []): ApiErrorBody {

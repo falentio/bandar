@@ -8,6 +8,10 @@ export type Db = BunSQLiteDatabase<typeof schema>;
 
 export type DatabaseHandle = { readonly sqlite: Database; readonly db: Db };
 
+export function isUniqueViolation(error: Error): boolean {
+  return error.message.includes("UNIQUE constraint failed");
+}
+
 export function openDatabase(path: string): DatabaseHandle {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
 

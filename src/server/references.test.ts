@@ -419,7 +419,7 @@ describe("provider models", () => {
 
     await expect(
       addProviderModel(deps, "user-1", beta.id, { upstreamModel: "x", slug: "alpha/m" }),
-    ).rejects.toThrow(/UNIQUE constraint failed/);
+    ).rejects.toMatchObject({ code: "conflict", message: "the address alpha/m is taken" });
   });
 
   test("a provider ref still resolves after a model takes a custom address", async () => {

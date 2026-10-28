@@ -14,7 +14,7 @@ import {
 } from "../../shared/providers";
 import { availableSlug, defaultModelSlug, providerRefOf, slugify } from "../../shared/slugs";
 import { parseCredential, type Credential } from "../credential";
-import type { Db } from "../db/client";
+import { isUniqueViolation, type Db } from "../db/client";
 import { providerCredentials, providerModels, providers } from "../db/schema";
 import type { Sealer } from "../seal";
 import { renumberTagPriorities } from "../tags";
@@ -95,7 +95,6 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
     credentials.set(row.providerId, list);
   }
 
-  // A model's ref is shadowed when another model's address already names it.
   const enabledSlugHolders = new Map(
     modelRows.filter((row) => row.enabled).map((row) => [row.slug, row.id]),
   );
@@ -297,23 +296,33 @@ export async function addProviderModel(
     );
   }
 
-  deps.db
-    .insert(providerModels)
-    .values({
-      id: crypto.randomUUID(),
-      userId,
-      providerId,
-      slug: model.slug ?? defaultModelSlug(providerSlug, model.upstreamModel),
-      alias: model.alias ?? null,
-      upstreamModel: model.upstreamModel,
-      compat: null,
-      inputPricePerMtok: model.inputPricePerMtok ?? null,
-      cacheInputPricePerMtok: model.cacheInputPricePerMtok ?? null,
-      outputPricePerMtok: model.outputPricePerMtok ?? null,
-      enabled: true,
-      createdAt: new Date(),
-    })
-    .run();
+  const slug = model.slug ?? defaultModelSlug(providerSlug, model.upstreamModel);
+
+  try {
+    deps.db
+      .insert(providerModels)
+      .values({
+        id: crypto.randomUUID(),
+        userId,
+        providerId,
+        slug,
+        alias: model.alias ?? null,
+        upstreamModel: model.upstreamModel,
+        compat: null,
+        inputPricePerMtok: model.inputPricePerMtok ?? null,
+        cacheInputPricePerMtok: model.cacheInputPricePerMtok ?? null,
+        outputPricePerMtok: model.outputPricePerMtok ?? null,
+        enabled: true,
+        createdAt: new Date(),
+      })
+      .run();
+  } catch (error) {
+    if (error instanceof Error && isUniqueViolation(error)) {
+      throw new ProviderRuleError(`the address ${slug} is taken`, "conflict");
+    }
+
+    throw error;
+  }
 
   return findProvider(deps, userId, providerId);
 }

@@ -29,6 +29,11 @@ export function isViewPath(path: string): path is ViewPath {
   return views.some((view) => view.to === path) || HARNESS_PATHS.some((p) => p === path);
 }
 
+/** Where to send someone after signing in. A detail page keeps its list page. */
+export function redirectTarget(path: string): ViewPath | undefined {
+  return activeView(path)?.to ?? (isViewPath(path) ? path : undefined);
+}
+
 export function activeView(path: string): View | undefined {
   return views.find((view) => path === view.to || path.startsWith(`${view.to}/`));
 }

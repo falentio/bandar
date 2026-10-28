@@ -22,7 +22,7 @@ import { ProvidersPanel } from "./components/providers-panel";
 import { RequestsPanel } from "./components/requests-panel";
 import { TagsPanel } from "./components/tags-panel";
 import { SessionProvider, useSession } from "./use-session";
-import { isViewPath } from "./views";
+import { redirectTarget } from "./views";
 
 const loginSearch = v.object({
   redirect: v.optional(
@@ -214,9 +214,11 @@ function AppLayout() {
   if (auth.status === "signed-out") {
     // While the redirect is in flight the location already reads /login, and a
     // second Navigate rendered from that state would overwrite the redirect target.
-    if (!isViewPath(pathname)) return <SessionLoading />;
+    const target = redirectTarget(pathname);
 
-    return <Navigate to="/login" search={{ redirect: pathname }} replace />;
+    if (target === undefined) return <SessionLoading />;
+
+    return <Navigate to="/login" search={{ redirect: target }} replace />;
   }
 
   return <AppShell email={auth.user.email} pending={auth.pending} onSignOut={auth.signOut} />;

@@ -35,11 +35,13 @@ type Run = {
   readonly code: number;
   readonly stdout: readonly string[];
   readonly stderr: readonly string[];
+  readonly warned: readonly string[];
 };
 
 const run = async (argv: readonly string[], env: Env = {}): Promise<Run> => {
   const stdout: string[] = [];
   const stderr: string[] = [];
+  const warned: string[] = [];
 
   const log = vi.spyOn(console, "log").mockImplementation((line: string) => {
     stdout.push(line);
@@ -49,7 +51,9 @@ const run = async (argv: readonly string[], env: Env = {}): Promise<Run> => {
     stderr.push(line);
   });
 
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const warn = vi.spyOn(console, "warn").mockImplementation((line: string) => {
+    warned.push(line);
+  });
 
   try {
     const invocation = parseArgs(argv, cli);
@@ -62,7 +66,7 @@ const run = async (argv: readonly string[], env: Env = {}): Promise<Run> => {
       invocation.args ?? [],
     );
 
-    return { code, stdout, stderr };
+    return { code, stdout, stderr, warned };
   } finally {
     log.mockRestore();
     error.mockRestore();
@@ -159,6 +163,26 @@ describe("the config command", () => {
         "https://one.example.com, https://two.example.com (environment)",
       ),
     ).toBe(true);
+  });
+
+  test("an unset auth secret warns once on stderr, and stdout carries only the report", async () => {
+    const { code, stdout, stderr, warned } = await run(["config"], {
+      BANDAR_AUTH_SECRET: undefined,
+    });
+
+    expect(code).toBe(0);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain("BANDAR_AUTH_SECRET is unset");
+    expect(warned[0]).not.toContain("\n");
+    expect(stderr).toEqual([]);
+    expect(stdout.map((line) => line.split(/\s+/u)[0])).toEqual([
+      "settings",
+      "mode",
+      "server.host",
+      "server.port",
+      "server.authUrl",
+      "trustedOrigins",
+    ]);
   });
 
   test("an argument or a stray option is invalid before the command runs", () => {

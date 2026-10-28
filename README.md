@@ -135,3 +135,34 @@ rm -rf ~/.config/bandar ~/.bandar
 
 Read [`docs/install.md`](./docs/install.md) for the installer in full, [`docs/update.md`](./docs/update.md)
 for updates, and [`docs/service.md`](./docs/service.md) for the service unit.
+
+## Configuration
+
+`bandar` reads `config.json` from `BANDAR_HOME`, which defaults to `~/.bandar`, on
+every start. A missing file means the defaults.
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000
+  }
+}
+```
+
+| key           | value                      | default   |
+| ------------- | -------------------------- | --------- |
+| `server.host` | a non-empty string         | `0.0.0.0` |
+| `server.port` | an integer from 0 to 65535 | `3000`    |
+
+Both keys are optional, and so is the `server` section. The file is strict: an unknown
+key, a root that is not a JSON object, an empty host, a port that is not a whole number
+in range, and a file that is not JSON all fail the boot, and the message names the file
+and the field. A typo never falls back to a default.
+
+An environment variable wins over the file, and the file wins over the default. A blank
+environment variable counts as unset.
+
+`bandar` reads the file on every start, so a restart applies an edit. A service unit
+that pins a port outranks the file; `bandar install-service` pins one only when you
+name it. Read [`docs/service.md`](./docs/service.md) for the unit.

@@ -6,6 +6,7 @@ import type { UpstreamErrorKind } from "./providers/types";
 export const COOLDOWN_BASE_MS = 30_000;
 export const COOLDOWN_CAP_MS = 24 * 60 * 60 * 1000;
 export const COOLDOWN_HISTORY_LIMIT = 500;
+export const MAX_ERROR_MESSAGE = 500;
 
 export type Subject =
   | { kind: "provider"; id: string }
@@ -22,6 +23,7 @@ export type FailureContext = {
   readonly userId: string;
   readonly reference: string;
   readonly errorKind: UpstreamErrorKind;
+  readonly message?: string;
   readonly providerId: string;
   readonly providerName: string;
   readonly modelId: string;
@@ -106,6 +108,7 @@ export function recordFailure(db: Db, record: FailureRecord): void {
         credentialId: context.credentialId,
         credentialName: context.credentialName,
         errorKind: context.errorKind,
+        errorMessage: errorMessageOf(context.message),
         reference: context.reference,
         failures,
         cooldownMs: cooldown,
@@ -125,6 +128,10 @@ export function recordFailure(db: Db, record: FailureRecord): void {
       )
       .run();
   });
+}
+
+function errorMessageOf(message: string | undefined): string | null {
+  return message === undefined ? null : message.slice(0, MAX_ERROR_MESSAGE);
 }
 
 function updateSubject(db: Db, subject: Subject, failures: number, flaggedUntil: Date): void {

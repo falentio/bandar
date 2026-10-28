@@ -15,6 +15,7 @@ export const CooldownEventSchema = v.object({
   credentialId: v.nullable(v.string()),
   credentialName: v.nullable(v.string()),
   errorKind: v.string(),
+  errorMessage: v.nullable(v.string()),
   reference: v.string(),
   failures: v.number(),
   cooldownMs: v.number(),

@@ -128,6 +128,7 @@ export const cooldownEvents = sqliteTable(
     credentialId: text("credential_id"),
     credentialName: text("credential_name"),
     errorKind: text("error_kind").notNull(),
+    errorMessage: text("error_message"),
     reference: text("reference").notNull(),
     failures: integer("failures").notNull(),
     cooldownMs: integer("cooldown_ms").notNull(),

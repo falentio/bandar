@@ -61,7 +61,7 @@ type Outcome = {
 type AttemptPlan = {
   readonly attempts: readonly ResolvedAttempt[];
   suppressed(attempt: ResolvedAttempt): boolean;
-  failed(attempt: ResolvedAttempt, kind: UpstreamErrorKind, now: Date): void;
+  failed(attempt: ResolvedAttempt, kind: UpstreamErrorKind, message: string, now: Date): void;
   succeeded(attempt: ResolvedAttempt): void;
 };
 
@@ -158,7 +158,7 @@ async function complete(
         return openAiError(400, "request aborted", "aborted", "upstream_error");
       }
 
-      attempts.failed(attempt, failed.kind, new Date());
+      attempts.failed(attempt, failed.kind, failed.message, new Date());
 
       if (!RETRYABLE.has(failed.kind)) {
         return openAiError(statusFor(failed), failed.message, failed.kind, "upstream_error");
@@ -353,7 +353,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             return;
           }
 
-          attempts.failed(attempt, failed.kind, new Date());
+          attempts.failed(attempt, failed.kind, failed.message, new Date());
 
           if (chunksSent > 0 || !RETRYABLE.has(failed.kind)) {
             fail(failed.message, failed.kind);
@@ -417,7 +417,7 @@ function attemptPlan(
     attempts,
     suppressed: (attempt) =>
       !probe && subjectsOf(attempt).some((subject) => cooling.has(subjectKey(subject))),
-    failed: (attempt, kind, at) => {
+    failed: (attempt, kind, message, at) => {
       const subject = subjectFor(kind, {
         providerId: attempt.providerId,
         modelId: attempt.modelId,
@@ -433,6 +433,7 @@ function attemptPlan(
             userId,
             reference: plan.ref,
             errorKind: kind,
+            message,
             providerId: attempt.providerId,
             providerName: attempt.providerName,
             modelId: attempt.modelId,

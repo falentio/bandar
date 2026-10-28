@@ -41,7 +41,7 @@ async function config(env: Env): Promise<number> {
 
 const oneLine = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
-export function renderReport(report: ConfigReport): readonly string[] {
+function renderReport(report: ConfigReport): readonly string[] {
   const rows: readonly (readonly [string, string])[] = [
     ["settings", `${report.settingsPath} (${report.settingsFound ? "found" : "missing"})`],
     ["mode", report.mode],

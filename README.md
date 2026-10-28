@@ -198,9 +198,9 @@ derived auth URL and trusted origins name port 0 and reach nothing, so set
 `server.authUrl` and `server.trustedOrigins` yourself when the port is 0.
 
 `config.json` wins over the environment, and the environment wins over the built-in
-default. A blank environment variable counts as unset. The dev proxy in `vite.config.ts` takes the API port
-from `BANDAR_PORT` rather than the file, so set that variable too when you change
-`server.port` and run `bun run dev`.
+default. A blank environment variable counts as unset. The dev server in `vite.config.ts` reads both
+ports from the same file, so `bun run dev` follows an edit to `server.port` or
+`server.webPort`.
 
 Behind a reverse proxy, set `server.authUrl` to the public URL, such as
 `https://llm.example.com`. Its origin joins the default trusted origins, so sign-in links

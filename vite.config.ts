@@ -2,7 +2,9 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite-plus";
-import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, loopbackOrigin } from "./src/shared/topology";
+import { loadConfig } from "./src/server/config";
+import { settingsIo } from "./src/server/settings-io";
+import { loopbackOrigin } from "./src/shared/topology";
 
 const ignored = [
   "src/server/generated/**",
@@ -12,8 +14,7 @@ const ignored = [
   "tools/oxlint/anti-slop/**",
 ];
 
-const apiPort = Number(process.env.BANDAR_PORT ?? DEFAULT_API_PORT);
-const webPort = Number(process.env.BANDAR_WEB_PORT ?? DEFAULT_WEB_PORT);
+const config = loadConfig(process.env, settingsIo, "development");
 
 // Vendored from https://github.com/dmmulroy/anti-slop. Rules are local policy; edit them here.
 const antiSlopRules = {
@@ -51,13 +52,13 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: webPort,
+    port: config.webPort,
     // MagicDNS names resolve to this machine on the tailnet; Vite rejects unknown Host headers.
     allowedHosts: [".ts.net"],
     proxy: {
       // Segment match, not a prefix: /api-keys is a client route, not the API.
-      "^/api(?:/|$)": { target: loopbackOrigin(apiPort), changeOrigin: true },
-      "^/v1(?:/|$)": { target: loopbackOrigin(apiPort), changeOrigin: true },
+      "^/api(?:/|$)": { target: loopbackOrigin(config.port), changeOrigin: true },
+      "^/v1(?:/|$)": { target: loopbackOrigin(config.port), changeOrigin: true },
     },
   },
   fmt: { ignorePatterns: ignored },

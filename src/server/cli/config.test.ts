@@ -88,7 +88,7 @@ describe("the config command", () => {
 
     expect(code).toBe(0);
     expect(stderr).toEqual([]);
-    expect(stdout).toHaveLength(18);
+    expect(stdout).toHaveLength(19);
 
     const printed = lineOf(stdout, "mode").replace(/^mode\s+/u, "");
 
@@ -101,6 +101,9 @@ describe("the config command", () => {
 
     expect(lineOf(stdout, "server.host").endsWith("0.0.0.0 (default)")).toBe(true);
     expect(lineOf(stdout, "server.port").endsWith(`${String(DEFAULT_API_PORT)} (default)`)).toBe(
+      true,
+    );
+    expect(lineOf(stdout, "server.webPort").endsWith(`${String(DEFAULT_WEB_PORT)} (default)`)).toBe(
       true,
     );
     expect(
@@ -231,6 +234,7 @@ describe("the config command", () => {
       "mode",
       "server.host",
       "server.port",
+      "server.webPort",
       "server.authUrl",
       "server.trustedOrigins",
       "providers.kilocode.baseUrl",

@@ -31,6 +31,7 @@ import {
 export type Config = {
   readonly host: string;
   readonly port: number;
+  readonly webPort: number;
   readonly databasePath: string;
   readonly duckdbPath: string;
   readonly configDir: string;
@@ -54,6 +55,7 @@ export type ConfigRow = {
 type ConfigSources = {
   readonly host: ConfigSource;
   readonly port: ConfigSource;
+  readonly webPort: ConfigSource;
   readonly authUrl: ConfigSource;
   readonly trustedOrigins: ConfigSource;
   readonly updateWebUrl: ConfigSource;
@@ -116,6 +118,16 @@ const UNSET_SECRET_WARNING =
 const ConfigSchema = v.object({
   BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   BANDAR_PORT: v.optional(
+    v.pipe(
+      v.string(),
+      v.transform(Number),
+      v.number(),
+      v.integer(),
+      v.minValue(MIN_PORT),
+      v.maxValue(MAX_PORT),
+    ),
+  ),
+  BANDAR_WEB_PORT: v.optional(
     v.pipe(
       v.string(),
       v.transform(Number),
@@ -332,13 +344,14 @@ function buildConfig(
 
   const host = resolve(server?.host, environment.BANDAR_HOST, DEFAULT_HOST);
   const port = resolve(server?.port, environment.BANDAR_PORT, DEFAULT_API_PORT);
+  const webPort = resolve(server?.webPort, environment.BANDAR_WEB_PORT, DEFAULT_WEB_PORT);
 
   const authUrl = resolve(server?.authUrl, environment.BANDAR_AUTH_URL, authUrlForPort(port.value));
 
   const trustedOrigins = resolve(
     server?.trustedOrigins,
     environmentOrigins,
-    defaultTrustedOrigins(authUrl.value, host.value, port.value, mode),
+    defaultTrustedOrigins(authUrl.value, host.value, port.value, webPort.value, mode),
   );
 
   const update = settings.update;
@@ -349,6 +362,7 @@ function buildConfig(
     config: {
       host: host.value,
       port: port.value,
+      webPort: webPort.value,
       databasePath: join(home, DATABASE_FILE),
       duckdbPath: join(home, DUCKDB_FILE),
       configDir: environment.BANDAR_CONFIG_DIR,
@@ -361,6 +375,7 @@ function buildConfig(
     sources: {
       host: host.source,
       port: port.source,
+      webPort: webPort.source,
       authUrl: authUrl.source,
       trustedOrigins: trustedOrigins.source,
       updateWebUrl: updateWebUrl.source,
@@ -427,6 +442,7 @@ function defaultTrustedOrigins(
   authUrl: string,
   host: string,
   port: number,
+  webPort: number,
   mode: RunMode,
 ): readonly string[] {
   const origins = [new URL(authUrl).origin, authUrlForPort(port), loopbackOrigin(port)];
@@ -435,7 +451,7 @@ function defaultTrustedOrigins(
   if (!anywhere) origins.push(`http://${host.includes(":") ? `[${host}]` : host}:${port}`);
 
   if (mode === "development")
-    origins.push(`http://localhost:${DEFAULT_WEB_PORT}`, `http://127.0.0.1:${DEFAULT_WEB_PORT}`);
+    origins.push(`http://localhost:${webPort}`, `http://127.0.0.1:${webPort}`);
 
   return [...new Set(origins)];
 }
@@ -444,6 +460,7 @@ function serverRows(config: Config, sources: ConfigSources): readonly ConfigRow[
   return [
     { key: "server.host", value: config.host, source: sources.host },
     { key: "server.port", value: String(config.port), source: sources.port },
+    { key: "server.webPort", value: String(config.webPort), source: sources.webPort },
     { key: "server.authUrl", value: config.authUrl, source: sources.authUrl },
     {
       key: "server.trustedOrigins",

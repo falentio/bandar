@@ -225,6 +225,24 @@ describe("settings", () => {
     }
   });
 
+  test("the web port parses within the same bounds", () => {
+    expect(settingsFrom(readerOf('{"server":{"webPort":6000}}'))).toEqual({
+      kind: "ok",
+      path,
+      settings: { server: { webPort: 6000 } },
+    });
+  });
+
+  test("a web port outside 0..65535, or not a whole number, is invalid", () => {
+    for (const webPort of [-1, 70000, 80.5, "5173"]) {
+      const reason = reasonOf(
+        settingsFrom(readerOf(`{"server":{"webPort":${JSON.stringify(webPort)}}}`)),
+      );
+
+      expect(reason).toContain("server.webPort");
+    }
+  });
+
   test("an empty host is invalid", () => {
     for (const host of ["", "   "]) {
       const reason = reasonOf(

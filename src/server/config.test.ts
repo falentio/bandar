@@ -337,6 +337,12 @@ describe("the derived defaults", () => {
 });
 
 describe("the config report", () => {
+  test("the report names the run mode that shaped the defaults", () => {
+    for (const [mode] of MODE_HOMES) {
+      expect(reportOf({}, mode).mode).toBe(mode);
+    }
+  });
+
   test("a missing file reports the path, no file, and every default", () => {
     const report = loadConfigReport(
       { BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set" },

@@ -11,7 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test";
 import { DEFAULT_API_PORT } from "../../shared/topology";
+import { parseArgs } from "./args";
 import type { Env } from "./command";
+import { createCli } from "./registry";
 import {
   ENV_FILE_NAME,
   SYSTEM_DATA_DIR,
@@ -58,7 +60,7 @@ const envPath = (): string => join(configDir(), ENV_FILE_NAME);
 
 const invoke = async (
   command: "install-service" | "uninstall-service",
-  argv: readonly string[] = [],
+  args: readonly string[] = [],
   options: { readonly isRoot?: boolean; readonly env?: Env } = {},
 ): Promise<{ code: number; stdout: string[]; stderr: string[] }> => {
   const stdout: string[] = [];
@@ -66,7 +68,7 @@ const invoke = async (
 
   const request: ServiceRequest = {
     env: options.env ?? envOf(),
-    argv,
+    args,
     home: root,
     currentUser: "bandar",
     execPath: "/opt/bandar/bin/bandar",
@@ -496,5 +498,38 @@ describe("uninstallService", () => {
       "bandar: system scope needs root: sudo /opt/bandar/bin/bandar uninstall-service --scope system",
     ]);
     expect(existsSync(join(root, ".config"))).toBe(false);
+  });
+});
+
+describe("the cli seam", () => {
+  const cli = createCli(async () => {});
+  const byName = new Map(cli.commands.map((command) => [command.name, command]));
+
+  test("both service commands declare that they take arguments", () => {
+    expect(byName.get("install-service")?.takesArguments).toBe(true);
+    expect(byName.get("uninstall-service")?.takesArguments).toBe(true);
+    expect(byName.get("serve")?.takesArguments).toBeUndefined();
+  });
+
+  test("the flags arrive as arguments instead of a usage error", () => {
+    expect(parseArgs(["install-service", "--scope", "user", "--port", "8080"], cli)).toMatchObject({
+      kind: "command",
+      args: ["--scope", "user", "--port", "8080"],
+    });
+    expect(parseArgs(["uninstall-service", "--purge"], cli)).toMatchObject({
+      kind: "command",
+      args: ["--purge"],
+    });
+  });
+
+  test("a command without takesArguments still rejects a stray option", () => {
+    expect(parseArgs(["serve", "--scope", "user"], cli)).toEqual({
+      kind: "invalid",
+      message: "unknown option: --scope",
+    });
+    expect(parseArgs(["update", "extra"], cli)).toEqual({
+      kind: "invalid",
+      message: "update takes no arguments",
+    });
   });
 });

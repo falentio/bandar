@@ -2542,6 +2542,7 @@ async function boot(port = 0, timeoutMs = BOOT_TIMEOUT_MS): Promise<Booted> {
 
       throw new Error(`the binary exited with ${proc.exitCode}\n${errors.text()}`);
     }
+
     await Bun.sleep(25);
   }
 

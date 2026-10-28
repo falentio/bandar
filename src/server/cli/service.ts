@@ -71,7 +71,7 @@ export type ServicePlan = UnitOptions & {
 
 export type ServiceRequest = {
   readonly env: Env;
-  readonly argv: readonly string[];
+  readonly args: readonly string[];
   readonly stdout?: (line: string) => void;
   readonly stderr?: (line: string) => void;
   readonly home?: string;
@@ -219,7 +219,7 @@ export function planService(input: ServiceInput): ServicePlan {
 
 export async function installService(request: ServiceRequest): Promise<number> {
   const context = contextOf(request);
-  const args = parseServiceArgs(request.argv, false);
+  const args = parseServiceArgs(request.args, false);
 
   if (args.kind === "invalid") {
     context.stderr(`${PREFIX}${args.message}`);
@@ -268,7 +268,7 @@ export async function installService(request: ServiceRequest): Promise<number> {
 
 export async function uninstallService(request: ServiceRequest): Promise<number> {
   const context = contextOf(request);
-  const args = parseServiceArgs(request.argv, true);
+  const args = parseServiceArgs(request.args, true);
 
   if (args.kind === "invalid") {
     context.stderr(`${PREFIX}${args.message}`);
@@ -330,22 +330,16 @@ export function register(commands: Commands): void {
   commands.add({
     name: "install-service",
     summary: "install bandar as a systemd service",
-    run: (env) => installService({ env, argv: commandArgv("install-service") }),
+    takesArguments: true,
+    run: (env, args) => installService({ env, args }),
   });
 
   commands.add({
     name: "uninstall-service",
     summary: "remove the bandar systemd service",
-    run: (env) => uninstallService({ env, argv: commandArgv("uninstall-service") }),
+    takesArguments: true,
+    run: (env, args) => uninstallService({ env, args }),
   });
-}
-
-// The registry hands a command only the environment, so the flags come from the same argument
-// slice args.ts parses: [binary, entry, command, ...flags].
-function commandArgv(name: string): readonly string[] {
-  const argv = Bun.argv.slice(2);
-
-  return argv[0] === name ? argv.slice(1) : argv;
 }
 
 function splitFlag(written: string): readonly [string, string | undefined] {

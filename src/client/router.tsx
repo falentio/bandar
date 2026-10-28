@@ -12,6 +12,7 @@ import * as v from "valibot";
 import { ApiKeysPanel } from "./components/api-keys-panel";
 import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
+import { CliToolPage } from "./components/cli-tool-page";
 import { CliToolsPanel } from "./components/cli-tools-panel";
 import { ErrorsPanel } from "./components/errors-panel";
 import { OverviewPanel } from "./components/overview-panel";
@@ -137,6 +138,12 @@ const cliToolsRoute = createRoute({
   component: CliToolsPanel,
 });
 
+const cliToolRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/cli-tools/$toolId",
+  component: CliToolDetailRoute,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -150,6 +157,7 @@ const routeTree = rootRoute.addChildren([
     errorsRoute,
     apiKeysRoute,
     cliToolsRoute,
+    cliToolRoute,
   ]),
 ]);
 
@@ -178,6 +186,12 @@ function ProviderDetailRoute() {
       onRemoved={() => void navigate({ to: "/providers" })}
     />
   );
+}
+
+function CliToolDetailRoute() {
+  const { toolId } = cliToolRoute.useParams();
+
+  return <CliToolPage toolId={toolId} />;
 }
 
 function LoginPage() {

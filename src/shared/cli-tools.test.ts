@@ -18,7 +18,7 @@ describe("secrets", () => {
   test("no file snippet carries the key", () => {
     for (const tool of CLI_TOOLS) {
       for (const snippet of tool.snippets(input)) {
-        if (snippet.path === "") continue;
+        if (snippet.kind === "shell") continue;
 
         expect(snippet.code, `${tool.id} writes the key into ${snippet.path}`).not.toContain(KEY);
       }
@@ -49,7 +49,11 @@ describe("secrets", () => {
       expect(code).toContain(MODEL_PLACEHOLDER);
     }
 
-    expect(toolById("pi").snippets(blank)[1]?.code).toContain(KEY_PLACEHOLDER);
+    const pi = toolById("pi")
+      .snippets(blank)
+      .find((snippet) => snippet.kind === "shell");
+
+    expect(pi?.code).toContain(KEY_PLACEHOLDER);
   });
 });
 
@@ -86,11 +90,9 @@ describe("status", () => {
     expect(codex.reason).toContain("/v1/responses");
   });
 
-  test("a served path with no tool forwarding is partial", () => {
-    const opencode = toolStatus(toolById("opencode-v1"));
-
-    expect(opencode.status).toBe("partial");
-    expect(opencode.reason).toContain("tool loop");
+  test("a chat tool names the stall and an Anthropic tool names the rejection", () => {
+    expect(toolStatus(toolById("opencode-v1")).reason).toContain("tool loop stalls");
+    expect(toolStatus(toolById("claude-code")).reason).toContain("422");
   });
 
   test("nothing is ready while the gateway drops tools", () => {

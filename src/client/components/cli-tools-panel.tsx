@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -5,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  CLI_TOOL_IDS,
   CLI_TOOLS,
   renderInput,
   toolStatus,
@@ -13,8 +15,7 @@ import {
   type CliToolId,
   type CliToolStatus,
 } from "@/shared/cli-tools";
-import { apiKeyApi } from "../api";
-import { describeError, isError } from "../errors";
+import { useApiKeys } from "../use-api-keys";
 
 const STATUS_LABEL: Record<CliToolStatus["status"], string> = {
   ready: "Ready",
@@ -37,30 +38,13 @@ const COPY_LABEL: Record<CopyState, string> = {
 };
 
 export function CliToolsPanel() {
-  const [activeToolId, setActiveToolId] = useState<CliToolId>(CLI_TOOLS[0]?.id ?? "opencode-v1");
-  const [key, setKey] = useState("");
-  const [freshKey, setFreshKey] = useState(false);
+  const apiKeys = useApiKeys();
+  const [activeToolId, setActiveToolId] = useState<CliToolId>(CLI_TOOL_IDS[0]);
+  const [pastedKey, setPastedKey] = useState("");
   const [model, setModel] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
 
+  const key = apiKeys.created ?? pastedKey;
   const input = renderInput(window.location.origin, model, key);
-
-  const createKey = async () => {
-    setCreating(true);
-    setCreateError(null);
-
-    try {
-      const created = await apiKeyApi.create({ name: `cli-${activeToolId}` });
-
-      setKey(created.key);
-      setFreshKey(true);
-    } catch (error) {
-      setCreateError(isError(error) ? describeError(error) : String(error));
-    } finally {
-      setCreating(false);
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -86,10 +70,7 @@ export function CliToolsPanel() {
               <Input
                 type="password"
                 value={key}
-                onChange={(event) => {
-                  setKey(event.target.value);
-                  setFreshKey(false);
-                }}
+                onChange={(event) => setPastedKey(event.target.value)}
                 autoComplete="off"
                 spellCheck={false}
                 placeholder="bandar_..."
@@ -108,28 +89,42 @@ export function CliToolsPanel() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" onClick={() => void createKey()} disabled={creating}>
+            <Button
+              type="button"
+              disabled={apiKeys.pending}
+              onClick={() => void apiKeys.create(`cli-${activeToolId}`)}
+            >
               Create key
             </Button>
+            <Link to="/api-keys" className="text-xs underline underline-offset-4">
+              List or revoke keys
+            </Link>
             <p className="text-xs text-muted-foreground">
               The key stays in this browser tab. bandar stores a hash, so the dashboard cannot show
               it again.
             </p>
           </div>
 
-          {freshKey ? (
+          {apiKeys.created === null ? null : (
             <div className="space-y-2 rounded-md border bg-muted/40 p-3">
               <p className="text-xs font-medium">
                 Copy this key now. bandar stores a hash and cannot show it again.
               </p>
               <div className="flex items-start gap-2">
-                <code className="min-w-0 flex-1 font-mono text-xs break-all">{key}</code>
-                <CopyButton text={key} />
+                <code className="min-w-0 flex-1 font-mono text-xs break-all">
+                  {apiKeys.created}
+                </code>
+                <CopyButton text={apiKeys.created} label="Copy key" />
+                <Button type="button" variant="outline" size="sm" onClick={apiKeys.dismissCreated}>
+                  Dismiss
+                </Button>
               </div>
             </div>
-          ) : null}
+          )}
 
-          {createError === null ? null : <p className="text-sm text-destructive">{createError}</p>}
+          {apiKeys.error === null ? null : (
+            <p className="text-sm text-destructive">{apiKeys.error}</p>
+          )}
         </CardContent>
       </Card>
 
@@ -189,13 +184,13 @@ function ToolTab({ tool, input }: { tool: CliTool; input: CliRenderInput }) {
       <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-3">
         <span className="text-xs text-muted-foreground">Base URL</span>
         <code className="min-w-0 flex-1 font-mono text-xs break-all">{baseUrl}</code>
-        <CopyButton text={baseUrl} />
+        <CopyButton text={baseUrl} label={`Copy base URL for ${tool.name}`} />
       </div>
 
       <Separator />
 
       <ol className="list-decimal space-y-1 pl-5 text-sm">
-        {tool.steps().map((step) => (
+        {tool.steps.map((step) => (
           <li key={step}>{step}</li>
         ))}
       </ol>
@@ -205,14 +200,19 @@ function ToolTab({ tool, input }: { tool: CliTool; input: CliRenderInput }) {
           <div key={snippet.label} className="space-y-2 rounded-md border p-3">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-xs font-medium">{snippet.label}</p>
-                {snippet.path === "" ? null : (
+                <p className="text-xs font-medium">
+                  {snippet.label}
+                  {snippet.kind === "file" ? (
+                    <span className="ml-2 text-muted-foreground uppercase">{snippet.language}</span>
+                  ) : null}
+                </p>
+                {snippet.kind === "file" ? (
                   <p className="font-mono text-xs break-all text-muted-foreground">
                     {snippet.path}
                   </p>
-                )}
+                ) : null}
               </div>
-              <CopyButton text={snippet.code} />
+              <CopyButton text={snippet.code} label={`Copy ${snippet.label} for ${tool.name}`} />
             </div>
             <pre className="font-mono text-xs whitespace-pre-wrap break-words">{snippet.code}</pre>
           </div>
@@ -231,7 +231,7 @@ function ToolTab({ tool, input }: { tool: CliTool; input: CliRenderInput }) {
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, label }: { text: string; label: string }) {
   const [state, setState] = useState<CopyState>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -243,12 +243,7 @@ function CopyButton({ text }: { text: string }) {
   );
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setState("copied");
-    } catch {
-      setState("failed");
-    }
+    setState((await writeClipboard(text)) ? "copied" : "failed");
 
     if (timer.current !== null) clearTimeout(timer.current);
 
@@ -256,8 +251,42 @@ function CopyButton({ text }: { text: string }) {
   };
 
   return (
-    <Button type="button" variant="outline" size="sm" onClick={() => void copy()}>
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      aria-label={label}
+      onClick={() => void copy()}
+    >
       {COPY_LABEL[state]}
     </Button>
   );
+}
+
+/** The clipboard API needs a secure context, and a tailnet host over plain HTTP is not one. */
+async function writeClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard !== undefined) {
+    try {
+      await navigator.clipboard.writeText(text);
+
+      return true;
+    } catch {
+      // Denied permission falls through to the selection fallback.
+    }
+  }
+
+  const area = document.createElement("textarea");
+
+  area.value = text;
+  area.readOnly = true;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    area.remove();
+  }
 }

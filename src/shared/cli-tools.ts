@@ -10,7 +10,7 @@ export const GATEWAY_SURFACE = {
 
 export type GatewayNeed = keyof typeof GATEWAY_SURFACE;
 
-export const GATEWAY_PATHS: Record<GatewayNeed, string> = {
+export const GATEWAY_NEED_LABEL: Record<GatewayNeed, string> = {
   chatCompletions: "/v1/chat/completions",
   messages: "/v1/messages",
   responses: "/v1/responses",
@@ -23,14 +23,20 @@ export const CliToolIdSchema = v.picklist(CLI_TOOL_IDS);
 
 export type CliToolId = v.InferOutput<typeof CliToolIdSchema>;
 
-export type CliSnippet = {
-  /** Where the text goes, or the shell it runs in. */
-  readonly label: string;
-  /** File the text belongs in, empty for a shell snippet. */
-  readonly path: string;
-  readonly language: "json" | "toml" | "bash";
-  readonly code: string;
-};
+/** A snippet either writes a file or runs in a shell. Only a shell snippet may hold the key. */
+export type CliSnippet =
+  | {
+      readonly kind: "file";
+      readonly label: string;
+      readonly path: string;
+      readonly language: "json" | "toml";
+      readonly code: string;
+    }
+  | {
+      readonly kind: "shell";
+      readonly label: string;
+      readonly code: string;
+    };
 
 export type CliRenderInput = {
   readonly origin: string;
@@ -50,7 +56,7 @@ export type CliTool = {
   /** Claude Code appends /v1/messages itself, every other tool wants /v1. */
   readonly baseUrl: (origin: string) => string;
   readonly keyVariable: string;
-  readonly steps: () => readonly string[];
+  readonly steps: readonly string[];
   readonly snippets: (input: CliRenderInput) => readonly CliSnippet[];
 };
 
@@ -69,14 +75,15 @@ export function toolStatus(tool: CliTool): CliToolStatus {
   if (missing.length > 0)
     return {
       status: "blocked",
-      reason: `bandar does not serve ${missing.map((need) => GATEWAY_PATHS[need]).join(", ")} yet`,
+      reason: `bandar does not serve ${missing.map((need) => GATEWAY_NEED_LABEL[need]).join(", ")} yet`,
     };
 
   if (tool.needsTools && !GATEWAY_SURFACE.tools)
     return {
       status: "partial",
-      reason:
-        "requests reach the model, but this gateway forwards text only, so the tool loop stalls",
+      reason: tool.needs.includes("messages")
+        ? "a tool_result block answers 422, so this tool fails at its first tool call"
+        : "requests reach the model, but this gateway forwards text only, so the tool loop stalls",
     };
 
   return { status: "ready", reason: "requests and tool calls reach the model" };
@@ -100,7 +107,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     needsTools: true,
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
-    steps: () => [
+    steps: [
       "Install opencode: npm i -g opencode-ai",
       "Add the provider block to ~/.config/opencode/opencode.json",
       "Export BANDAR_API_KEY before you start opencode",
@@ -108,6 +115,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     ],
     snippets: (input) => [
       {
+        kind: "file",
         label: "Provider block",
         path: "~/.config/opencode/opencode.json",
         language: "json",
@@ -128,9 +136,8 @@ export const CLI_TOOLS: readonly CliTool[] = [
         }),
       },
       {
+        kind: "shell",
         label: "Key in the shell",
-        path: "",
-        language: "bash",
         code: `export BANDAR_API_KEY="${keyOf(input)}"`,
       },
     ],
@@ -144,7 +151,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     needsTools: true,
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
-    steps: () => [
+    steps: [
       "Install opencode v2",
       "Add the providers block to ~/.config/opencode/opencode.jsonc",
       "Export BANDAR_API_KEY before you start opencode",
@@ -152,6 +159,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     ],
     snippets: (input) => [
       {
+        kind: "file",
         label: "Provider block",
         path: "~/.config/opencode/opencode.jsonc",
         language: "json",
@@ -170,9 +178,8 @@ export const CLI_TOOLS: readonly CliTool[] = [
         }),
       },
       {
+        kind: "shell",
         label: "Key in the shell",
-        path: "",
-        language: "bash",
         code: `export BANDAR_API_KEY="${keyOf(input)}"`,
       },
     ],
@@ -186,7 +193,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     needsTools: true,
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
-    steps: () => [
+    steps: [
       "Install Codex: npm i -g @openai/codex",
       "Add the provider block to ~/.codex/config.toml",
       "Export BANDAR_API_KEY before you start codex",
@@ -194,6 +201,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     ],
     snippets: (input) => [
       {
+        kind: "file",
         label: "Provider block",
         path: "~/.codex/config.toml",
         language: "toml",
@@ -209,9 +217,8 @@ export const CLI_TOOLS: readonly CliTool[] = [
         ].join("\n"),
       },
       {
+        kind: "shell",
         label: "Key in the shell",
-        path: "",
-        language: "bash",
         code: `export BANDAR_API_KEY="${keyOf(input)}"`,
       },
     ],
@@ -225,7 +232,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     needsTools: true,
     baseUrl: (origin) => origin,
     keyVariable: "ANTHROPIC_AUTH_TOKEN",
-    steps: () => [
+    steps: [
       "Install Claude Code: npm i -g @anthropic-ai/claude-code",
       "Save the key to ~/.config/bandar/key with no trailing newline, then chmod 600 that file",
       "Add the settings block to ~/.claude/settings.json, never to a project .claude/settings.json",
@@ -233,6 +240,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     ],
     snippets: (input) => [
       {
+        kind: "file",
         label: "Settings block",
         path: "~/.claude/settings.json",
         language: "json",
@@ -245,9 +253,8 @@ export const CLI_TOOLS: readonly CliTool[] = [
         }),
       },
       {
+        kind: "shell",
         label: "Shell alternative",
-        path: "",
-        language: "bash",
         code: [
           `export ANTHROPIC_BASE_URL="${input.origin}"`,
           `export ANTHROPIC_AUTH_TOKEN="${keyOf(input)}"`,
@@ -265,7 +272,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     needsTools: true,
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
-    steps: () => [
+    steps: [
       "Install the pi coding agent",
       "Add the provider block to ~/.pi/agent/models.json",
       "Export BANDAR_API_KEY before you start pi",
@@ -273,6 +280,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     ],
     snippets: (input) => [
       {
+        kind: "file",
         label: "Provider block",
         path: "~/.pi/agent/models.json",
         language: "json",
@@ -289,9 +297,8 @@ export const CLI_TOOLS: readonly CliTool[] = [
         }),
       },
       {
+        kind: "shell",
         label: "Key in the shell",
-        path: "",
-        language: "bash",
         code: `export BANDAR_API_KEY="${keyOf(input)}"`,
       },
     ],

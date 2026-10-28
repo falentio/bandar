@@ -209,7 +209,7 @@ The blockers, in the order they pay off:
 
 ## Adding a tool
 
-Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, the steps, and the snippets. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status.
+Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, the steps, and the snippets. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status. Add the tool's mark to `CliToolLogo` in `./src/client/components/cli-tool-logo.tsx`; the paths there come from [svgl.app](https://svgl.app), which serves single-color marks, so a two-tone one carries an opacity instead of a second color.
 
 Two rules the tests enforce, so keep them true:
 

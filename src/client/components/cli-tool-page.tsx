@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowLeftIcon, TerminalIcon } from "lucide-react";
+import { ArrowLeftIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -10,6 +10,7 @@ import {
   type CliRenderInput,
   type CliTool,
 } from "@/shared/cli-tools";
+import { CliToolLogo } from "./cli-tool-logo";
 import { CliToolStatusChip, CopyButton, KeyAndModelCard } from "./cli-tool-parts";
 
 export function CliToolPage({ toolId }: { toolId: string }) {
@@ -54,7 +55,7 @@ function ToolPage({ tool, origin }: { tool: CliTool; origin: string }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-muted">
-            <TerminalIcon className="size-5" />
+            <CliToolLogo toolId={tool.id} className="size-5" />
           </span>
           <div className="min-w-0">
             <h1 className="truncate text-lg font-semibold">{tool.name}</h1>

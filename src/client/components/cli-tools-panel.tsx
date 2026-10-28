@@ -1,8 +1,9 @@
 import { type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronRightIcon, TerminalIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { CLI_TOOLS, GATEWAY_NEED_LABEL, toolStatus, type CliTool } from "@/shared/cli-tools";
+import { CliToolLogo } from "./cli-tool-logo";
 import { CliToolStatusChip } from "./cli-tool-parts";
 
 export function CliToolsPanel() {
@@ -80,7 +81,7 @@ function CliToolRow({ tool }: { tool: CliTool }) {
         className="group/row -mx-1 flex w-[calc(100%+0.5rem)] items-center gap-3 rounded-lg px-2 py-3 text-start transition-colors duration-150 ease-out hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
       >
         <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground transition-transform duration-150 ease-out group-hover/row:scale-105">
-          <TerminalIcon className="size-4.5" />
+          <CliToolLogo toolId={tool.id} className="size-5" />
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">

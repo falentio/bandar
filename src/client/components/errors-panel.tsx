@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import type { CooldownEvent } from "../../shared/cooldowns";
 import { formatWhen } from "../format";
-import { labelForId, modelLabels } from "../model-labels";
+import { labelForId, modelLabels, type ModelLabels } from "../model-labels";
+import { ModelName } from "../model-name";
 import { useCooldowns } from "../use-cooldowns";
 import { useProviders } from "../use-providers";
 import { isCoolingDown } from "./health-badge";
@@ -67,20 +69,12 @@ export function ErrorsPanel() {
                           {event.subject}
                         </span>
                         <span className="mt-0.5 block">
-                          {event.subjectName === "" ? "unnamed" : event.subjectName}
+                          {event.subjectName === "" ? "unnamed" : subjectLabelOf(event, labels)}
                         </span>
                       </td>
                       <td className="py-2 pr-3">{event.providerName}</td>
                       <td className="py-2 pr-3">
-                        <span title={event.modelSlug}>
-                          {labelForId(labels, event.modelId, event.modelSlug)}
-                        </span>
-                        {labelForId(labels, event.modelId, event.modelSlug) ===
-                        event.modelSlug ? null : (
-                          <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
-                            {event.modelSlug}
-                          </span>
-                        )}
+                        <ModelName labels={labels} modelId={event.modelId} slug={event.modelSlug} />
                       </td>
                       <td className="py-2 pr-3 font-mono text-xs">
                         {event.errorKind}
@@ -118,6 +112,12 @@ export function ErrorsPanel() {
       </Card>
     </div>
   );
+}
+
+function subjectLabelOf(event: CooldownEvent, labels: ModelLabels): string {
+  return event.subject === "model"
+    ? labelForId(labels, event.modelId, event.subjectName)
+    : event.subjectName;
 }
 
 function formatCooldown(ms: number): string {

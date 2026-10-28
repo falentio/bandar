@@ -10,7 +10,8 @@ import {
   formatTps,
   formatUsd,
 } from "../format";
-import { labelForSlug, modelLabels } from "../model-labels";
+import { modelLabels } from "../model-labels";
+import { ModelName } from "../model-name";
 import { useAnalytics } from "../use-analytics";
 import { useProviders } from "../use-providers";
 import { AnalyticsFilterBar } from "./analytics-filters";
@@ -126,12 +127,7 @@ export function OverviewPanel() {
                     {data.models.map((model) => (
                       <tr key={`${model.providerKind}:${model.model}`} className="border-b">
                         <td className="py-2 pr-3">
-                          <span title={model.model}>{labelForSlug(labels, model.model)}</span>
-                          {labelForSlug(labels, model.model) === model.model ? null : (
-                            <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
-                              {model.model}
-                            </span>
-                          )}
+                          <ModelName labels={labels} slug={model.model} />
                         </td>
                         <td className="py-2 pr-3">{model.providerKind}</td>
                         <td className="py-2 pr-3 text-right">

@@ -31,7 +31,8 @@ import {
   type ProviderModel,
   type ProviderModelRefresh,
 } from "../../shared/providers";
-import { labelForSlug, modelLabelOf, modelLabels } from "../model-labels";
+import { modelLabelOf, modelLabels } from "../model-labels";
+import { ModelName } from "../model-name";
 import {
   formatExactTokens,
   formatMs,
@@ -828,14 +829,7 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
                       {formatWhen(request.startedAt)}
                     </td>
                     <td className="py-2 pr-3">
-                      <span className="text-xs" title={request.model}>
-                        {labelForSlug(labels, request.model)}
-                      </span>
-                      {labelForSlug(labels, request.model) === request.model ? null : (
-                        <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
-                          {request.model}
-                        </span>
-                      )}
+                      <ModelName labels={labels} slug={request.model} className="text-xs" />
                     </td>
                     <td className="py-2 pr-3">
                       <span

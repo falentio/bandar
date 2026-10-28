@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatExactTokens, formatMs, formatTps, formatUsd, formatWhen } from "../format";
-import { labelForSlug, modelLabels } from "../model-labels";
+import { modelLabels } from "../model-labels";
+import { ModelName } from "../model-name";
 import { useProviders } from "../use-providers";
 import { useRequests } from "../use-requests";
 
@@ -60,14 +61,7 @@ export function RequestsPanel() {
                         {formatWhen(request.startedAt)}
                       </td>
                       <td className="py-2 pr-3">
-                        <span className="text-xs" title={request.model}>
-                          {labelForSlug(labels, request.model)}
-                        </span>
-                        {labelForSlug(labels, request.model) === request.model ? null : (
-                          <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
-                            {request.model}
-                          </span>
-                        )}
+                        <ModelName labels={labels} slug={request.model} className="text-xs" />
                         {request.reference === null ||
                         request.reference === request.model ? null : (
                           <span className="mt-0.5 block font-mono text-xs text-muted-foreground">

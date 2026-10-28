@@ -538,9 +538,9 @@ describe("the cli seam", () => {
       kind: "invalid",
       message: "unknown option: --scope",
     });
-    expect(parseArgs(["update", "extra"], cli)).toEqual({
+    expect(parseArgs(["serve", "extra"], cli)).toEqual({
       kind: "invalid",
-      message: "update takes no arguments",
+      message: "serve takes no arguments",
     });
   });
 });

@@ -17,6 +17,7 @@ const DUCK_DIR = join(ROOT, "duckdb");
 const CLIENT_DIR = join(ROOT, "dist/client");
 const STAGING_DIR = join(ROOT, ".build/embed");
 const GENERATED_DIR = join(ROOT, "src/server/generated");
+const PACKAGE = join(ROOT, "package.json");
 
 export type GeneratedFile = { readonly url: string; readonly path: string };
 
@@ -46,6 +47,7 @@ export function generate(options: { readonly strict?: boolean } = {}): GenReport
   const files = readClientFiles(strict);
   rmSync(STAGING_DIR, { recursive: true, force: true });
   writeGenerated(join(GENERATED_DIR, "client-assets.ts"), renderClientFiles(files), changed);
+  writeGenerated(join(GENERATED_DIR, "version.ts"), renderVersion(), changed);
 
   console.log(
     `gen: ${files.length} assets, ${migrations.length} migrations, ${duckMigrations.length} duckdb migrations`,
@@ -200,6 +202,13 @@ function renderClientFiles(files: readonly GeneratedFile[]): string {
   const rows = staged.map((file, i) => `  { url: ${quote(file.url)}, path: a${i} },`);
 
   return `${head}\n${imports.join("\n")}\n\nexport const clientFiles = [\n${rows.join("\n")}\n] satisfies readonly EmbeddedClientFile[];\n`;
+}
+
+function renderVersion(): string {
+  // SAFETY: package.json is ours; only the version string is read.
+  const manifest = JSON.parse(readFileSync(PACKAGE, "utf8")) as { readonly version: string };
+
+  return `export const version = ${quote(manifest.version)};\n`;
 }
 
 function writeGenerated(target: string, contents: string, changed: string[]): void {

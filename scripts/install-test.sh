@@ -6,9 +6,11 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 INSTALLER=$ROOT/install.sh
 VERSION=9.9.9
+STUB_TOKEN=stub-token-123
 WORK=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/bandar-install-test.XXXXXX")" && pwd -P)
 STUB=$WORK/stub
 PORT_FILE=$WORK/port
+REQUEST_LOG=$WORK/requests.log
 checks=0
 failures=0
 
@@ -17,21 +19,91 @@ command -v bun >/dev/null 2>&1 || {
   exit 1
 }
 
-printf '%s\n' 'const root = process.argv[2] ?? "";
+raw_os=$(uname -s)
+case $raw_os in
+  Linux) os=linux ;;
+  MINGW* | MSYS* | CYGWIN*) os=windows ;;
+  *) os=$(printf '%s' "$raw_os" | tr '[:upper:]' '[:lower:]') ;;
+esac
+raw_arch=$(uname -m)
+case $raw_arch in
+  x86_64 | amd64 | AMD64) arch=x64 ;;
+  aarch64 | arm64 | ARM64) arch=arm64 ;;
+  *) arch=$(printf '%s' "$raw_arch" | tr '[:upper:]' '[:lower:]') ;;
+esac
+exe=
+if [ "$os" = windows ]; then
+  exe=.exe
+fi
+binary=bandar$exe
+asset=bandar-$VERSION-$os-$arch$exe
+asset_sha=$asset.sha256
+
+cat >"$WORK/server.ts" <<'TSSERVER'
+import { appendFileSync } from "node:fs";
+
+const root = process.argv[2] ?? "";
 const portFile = process.argv[3] ?? "";
+const logFile = process.argv[4] ?? "";
+const assetName = process.argv[5] ?? "";
+const assetSha = process.argv[6] ?? "";
+const token = process.argv[7] ?? "";
+const version = process.argv[8] ?? "";
+
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   async fetch(request) {
-    const path = root + decodeURIComponent(new URL(request.url).pathname);
-    const file = Bun.file(path);
+    const url = new URL(request.url);
+    const origin = "http://127.0.0.1:" + server.port;
+    const auth = request.headers.get("authorization") ?? "";
+    const accept = request.headers.get("accept") ?? "";
+    appendFileSync(logFile, url.pathname + url.search + " auth=" + auth + " accept=" + accept + "\n");
+
+    if (url.pathname.startsWith("/releases/tags/")) {
+      if (auth !== "Bearer " + token) return new Response("unauthorized\n", { status: 401 });
+      return Response.json({
+        url: origin + "/releases/1",
+        tag_name: "v" + version,
+        assets: [
+          {
+            url: origin + "/api/assets/683929513",
+            id: 683929513,
+            node_id: "MDM6QXNzZXQ2ODM5Mjk1MTM=",
+            name: assetName,
+            label: null,
+            uploader: { login: "stub", id: 1, url: origin + "/users/stub" },
+          },
+          {
+            url: origin + "/api/assets/683929514",
+            id: 683929514,
+            node_id: "MDM6QXNzZXQ2ODM5Mjk1MTQ=",
+            name: assetSha,
+            label: null,
+            uploader: { login: "stub", id: 1, url: origin + "/users/stub" },
+          },
+        ],
+      });
+    }
+
+    if (url.pathname.startsWith("/api/assets/")) {
+      if (auth !== "Bearer " + token) return new Response("unauthorized\n", { status: 401 });
+      const name = url.pathname.endsWith("683929514") ? assetSha : assetName;
+      const file = Bun.file(root + "/download/v" + version + "/" + name);
+      if (!(await file.exists())) return new Response("not found\n", { status: 404 });
+      return new Response(file);
+    }
+
+    const file = Bun.file(root + decodeURIComponent(url.pathname));
     if (!(await file.exists())) return new Response("not found\n", { status: 404 });
     return new Response(file);
   },
 });
-await Bun.write(portFile, String(server.port));' >"$WORK/server.ts"
+await Bun.write(portFile, String(server.port));
+TSSERVER
 
-bun "$WORK/server.ts" "$STUB" "$PORT_FILE" >"$WORK/server.log" 2>&1 &
+bun "$WORK/server.ts" "$STUB" "$PORT_FILE" "$REQUEST_LOG" "$asset" "$asset_sha" "$STUB_TOKEN" "$VERSION" \
+  >"$WORK/server.log" 2>&1 &
 server_pid=$!
 
 cleanup() {
@@ -81,24 +153,6 @@ mode_of() {
   fi
 }
 
-raw_os=$(uname -s)
-case $raw_os in
-  Linux) os=linux ;;
-  MINGW* | MSYS* | CYGWIN*) os=windows ;;
-  *) os=$(printf '%s' "$raw_os" | tr '[:upper:]' '[:lower:]') ;;
-esac
-raw_arch=$(uname -m)
-case $raw_arch in
-  x86_64 | amd64 | AMD64) arch=x64 ;;
-  aarch64 | arm64 | ARM64) arch=arm64 ;;
-  *) arch=$(printf '%s' "$raw_arch" | tr '[:upper:]' '[:lower:]') ;;
-esac
-exe=
-if [ "$os" = windows ]; then
-  exe=.exe
-fi
-binary=bandar$exe
-
 publish() {
   publish_version=$1
   publish_body=$2
@@ -142,7 +196,7 @@ fi
 printf 'bandar: listening\n'
 STUB
 
-asset=$(publish "$VERSION" "$WORK/service.sh")
+publish "$VERSION" "$WORK/service.sh" >/dev/null
 publish 9.9.8 "$WORK/no-command.sh" >/dev/null
 publish 9.9.7 "$WORK/hangs.sh" >/dev/null
 publish 9.9.6 "$WORK/serves.sh" >/dev/null
@@ -162,9 +216,23 @@ run_install() {
 
   RUN_STATUS=0
   RUN_OUTPUT=$(env BANDAR_VERSION= BANDAR_SCOPE= BANDAR_SERVICE_TIMEOUT= \
+    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= \
     TMPDIR="$case_dir/tmp" BANDAR_INSTALL_DIR="$case_dir/bin" \
     BANDAR_CONFIG_DIR="$case_dir/config" \
     BANDAR_RELEASE_BASE_URL="$base/download/v${PINNED:-$VERSION}" \
+    BANDAR_RELEASE_API_URL="$base/releases/latest" \
+    "$@" sh "$INSTALLER" 2>&1) || RUN_STATUS=$?
+}
+
+run_install_api() {
+  case_dir=$1
+  shift
+
+  RUN_STATUS=0
+  RUN_OUTPUT=$(env BANDAR_VERSION= BANDAR_SCOPE= BANDAR_SERVICE_TIMEOUT= \
+    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= \
+    TMPDIR="$case_dir/tmp" BANDAR_INSTALL_DIR="$case_dir/bin" \
+    BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_BASE_URL= \
     BANDAR_RELEASE_API_URL="$base/releases/latest" \
     "$@" sh "$INSTALLER" 2>&1) || RUN_STATUS=$?
 }
@@ -177,6 +245,7 @@ run_piped() {
   # The pipe is the invocation under test: "curl | sh" has no script path.
   # shellcheck disable=SC2002
   RUN_OUTPUT=$(cat "$INSTALLER" | env BANDAR_VERSION= BANDAR_SCOPE= BANDAR_SERVICE_TIMEOUT= \
+    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= \
     TMPDIR="$case_dir/tmp" BANDAR_INSTALL_DIR="$case_dir/bin" \
     BANDAR_CONFIG_DIR="$case_dir/config" \
     BANDAR_RELEASE_BASE_URL="$base/download/v${PINNED:-$VERSION}" \
@@ -197,6 +266,13 @@ expect_contains() {
   case $RUN_OUTPUT in
     *"$2"*) pass "$1" ;;
     *) fail "$1" "output does not contain '$2': $RUN_OUTPUT" ;;
+  esac
+}
+
+expect_absent() {
+  case $RUN_OUTPUT in
+    *"$2"*) fail "$1" "output contains '$2': $RUN_OUTPUT" ;;
+    *) pass "$1" ;;
   esac
 }
 
@@ -299,6 +375,111 @@ if [ "$elapsed" -le 15 ]; then
 else
   fail "hanging install-service: stops after the timeout" "took $elapsed s"
 fi
+
+case_dir=$WORK/token
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+: >"$REQUEST_LOG"
+run_install_api "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
+expect_status "token: exits 0" 0
+expect_installed "token: installs the binary" "$case_dir/bin/$binary"
+expect_manifest "token: records source, version, and path" "$case_dir/config/install.json" \
+  "$VERSION" "$case_dir/bin/$binary"
+if grep -q '^/releases/tags/v'"$VERSION"' ' "$REQUEST_LOG"; then
+  pass "token: resolves the release through the tags API"
+else
+  fail "token: resolves the release through the tags API" "$(cat "$REQUEST_LOG")"
+fi
+if grep -q "auth=Bearer $STUB_TOKEN" "$REQUEST_LOG"; then
+  pass "token: sends the Authorization header"
+else
+  fail "token: sends the Authorization header" "$(cat "$REQUEST_LOG")"
+fi
+if grep -q 'accept=application/octet-stream' "$REQUEST_LOG"; then
+  pass "token: asks for the asset bytes"
+else
+  fail "token: asks for the asset bytes" "$(cat "$REQUEST_LOG")"
+fi
+if grep -q '^/api/assets/' "$REQUEST_LOG"; then
+  pass "token: downloads from the asset api url"
+else
+  fail "token: downloads from the asset api url" "$(cat "$REQUEST_LOG")"
+fi
+if grep -q 'token=' "$REQUEST_LOG"; then
+  fail "token: never appears in a URL" "$(grep 'token=' "$REQUEST_LOG")"
+else
+  pass "token: never appears in a URL"
+fi
+expect_absent "token: stays out of the output" "$STUB_TOKEN"
+if grep -rq "$STUB_TOKEN" "$case_dir/bin" "$case_dir/config" 2>/dev/null; then
+  fail "token: is never written next to the install" "$(grep -rl "$STUB_TOKEN" "$case_dir/bin" "$case_dir/config")"
+else
+  pass "token: is never written next to the install"
+fi
+
+real_curl=$(command -v curl || true)
+if [ -n "$real_curl" ]; then
+  mkdir -p "$WORK/shim"
+  cat >"$WORK/shim/curl" <<SHIM
+#!/bin/sh
+printf '%s\n' "\$*" >>"$WORK/curl-argv.log"
+exec "$real_curl" "\$@"
+SHIM
+  chmod 755 "$WORK/shim/curl"
+
+  case_dir=$WORK/token-argv
+  mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+  : >"$WORK/curl-argv.log"
+  run_install_api "$case_dir" PATH="$WORK/shim:$PATH" \
+    BANDAR_VERSION="$VERSION" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
+  expect_status "token argv: exits 0 through a curl shim" 0
+  if grep -q -- '-K ' "$WORK/curl-argv.log"; then
+    if grep -q "$STUB_TOKEN" "$WORK/curl-argv.log"; then
+      fail "token: stays out of the curl arguments" "$(grep "$STUB_TOKEN" "$WORK/curl-argv.log")"
+    else
+      pass "token: stays out of the curl arguments"
+    fi
+  else
+    printf 'skip token argv: this curl read the header from its arguments\n'
+  fi
+fi
+
+case_dir=$WORK/token-gh
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+run_install_api "$case_dir" BANDAR_VERSION="$VERSION" GH_TOKEN="$STUB_TOKEN"
+expect_status "GH_TOKEN: exits 0" 0
+expect_installed "GH_TOKEN: installs the binary" "$case_dir/bin/$binary"
+
+case_dir=$WORK/token-github
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+run_install_api "$case_dir" BANDAR_VERSION="$VERSION" GITHUB_TOKEN="$STUB_TOKEN"
+expect_status "GITHUB_TOKEN: exits 0" 0
+expect_installed "GITHUB_TOKEN: installs the binary" "$case_dir/bin/$binary"
+
+case_dir=$WORK/token-precedence
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+run_install_api "$case_dir" BANDAR_VERSION="$VERSION" \
+  BANDAR_GITHUB_TOKEN=wrong-token GH_TOKEN="$STUB_TOKEN"
+expect_status "BANDAR_GITHUB_TOKEN wins over GH_TOKEN" 1
+expect_missing "precedence: installs nothing with the rejected token" "$case_dir/bin/$binary"
+expect_absent "precedence: keeps the rejected token out of the output" "wrong-token"
+
+if grep -q 'auth=Bearer  accept=' "$REQUEST_LOG" 2>/dev/null; then
+  fail "token: never sends an empty Authorization header" "$(grep 'auth=Bearer  accept=' "$REQUEST_LOG")"
+else
+  pass "token: never sends an empty Authorization header"
+fi
+
+case_dir=$WORK/private
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+PINNED=$VERSION
+run_install "$case_dir" BANDAR_VERSION="$VERSION" BANDAR_RELEASE_BASE_URL="$base/private/v$VERSION"
+expect_status "no token: exits 1 on a 404" 1
+expect_contains "no token: names the private repository and the token variables" \
+  "falentio/bandar is private, so a GitHub token is required: set BANDAR_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN"
+expect_absent "no token: does not fall through to a checksum error" "checksum"
+expect_missing "no token: installs nothing" "$case_dir/bin/$binary"
+printf '\ninstall.sh output without a token on a 404:\n'
+printf '%s\n' "$RUN_OUTPUT" | sed 's/^/  /'
 
 case_dir=$WORK/bad-checksum
 mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"

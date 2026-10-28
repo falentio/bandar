@@ -2,7 +2,12 @@ import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
 import { entryOf, readModelIds } from "../catalog";
 import { apiBaseUrl } from "../env";
 import { bearerAdapter } from "../openai/compatible";
-import type { BuiltInProviderDefinition, CatalogRequest, ModelCatalogEntry } from "../types";
+import {
+  always,
+  type BuiltInProviderDefinition,
+  type CatalogRequest,
+  type ModelCatalogEntry,
+} from "../types";
 
 const settings = BUILT_IN_PROVIDERS.tokenharbor;
 
@@ -14,7 +19,8 @@ export const tokenharbor: BuiltInProviderDefinition<"tokenharbor"> = {
     slug: settings.slug,
     baseUrl: () => apiBaseUrl("BANDAR_TOKENHARBOR_API", settings.baseUrl),
   },
-  adapter: bearerAdapter("tokenharbor", "token harbor"),
+  routes: { chat: { adapter: bearerAdapter("tokenharbor", "token harbor") } },
+  defaultCompat: always("chat"),
   catalog: fetchTokenharborCatalog,
 };
 

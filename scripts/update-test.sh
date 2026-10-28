@@ -106,15 +106,43 @@ API="http://127.0.0.1:$(cat "$work/port")"
 feed="$API/api/releases/latest"
 installed="$(bun -e 'process.stdout.write((await Bun.file("package.json").json()).version)')"
 
-echo "update-test: stub release feed at $API, installed version $installed"
+# A staged release is always a bump of the version this binary compiles in, which scripts/gen.ts
+# reads from package.json. A hardcoded release falls behind a version bump and turns an available
+# update into the correct "up to date" answer, failing the case for the wrong reason.
+bump() {
+  local core="$1" part="$2" major minor patch
 
+  core="$(printf '%s' "$core" | cut -d- -f1)"
+  IFS=. read -r major minor patch <<<"$core"
+
+  case "$part" in
+    patch) patch=$((patch + 1)) ;;
+    minor) minor=$((minor + 1)) patch=0 ;;
+    major) major=$((major + 1)) minor=0 patch=0 ;;
+    *) echo "update-test: unknown bump part $part" >&2; exit 1 ;;
+  esac
+
+  printf '%s.%s.%s\n' "$major" "$minor" "$patch"
+}
+
+newer="$(bump "$installed" patch)"
+newer_minor="$(bump "$installed" minor)"
+newer_major="$(bump "$installed" major)"
+
+echo "update-test: stub release feed at $API, installed version $installed, staging $newer, $newer_minor, and $newer_major"
+
+checks=0
 failures=0
 
-ok() { printf 'ok   %s\n' "$1"; }
+ok() {
+  checks=$((checks + 1))
+  printf 'ok   %s\n' "$1"
+}
 
 fail() {
-  printf 'FAIL %s - %s\n' "$1" "$2"
+  checks=$((checks + 1))
   failures=$((failures + 1))
+  printf 'FAIL %s - %s\n' "$1" "$2"
 }
 
 status=0
@@ -301,12 +329,12 @@ printf 'duckdb-bytes' >"$CASE_DIR/bandar.duckdb"
 cp "$CASE_DIR/bandar.db" "$work/logs/happy.db"
 cp "$CASE_DIR/bandar.duckdb" "$work/logs/happy.duckdb"
 cp "$CASE_DIR/config/install.json" "$work/logs/happy.json"
-stage_release 0.2.0 'new binary payload'
+stage_release "$newer" 'new binary payload'
 : >"$work/logs/requests.log"
 public happy "BANDAR_DB=$CASE_DIR/bandar.db" "BANDAR_DUCKDB=$CASE_DIR/bandar.duckdb"
 expect_exit happy 0
-expect_stdout happy "bandar 0.2.0 installed at $CASE_DIR/bin/bandar"
-expect_same "$CASE_DIR/bin/bandar" "$work/site/rel/v0.2.0/bandar-0.2.0-linux-x64" "happy: the binary is the release asset"
+expect_stdout happy "bandar $newer installed at $CASE_DIR/bin/bandar"
+expect_same "$CASE_DIR/bin/bandar" "$work/site/rel/v$newer/bandar-$newer-linux-x64" "happy: the binary is the release asset"
 expect_mode "$CASE_DIR/bin/bandar" 755 happy
 expect_no_temp "$CASE_DIR/bin" happy
 expect_same "$CASE_DIR/bandar.db" "$work/logs/happy.db" "happy: bandar.db is untouched"
@@ -334,12 +362,12 @@ fi
 echo
 echo "case: private fork override"
 case_dir fork install-script
-stage_release 0.2.0 'private fork payload'
+stage_release "$newer" 'private fork payload'
 : >"$work/logs/requests.log"
 private fork
 expect_exit fork 0
-expect_stdout fork "bandar 0.2.0 installed at $CASE_DIR/bin/bandar"
-expect_same "$CASE_DIR/bin/bandar" "$work/site/assets/bandar-0.2.0-linux-x64" "fork: the binary is the feed asset"
+expect_stdout fork "bandar $newer installed at $CASE_DIR/bin/bandar"
+expect_same "$CASE_DIR/bin/bandar" "$work/site/assets/bandar-$newer-linux-x64" "fork: the binary is the feed asset"
 expect_no_temp "$CASE_DIR/bin" fork
 
 if grep -q "^/api/releases/latest Bearer $STUB_TOKEN$" "$work/logs/requests.log"; then
@@ -369,7 +397,7 @@ fi
 echo
 echo "case: the API override without a token"
 case_dir apinotoken install-script
-stage_release 0.2.0 'new binary payload'
+stage_release "$newer" 'new binary payload'
 : >"$work/logs/requests.log"
 run apinotoken env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_API_URL=$feed" \
   bun src/server/main.ts update
@@ -387,7 +415,7 @@ fi
 echo
 echo "case: checksum mismatch"
 case_dir mismatch install-script
-stage_release 0.3.0 'tampered payload' "$(printf '0%.0s' $(seq 1 64))"
+stage_release "$newer_minor" 'tampered payload' "$(printf '0%.0s' $(seq 1 64))"
 public mismatch
 expect_exit mismatch 1
 expect_stderr mismatch "checksum mismatch"
@@ -397,8 +425,8 @@ expect_no_temp "$CASE_DIR/bin" mismatch
 echo
 echo "case: foreign asset host"
 case_dir foreign install-script
-stage_release 0.5.0 'foreign payload'
-stage_foreign_release 0.5.0
+stage_release "$newer_major" 'foreign payload'
+stage_foreign_release "$newer_major"
 : >"$work/logs/requests.log"
 run foreign env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_API_URL=$API/api/releases/foreign" \
   "BANDAR_GITHUB_TOKEN=$STUB_TOKEN" bun src/server/main.ts update
@@ -416,7 +444,7 @@ fi
 echo
 echo "case: unknown install source"
 case_dir unknown
-stage_release 0.2.0 'new binary payload'
+stage_release "$newer" 'new binary payload'
 public unknown
 expect_exit unknown 1
 expect_stdout_empty unknown
@@ -445,12 +473,12 @@ fi
 echo
 echo "case: --check"
 case_dir check install-script
-stage_release 0.2.0 'new binary payload'
+stage_release "$newer" 'new binary payload'
 run check env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_WEB_URL=$API" \
   bun src/server/main.ts update --check
 expect_exit check 0
 expect_stdout check "installed $installed"
-expect_stdout check "latest 0.2.0"
+expect_stdout check "latest $newer"
 expect_stdout check "update-available"
 
 echo
@@ -467,7 +495,7 @@ expect_stdout norelease "unknown"
 echo
 echo "case: --archive offline"
 case_dir archive install-script
-ARCHIVE="$work/logs/bandar-0.4.0-linux-x64"
+ARCHIVE="$work/logs/bandar-$newer-linux-x64"
 printf 'offline binary payload' >"$ARCHIVE"
 printf '%s  %s\n' "$(sha256_of "$ARCHIVE")" "$(basename "$ARCHIVE")" >"$ARCHIVE.sha256"
 run archive env "BANDAR_CONFIG_DIR=$CASE_DIR/config" \
@@ -495,9 +523,9 @@ fi
 echo
 
 if [ "$failures" -ne 0 ]; then
-  printf 'update-test: %d failure(s)\n' "$failures"
+  printf 'update-test: %d of %d checks failed\n' "$failures" "$checks"
 
   exit 1
 fi
 
-printf 'update-test: all cases passed\n'
+printf 'update-test: all %d checks passed\n' "$checks"

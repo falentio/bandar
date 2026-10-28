@@ -1,6 +1,8 @@
 import { and, asc, eq } from "drizzle-orm";
 import {
   BUILT_IN_PROVIDER_KINDS,
+  parseCompat,
+  type Compat,
   type Provider,
   type ProviderCredential,
   type ProviderCreateInput,
@@ -15,7 +17,7 @@ import type { Db } from "../db/client";
 import { providerCredentials, providerModels, providers } from "../db/schema";
 import type { Sealer } from "../seal";
 import { renumberTagPriorities } from "../tags";
-import { definitionFor, reservedProviderSlugs } from "./registry";
+import { compatsOf, definitionFor, reservedProviderSlugs } from "./registry";
 import { ensureBuiltInProviders } from "./seeding";
 import type { ModelCatalogEntry } from "./types";
 
@@ -94,6 +96,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
 
   const enabledAliases = new Set(modelRows.filter((row) => row.enabled).map((row) => row.alias));
   const providerSlugs = new Map(providerRows.map((row) => [row.id, row.slug]));
+  const providerKinds = new Map(providerRows.map((row) => [row.id, row.kind]));
 
   const grouped = new Map<string, Provider["models"][number][]>();
 
@@ -107,6 +110,8 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       alias: row.alias,
       ref,
       shadowed: enabledAliases.has(ref),
+      compat: parseCompat(row.compat),
+      defaultCompat: defaultCompatOf(providerKinds.get(row.providerId), row.upstreamModel),
       inputPricePerMtok: row.inputPricePerMtok,
       outputPricePerMtok: row.outputPricePerMtok,
       failures: row.failures,
@@ -140,6 +145,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       origin: row.origin,
       baseUrl: row.baseUrl,
       authModes: [...definitionFor(row.kind).authModes],
+      compats: compatsOf(row.kind),
       hasCatalog: definitionFor(row.kind).catalog !== undefined,
       credentials: credentials.get(row.id) ?? [],
       models: grouped.get(row.id) ?? [],
@@ -360,6 +366,32 @@ export async function removeProviderModel(
   return findProvider(deps, userId, providerId);
 }
 
+export async function updateProviderModel(
+  deps: ProviderDeps,
+  userId: string,
+  providerId: string,
+  modelId: string,
+  compat: Compat | null,
+): Promise<Provider | null> {
+  const provider = await findProvider(deps, userId, providerId);
+
+  if (provider === null) return null;
+
+  if (compat !== null && !provider.compats.includes(compat)) {
+    throw new ProviderRuleError(`${provider.kind} does not speak the ${compat} wire`, "validation");
+  }
+
+  const updated = await deps.db
+    .update(providerModels)
+    .set({ compat })
+    .where(and(eq(providerModels.id, modelId), eq(providerModels.providerId, providerId)))
+    .returning({ id: providerModels.id });
+
+  if (updated.length === 0) return null;
+
+  return findProvider(deps, userId, providerId);
+}
+
 export async function removeProvider(
   deps: ProviderDeps,
   userId: string,
@@ -373,6 +405,12 @@ export async function removeProvider(
   if (removed.length > 0) await renumberTagPriorities(deps, userId);
 
   return removed.length > 0;
+}
+
+function defaultCompatOf(kind: ProviderKind | undefined, upstreamModel: string): Compat | null {
+  if (kind === undefined) return null;
+
+  return definitionFor(kind).defaultCompat(upstreamModel).compat;
 }
 
 export function sealApiKey(deps: ProviderDeps, apiKey: string): Promise<string> {
@@ -445,6 +483,7 @@ function modelRow(
     providerId,
     alias: model.alias ?? model.upstreamModel,
     upstreamModel: model.upstreamModel,
+    compat: null,
     inputPricePerMtok: model.inputPricePerMtok ?? null,
     outputPricePerMtok: model.outputPricePerMtok ?? null,
     enabled: true,

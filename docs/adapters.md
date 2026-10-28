@@ -37,6 +37,12 @@ and `chatAdapter({ kind, label, headers })`, both returning `ProviderAdapter<K>`
 organization header and its own auth error; Token Harbor, Yeta, River, Nous Portal,
 Hyper, and the OpenCode Go chat wire reach it through `bearerAdapter`.
 
+`src/server/providers/openai/responses.ts` is a fourth options factory with that
+shape: `responsesAdapter({ kind, label, headers })` speaks the OpenAI Responses
+wire and maps it into the same canonical types. It is a separate wire rather than
+a mode of `chatAdapter`, so a kind can declare both and a gateway can mount each
+where it likes.
+
 The Messages and GenAI adapters are options factories with the same shape:
 `anthropicAdapter({ kind, label, headers })` and
 `googleAdapter({ kind, label, headers })`. Their native instances pass
@@ -82,7 +88,7 @@ and `usage` (`inputTokens`, `outputTokens`, each `number | null`).
 
 The gateway does not read provider JSON. It sees text, usage, finish, or a thrown
 `UpstreamError`. That boundary is the extension point: a new wire format changes
-one provider directory.
+one adapter file and the routes that name it.
 
 ## Ingress
 
@@ -169,7 +175,7 @@ the provider count.
 ## Registry
 
 Each provider is a directory under `src/server/providers/<kind>/`. Its
-`index.ts` exports one definition object that bundles the adapter with every
+`index.ts` exports one definition object that bundles the kind's wires with every
 capability the provider has. `src/server/providers/registry.ts` holds the record:
 
 ```ts
@@ -204,12 +210,27 @@ capabilities only. A built-in also carries the settings its row is seeded with:
 
 ```ts
 type DefinitionCapabilities<K extends ProviderKind> = {
-  readonly adapter: ProviderAdapter<K>;
+  readonly routes: ProviderRoutes<K>;
+  readonly defaultCompat: (upstreamModel: string) => CompatChoice;
   readonly authModes: readonly ProviderAuthMode[];
   readonly oauth?: OAuthConnector;
   readonly catalog?: ProviderCatalog;
   readonly renew?: CredentialRenewer;
 };
+
+type WireRoute<K extends ProviderKind = ProviderKind> = {
+  readonly adapter: ProviderAdapter<K>;
+  /** Joined onto the provider base URL for this (kind, compat) pair. */
+  readonly mount?: string;
+};
+
+type ProviderRoutes<K extends ProviderKind = ProviderKind> = Readonly<
+  Partial<Record<Compat, WireRoute<K>>>
+>;
+
+type CompatChoice =
+  | { readonly compat: Compat }
+  | { readonly compat: null; readonly reason: string };
 
 export type GenericProviderDefinition<K extends GenericProviderKind = GenericProviderKind> =
   DefinitionCapabilities<K> & {
@@ -223,6 +244,23 @@ export type BuiltInProviderDefinition<K extends BuiltInProviderKind = BuiltInPro
     readonly builtIn: BuiltInProviderSettings;
   };
 ```
+
+`Compat` is `chat | responses | messages | genai`, declared in
+`src/shared/providers.ts` and orthogonal to the provider kind: `chat` is OpenAI
+chat completions, `responses` is OpenAI Responses, `messages` is Anthropic
+Messages, and `genai` is Google GenAI. A kind declares one route per wire it can
+speak, and a route without a `mount` has its wire at the end of the base URL.
+`compatsOf(kind)` answers the declared list in the shared order, and it is the
+only list of a kind's compatibilities.
+
+`defaultCompat` is the provider's own rule for one upstream model, and it is
+total: a model the provider cannot route comes back as a `null` compat with the
+reason, not as a missing entry. A kind whose wire never depends on the model
+writes `always("chat")` and its definition stays one line longer than before.
+`registry.test.ts` fails when a declared route's adapter belongs to another kind,
+when a mount is not an absolute path without a trailing slash, when a default
+names a route the kind does not declare, and when a `Compat` value is declared by
+no kind at all.
 
 `authModes` is the credential modes the kind can accept, and it is the only source
 for them: a custom kind declares `["api-key"]`, Kilo Code declares
@@ -275,7 +313,7 @@ even when one is seeded later than the rest.
 The distinction is about existence, not wire shape. Token Harbor, Yeta, River,
 Nous Portal, and Hyper build the shared OpenAI adapter, and their `index.ts` adds
 only the catalog, the login, or the renewal that is theirs. Kilo Code needs its
-own adapter headers, and OpenCode Go is the one built-in that serves three wires.
+own adapter headers, and OpenCode Go is the one built-in that serves four wires.
 
 ## Catalogs
 
@@ -361,7 +399,8 @@ Helpers in `src/server/providers/http.ts`:
   the same network mapping.
 - `requireOk(response)` reads an error envelope (`error.message`, `message`, or
   plain text) and classifies the status.
-- `sseData(body, signal)` yields the joined `data:` lines of each SSE event.
+- `sseData(body, signal)` yields the joined `data:` lines of each SSE event, including one
+  the upstream closes on without a trailing blank line.
 - `apiKeyHeaders(name)` returns a `HeaderFactory` that omits the header when the
   upstream needs no key, and `bearerHeaders` is the `Authorization: Bearer` one.
 
@@ -386,6 +425,28 @@ optional fields the canonical request does not carry. That is one adapter
 implementation, not six: Kilo Code, Token Harbor, Yeta, River, Nous Portal, and
 Hyper all differ only in their headers and their catalogs.
 
+### Responses wire
+
+`POST {base}/responses` with `{ model, input, stream?, max_output_tokens?,
+temperature?, top_p? }`. `input` is the canonical messages, one item per message:
+`{ role, content: [{ type: "input_text", text }] }`. A system message stays an
+item; the wire's `instructions` field is not used.
+
+The canonical `stop` has no Responses equivalent, so the adapter drops it. A model
+that only speaks this wire cannot honour a stop sequence.
+
+A non-streamed answer is the concatenation of every `output[]` item whose `type`
+is `"message"`, through the `content[]` parts whose `type` is `"output_text"`.
+Usage comes from `input_tokens` and `output_tokens`.
+
+A stream carries typed events. `response.output_text.delta` is text;
+`response.completed` and `response.incomplete` carry the response's `usage` and
+`status`; `response.failed` and `error` throw a `protocolError`; any other event
+type is ignored. `[DONE]` ends the stream when a proxy sends one.
+
+The finish reason maps `completed` to `stop`, `incomplete` with
+`max_output_tokens` to `length`, and passes any other incomplete reason through.
+
 Kilo Code has two URLs: the OpenRouter-shaped gateway at
 `https://api.kilo.ai/api/openrouter` for chat, and the catalog at
 `https://api.kilo.ai/api/gateway/models`. Its `index.ts` builds the shared
@@ -397,38 +458,80 @@ which is why it can list models before any key is saved.
 
 ## Multi-wire gateways
 
-OpenCode Go is one kind serving three wires under one bearer. Its table lives in
-`./src/server/providers/opencode/models.ts`; the mount and the adapter for each
-wire live in one `Record<OpenCodeWire, OpenCodeRoute>`, so a wire cannot be added
-without its route:
+OpenCode Go is one kind serving four compatibilities under one bearer. Its table
+lives in `./src/server/providers/opencode/models.ts`; `compat.ts` in the same
+directory holds the mounts and one `Record<Compat, WireRoute<"opencode">>`, so a
+compat cannot be added without its mount and adapter:
 
-| Wire        | Mount               | Adapter            | Auth                                          |
+| Compat      | Mount               | Adapter            | Auth                                          |
 | ----------- | ------------------- | ------------------ | --------------------------------------------- |
-| `openai`    | `/go/openai/v1`     | `chatAdapter`      | `Authorization: Bearer`                       |
-| `anthropic` | `/go/anthropic/v1`  | `anthropicAdapter` | `Authorization: Bearer` + `anthropic-version` |
-| `google`    | `/go/google/v1beta` | `googleAdapter`    | `Authorization: Bearer`                       |
+| `chat`      | `/go/openai/v1`     | `chatAdapter`      | `Authorization: Bearer`                       |
+| `responses` | `/go/openai/v1`     | `responsesAdapter` | `Authorization: Bearer`                       |
+| `messages`  | `/go/anthropic/v1`  | `anthropicAdapter` | `Authorization: Bearer` + `anthropic-version` |
+| `genai`     | `/go/google/v1beta` | `googleAdapter`    | `Authorization: Bearer`                       |
 
-`opencodeAdapter.chat` and `.stream` look the model up in the table, reject an
-unknown or gapped id with `invalid_request` before any request leaves the process,
-clone the target with the wire's mount joined onto its base URL, and delegate.
-There is no `try`/`catch`, so the sub-adapter's `UpstreamError` kind and status
-survive unchanged.
+`opencodeDefaultCompat` looks the model up in the table and answers the row's
+compat. An id the table does not list, or a row that is a gap, comes back as a
+`null` compat with the reason, which the gateway turns into a 400 before any
+request leaves the process. The catalog imports the mounts from the same module,
+so the list and the chat path cannot disagree about where a wire lives.
 
 Two rules keep a multi-wire catalog honest:
 
 1. **The table is the authority; the live list is the gate.** Only rows that are
    both listed and callable import, in table order, so a model bandar cannot route
    never becomes a row the router will try.
-2. **A gap is data, not an omission.** The five Responses-only ids (`grok-4.7`,
-   `gpt-6-luna`, `gpt-5.6-luna`, `muse-spark-1.3-contributor`,
-   `muse-spark-1.2-contributor`) and the eight ids the docs omit (`glm-5.1`,
+2. **A gap is data, not an omission.** The eight ids the docs omit (`glm-5.1`,
    `grok-4.6`, `kimi-k2.6`, `minimax-m2.5`, `minimax-m2.7`, `omen-alpha`,
    `qwen3.6-plus`, `qwen3.7-max`) stay in the table with their reason, so a
-   hand-added id fails with that reason instead of a generic error. bandar has no
-   Responses adapter, so the first five cannot be called at all.
+   hand-added id fails with that reason instead of a generic error. The five ids
+   the gateway serves only on the Responses wire (`grok-4.7`, `gpt-6-luna`,
+   `gpt-5.6-luna`, `muse-spark-1.3-contributor`, `muse-spark-1.2-contributor`)
+   route there and import unpriced, because the docs publish no price for them.
 
 A single-wire gateway is the opposite policy: Hyper imports every id its public
 list returns, because its one wire cannot list a model it cannot serve.
+
+## Per-model compatibility
+
+A provider row fixes the kind; a model row may fix its wire. The override lives in
+`provider_models.compat` as raw text, with no default and no backfill, and only an
+override is ever stored: `NULL` means "the provider's own default" in SQL, in
+`resolvePlan`, in `routeAttempt`, and on the dashboard.
+
+`routeAttempt` resolves an attempt's wire in one order: a declared override, then
+the provider's `defaultCompat` for that upstream model, then a 400. An override the
+kind no longer declares is treated as absent, so a row that outlives its wire
+degrades to the default instead of failing the request. `parseCompat` reads the raw
+column, so a value this build does not name comes back as `null`: the row shows
+"Provider default" and answers there, and the next `PUT` overwrites the stored
+value with one the build knows. A value this build does name but the kind no
+longer declares is a different case: it stays in the row as a wire the provider
+cannot serve, so the select lists it as unavailable instead of showing the
+default.
+
+The `Provider` value carries both sides of the decision per model, so the dashboard
+never recomputes it:
+
+- `compat` is the stored override, or `null`.
+- `defaultCompat` is the wire the next request uses when no override is set, or
+  `null` when the provider cannot route that id at all.
+- `compats` on the provider is `compatsOf(kind)`: the list the model row offers.
+
+`PUT /api/providers/:id/models/:modelId` takes `{ compat: Compat | null }` and
+returns the whole provider, like the other model routes. It answers 404 when the
+provider or the model does not exist, and 422 (`validation`) for a compat the kind
+does not declare. A `null` body clears the override.
+
+On OpenCode Go, `defaultCompat` is the table, so the override is how a listed id is
+put on another wire. Importing a catalog never touches an existing row: a re-import
+skips an upstream model it already has, so it cannot clobber a user's override.
+
+The Models tab renders one native select per row, labelled `Compatibility for
+<alias>`. Its first option is `Provider default (<wire>)`, or `Provider default
+(no wire)` for a model the provider cannot route, then one option per
+`provider.compats`. Choosing the default clears the column; the select is disabled
+while a write is in flight.
 
 ## Streaming rules
 
@@ -452,11 +555,14 @@ not measure time, and non-streaming requests have no TTFT.
    `BUILT_IN_PROVIDER_KINDS`, add its name, slug, and base URL to
    `BUILT_IN_PROVIDERS`, and add its label to `PROVIDER_KIND_LABELS`.
 2. Create `src/server/providers/<kind>/index.ts` with the definition, annotated
-   with its own kind. An OpenAI-compatible kind builds its adapter with
-   `bearerAdapter("<kind>")`; a wire that needs its own headers builds one with
-   `chatAdapter({ kind, label, headers })`. The Messages and GenAI adapters are
-   built the same way, with `anthropicAdapter({ kind, label, headers })` and
-   `googleAdapter({ kind, label, headers })`. Add an `OAuthConnector`, a
+   with its own kind, and declare one route per wire it speaks. An
+   OpenAI-compatible kind builds its chat adapter with `bearerAdapter("<kind>")`,
+   or with `chatAdapter({ kind, label, headers })` when the wire needs its own
+   headers. The other wires take `anthropicAdapter({ kind, label, headers })`,
+   `googleAdapter({ kind, label, headers })`, and
+   `responsesAdapter({ kind, label, headers })`. Add a `mount` for a wire that
+   sits under a path of the base URL, and set `defaultCompat` with `always(...)`
+   unless the choice depends on the model. Add an `OAuthConnector`, a
    `ProviderCatalog`, or a `CredentialRenewer` when the provider has one.
 3. Register the definition in `genericDefinitions` or `builtInDefinitions` in
    `src/server/providers/registry.ts`. Both `satisfies` records report a missing
@@ -575,7 +681,7 @@ The built-in checks go through fake catalog, pricing, and device-auth servers.
 They import each catalog: one keyed with null prices, one keyed with a ratio join,
 one public with per-token prices, one public with per-million-token prices, and one
 public id list that must intersect a built-in table. OpenCode Go answers one chat
-on each of its three mounts, and a hand-added Responses-only model is a 400 with no
+on each of its four wires, and a hand-added undocumented model is a 400 with no
 upstream request. They approve both device logins, prove Nous
 Portal rejects an API key, call the gateway with each credential, renew a Nous
 token under two concurrent chats and assert exactly one refresh with no replayed

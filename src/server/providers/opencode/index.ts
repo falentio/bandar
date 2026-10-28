@@ -1,8 +1,8 @@
 import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
 import { apiBaseUrl } from "../env";
 import type { BuiltInProviderDefinition } from "../types";
-import { opencodeAdapter } from "./adapter";
 import { fetchOpenCodeCatalog } from "./catalog";
+import { OPENCODE_ROUTES, opencodeDefaultCompat } from "./compat";
 
 const settings = BUILT_IN_PROVIDERS.opencode;
 
@@ -14,6 +14,7 @@ export const opencode: BuiltInProviderDefinition<"opencode"> = {
     slug: settings.slug,
     baseUrl: () => apiBaseUrl("BANDAR_OPENCODE_API", settings.baseUrl, "/inference"),
   },
-  adapter: opencodeAdapter,
+  routes: OPENCODE_ROUTES,
+  defaultCompat: opencodeDefaultCompat,
   catalog: fetchOpenCodeCatalog,
 };

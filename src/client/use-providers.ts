@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
+  Compat,
   Provider,
   ProviderCreateInput,
   ProviderCredentialInput,
@@ -21,6 +22,7 @@ export type Providers = {
   readonly apply: (provider: Provider) => void;
   readonly addModel: (id: string, input: ProviderModelInput) => Promise<boolean>;
   readonly removeModel: (id: string, modelId: string) => Promise<void>;
+  readonly setModelCompat: (id: string, modelId: string, compat: Compat | null) => Promise<boolean>;
   readonly addCredential: (id: string, input: ProviderCredentialInput) => Promise<boolean>;
   readonly addCredentials: (id: string, apiKeys: readonly string[]) => Promise<boolean>;
   readonly reorderCredentials: (id: string, credentialIds: readonly string[]) => Promise<boolean>;
@@ -139,6 +141,12 @@ export function useProviders(): Providers {
     [mutate],
   );
 
+  const setModelCompat = useCallback(
+    (id: string, modelId: string, compat: Compat | null) =>
+      mutate(() => providerApi.setModelCompat(id, modelId, compat)),
+    [mutate],
+  );
+
   const addCredential = useCallback(
     (id: string, input: ProviderCredentialInput) =>
       mutate(() => providerApi.addCredential(id, input)),
@@ -189,6 +197,7 @@ export function useProviders(): Providers {
     apply,
     addModel,
     removeModel,
+    setModelCompat,
     addCredential,
     addCredentials,
     reorderCredentials,

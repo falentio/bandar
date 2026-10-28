@@ -30,9 +30,10 @@ stderr: which files it wrote, and which ones it kept.
 | `--port`     | none: `serve` reads the port from `BANDAR_PORT` or `config.json`     |
 | `--binary`   | the executable running the command                                   |
 
-A `BANDAR_HOME` or a `BANDAR_PORT` in the shell lands in the unit, because the install reads the
-environment it inherits. The unit pins a port only when `--port` or `BANDAR_PORT` names one, so
-a port in `config.json` is picked up on the next start.
+The data directory comes from `--data-dir`, else `XDG_DATA_HOME` or `~/.local/share/bandar` for
+user scope and `/var/lib/bandar` for system scope. A `BANDAR_PORT` in the shell lands in the unit,
+because the install reads the environment it inherits. The unit pins a port only when `--port` or
+`BANDAR_PORT` names one, so a port in `config.json` is picked up on the next start.
 
 ## What the unit holds
 

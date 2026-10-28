@@ -70,7 +70,7 @@ describe("runChat cooldowns", () => {
 
     await addProviderModel(harness.providers, "user-1", provider.id, {
       upstreamModel: "m",
-      alias: "fast",
+      slug: "fast",
     });
     await addCredential(harness.providers, provider.id, "bad", "bad-key");
     await addCredential(harness.providers, provider.id, "good", "good-key");
@@ -110,6 +110,7 @@ describe("runChat cooldowns", () => {
     expect(history[0]?.subject).toBe("credential");
     expect(history[0]?.errorKind).toBe("auth");
     expect(history[0]?.reference).toBe("fast");
+    expect(history[0]?.modelSlug).toBe("fast");
   });
 
   test("tries the next credential after a rate limit and flags the first", async () => {
@@ -128,7 +129,7 @@ describe("runChat cooldowns", () => {
 
     await addProviderModel(harness.providers, "user-1", provider.id, {
       upstreamModel: "m",
-      alias: "fast",
+      slug: "fast",
     });
     await addCredential(harness.providers, provider.id, "limited", "limited-key");
     await addCredential(harness.providers, provider.id, "good", "good-key");
@@ -147,7 +148,7 @@ describe("runChat cooldowns", () => {
     expect(limited?.flaggedUntil).not.toBeNull();
     expect(providerRowOf(harness.db, provider.id)?.failures).toBe(0);
     expect(
-      harness.db.select().from(providerModels).where(eq(providerModels.alias, "fast")).get()
+      harness.db.select().from(providerModels).where(eq(providerModels.slug, "fast")).get()
         ?.failures,
     ).toBe(0);
 
@@ -170,7 +171,7 @@ describe("runChat cooldowns", () => {
 
     await addProviderModel(harness.providers, "user-1", provider.id, {
       upstreamModel: "m",
-      alias: "fast",
+      slug: "fast",
     });
     await addCredential(harness.providers, provider.id, "bad", "bad-key");
     await addCredential(harness.providers, provider.id, "good", "good-key");
@@ -200,14 +201,14 @@ describe("runChat cooldowns", () => {
     const dead = await providerWithModel(harness, {
       name: "Dead",
       path: "/dead",
-      alias: "dead",
+      slug: "dead",
       upstreamModel: "dead-model",
     });
 
     const alive = await providerWithModel(harness, {
       name: "Alive",
       path: "/alive",
-      alias: "alive",
+      slug: "alive",
       upstreamModel: "alive-model",
     });
 
@@ -241,7 +242,7 @@ describe("runChat cooldowns", () => {
     const dead = await providerWithModel(harness, {
       name: "Dead",
       path: "",
-      alias: "dead",
+      slug: "dead",
       upstreamModel: "dead-model",
       origin: deadOrigin(),
     });
@@ -249,7 +250,7 @@ describe("runChat cooldowns", () => {
     const alive = await providerWithModel(harness, {
       name: "Alive",
       path: "/alive",
-      alias: "alive",
+      slug: "alive",
       upstreamModel: "alive-model",
     });
 
@@ -272,7 +273,7 @@ describe("runChat cooldowns", () => {
     const seeded = await providerWithModel(harness, {
       name: "Unpaid",
       path: "/unpaid",
-      alias: "fast",
+      slug: "fast",
       upstreamModel: "m",
     });
 
@@ -295,6 +296,7 @@ describe("runChat cooldowns", () => {
     expect(events).toHaveLength(1);
     expect(events[0]?.status).toBe("error");
     expect(events[0]?.error_kind).toBe("unknown");
+    expect(events[0]?.model).toBe("fast");
   });
 
   test("flags a model after a protocol failure and lets the next tag model answer", async () => {
@@ -308,14 +310,14 @@ describe("runChat cooldowns", () => {
     const broken = await providerWithModel(harness, {
       name: "Broken",
       path: "/broken",
-      alias: "broken",
+      slug: "broken",
       upstreamModel: "broken-model",
     });
 
     const spare = await providerWithModel(harness, {
       name: "Spare",
       path: "/spare",
-      alias: "spare",
+      slug: "spare",
       upstreamModel: "spare-model",
     });
 
@@ -353,14 +355,14 @@ describe("runChat cooldowns", () => {
     const retired = await providerWithModel(harness, {
       name: "Retired",
       path: "/retired",
-      alias: "retired",
+      slug: "retired",
       upstreamModel: "retired-model",
     });
 
     const current = await providerWithModel(harness, {
       name: "Current",
       path: "/current",
-      alias: "current",
+      slug: "current",
       upstreamModel: "current-model",
     });
 
@@ -390,7 +392,7 @@ describe("runChat cooldowns", () => {
     const seeded = await providerWithModel(harness, {
       name: "Cooling",
       path: "/cooling",
-      alias: "fast",
+      slug: "fast",
       upstreamModel: "m",
     });
 
@@ -445,7 +447,7 @@ describe("runChat cooldowns", () => {
 
     await addProviderModel(harness.providers, "user-1", provider.id, {
       upstreamModel: "m",
-      alias: "fast",
+      slug: "fast",
     });
     await addCredential(harness.providers, provider.id, "bad", "bad-key");
     await addCredential(harness.providers, provider.id, "good", "good-key");
@@ -579,7 +581,7 @@ type Seeded = { readonly providerId: string; readonly modelId: string };
 
 function requestEvents(duck: DuckDb): readonly QueryRow[] {
   return duck.query(
-    "SELECT status, error_kind, http_status, reference FROM request_events ORDER BY started_at",
+    "SELECT status, error_kind, http_status, reference, model FROM request_events ORDER BY started_at",
   );
 }
 
@@ -597,7 +599,7 @@ async function providerWithModel(
   options: {
     readonly name: string;
     readonly path: string;
-    readonly alias: string;
+    readonly slug: string;
     readonly upstreamModel: string;
     readonly origin?: string;
   },
@@ -611,10 +613,10 @@ async function providerWithModel(
 
   const updated = await addProviderModel(harness.providers, "user-1", provider.id, {
     upstreamModel: options.upstreamModel,
-    alias: options.alias,
+    slug: options.slug,
   });
 
-  const modelId = updated?.models.find((model) => model.alias === options.alias)?.id ?? "";
+  const modelId = updated?.models.find((model) => model.slug === options.slug)?.id ?? "";
 
   expect(modelId).not.toBe("");
 

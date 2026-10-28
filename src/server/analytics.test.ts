@@ -223,7 +223,7 @@ describe("readAnalytics filters", () => {
     expect(analytics.summary.totalTokens).toBe(600);
   });
 
-  test("filters by model alias", () => {
+  test("filters by model address", () => {
     const analytics = readFiltered(filterSeeded(), { model: ["smart"] });
 
     expect(analytics.summary.requests).toBe(1);

@@ -54,6 +54,9 @@ const INSERT_PROVIDER_SQL =
 const INSERT_MODEL_SQL =
   "INSERT INTO provider_models (id, user_id, provider_id, alias, upstream_model, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
+const INSERT_SLUG_MODEL_SQL =
+  "INSERT INTO provider_models (id, user_id, provider_id, slug, alias, upstream_model, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+
 describe("model refs", () => {
   test("the longest provider ref fits the gateway model field", () => {
     const ref = providerRefOf("s".repeat(MAX_SLUG_LENGTH), "m".repeat(MAX_UPSTREAM_MODEL_LENGTH));
@@ -90,7 +93,7 @@ describe("references", () => {
 
     await addProviderModel(deps, "user-1", provider.id, {
       upstreamModel: "Model",
-      alias: "Alias",
+      slug: "Alias",
     });
 
     expect((await resolvePlan(deps, "user-1", "case/Model")).attempts).toHaveLength(1);
@@ -99,7 +102,7 @@ describe("references", () => {
     expect((await resolvePlan(deps, "user-1", "alias")).attempts).toHaveLength(0);
   });
 
-  test("a legacy tags/ alias wins over the tag chain", async () => {
+  test("a legacy tags/ address wins over the tag chain", async () => {
     const handle = freshDb();
     const deps = await providerDeps(handle);
 
@@ -116,7 +119,8 @@ describe("references", () => {
         id: "legacy-alias",
         userId: "user-1",
         providerId: aliasProvider.id,
-        alias: "tags/legacy",
+        slug: "tags/legacy",
+        alias: null,
         upstreamModel: "alias-model",
         enabled: true,
         createdAt: new Date("2026-01-01T00:00:00.000Z"),
@@ -132,10 +136,12 @@ describe("references", () => {
 
     const tagProviderWithModel = await addProviderModel(deps, "user-1", tagProvider.id, {
       upstreamModel: "tag-model",
-      alias: "tag-model",
     });
 
-    const tagModel = tagProviderWithModel?.models.find((model) => model.alias === "tag-model");
+    const tagModel = tagProviderWithModel?.models.find(
+      (model) => model.upstreamModel === "tag-model",
+    );
+
     const created = await createTag(deps, "user-1", "legacy");
     const tagId = created.tags.find((tag) => tag.slug === "legacy")?.id ?? "";
 
@@ -165,21 +171,45 @@ describe("references", () => {
       apiKey: "",
     });
 
-    await addProviderModel(deps, "user-1", alpha.id, { upstreamModel: "m", alias: "m" });
-    await addProviderModel(deps, "user-1", beta.id, {
-      upstreamModel: "x",
-      alias: "alpha/m",
-    });
+    await addProviderModel(deps, "user-1", alpha.id, { upstreamModel: "m", slug: "beta/x" });
+    await addProviderModel(deps, "user-1", beta.id, { upstreamModel: "x", slug: "spare" });
 
     const refs = await listModelRefs(deps, "user-1");
 
-    expect(refs.filter((ref) => ref.id === "alpha/m")).toHaveLength(1);
+    expect(refs.filter((ref) => ref.id === "beta/x")).toHaveLength(1);
 
-    const alphaModel = (await listProviders(deps, "user-1")).providers
-      .find((provider) => provider.id === alpha.id)
-      ?.models.find((model) => model.upstreamModel === "m");
+    const models = (await listProviders(deps, "user-1")).providers.flatMap(
+      (provider) => provider.models,
+    );
 
-    expect(alphaModel?.shadowed).toBe(true);
+    expect(models.find((model) => model.slug === "beta/x")?.shadowed).toBe(false);
+    expect(models.find((model) => model.slug === "spare")?.shadowed).toBe(true);
+  });
+
+  test("an address wins over an identical provider ref", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const alpha = await createProvider(deps, "user-1", {
+      name: "Alpha",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const beta = await createProvider(deps, "user-1", {
+      name: "Beta",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addProviderModel(deps, "user-1", alpha.id, { upstreamModel: "m", slug: "beta/x" });
+    await addProviderModel(deps, "user-1", beta.id, { upstreamModel: "x", slug: "spare" });
+
+    const plan = await resolvePlan(deps, "user-1", "beta/x");
+
+    expect(plan.attempts.map((attempt) => attempt.upstreamModel)).toEqual(["m"]);
   });
 });
 
@@ -215,13 +245,14 @@ describe("provider models", () => {
 
     const withModel = await addProviderModel(deps, "user-1", provider.id, {
       upstreamModel: "gpt-4o",
-      alias: "fast",
+      slug: "fast",
     });
 
-    const modelId = withModel?.models.find((model) => model.alias === "fast")?.id ?? "";
+    const modelId = withModel?.models.find((model) => model.slug === "fast")?.id ?? "";
 
     await updateProviderModel(deps, "user-1", provider.id, modelId, {
-      alias: "fast",
+      slug: "fast",
+      alias: null,
       compat: "responses",
       inputPricePerMtok: null,
       cacheInputPricePerMtok: null,
@@ -261,20 +292,22 @@ describe("provider models", () => {
     const modelId = withModel?.models[0]?.id ?? "";
 
     const edited = await updateProviderModel(deps, "user-1", provider.id, modelId, {
-      alias: "gpt-4o-mini-fast",
+      slug: "gpt-4o-mini-fast",
+      alias: "Fast and cheap",
       compat: null,
       inputPricePerMtok: 0.15,
       cacheInputPricePerMtok: 0.0031,
       outputPricePerMtok: 0.6,
     });
 
-    expect(edited?.models[0]?.alias).toBe("gpt-4o-mini-fast");
+    expect(edited?.models[0]?.slug).toBe("gpt-4o-mini-fast");
+    expect(edited?.models[0]?.alias).toBe("Fast and cheap");
     expect(edited?.models[0]?.inputPricePerMtok).toBe(0.15);
     expect(edited?.models[0]?.outputPricePerMtok).toBe(0.6);
     expect(edited?.models[0]?.upstreamModel).toBe("gpt-4o-mini");
   });
 
-  test("an edit refuses an alias another model holds", async () => {
+  test("an edit refuses an address another model holds", async () => {
     const handle = freshDb();
     const deps = await providerDeps(handle);
 
@@ -285,24 +318,129 @@ describe("provider models", () => {
       apiKey: "",
     });
 
-    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "one", alias: "first" });
+    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "one", slug: "first" });
 
     const withSecond = await addProviderModel(deps, "user-1", provider.id, {
       upstreamModel: "two",
-      alias: "second",
+      slug: "second",
     });
 
-    const secondId = withSecond?.models.find((model) => model.alias === "second")?.id ?? "";
+    const secondId = withSecond?.models.find((model) => model.slug === "second")?.id ?? "";
 
     await expect(
       updateProviderModel(deps, "user-1", provider.id, secondId, {
-        alias: "first",
+        slug: "first",
+        alias: null,
         compat: null,
         inputPricePerMtok: null,
         cacheInputPricePerMtok: null,
         outputPricePerMtok: null,
       }),
-    ).rejects.toThrow(ProviderRuleError);
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  test("an address defaults to the provider ref", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Default",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const added = await addProviderModel(deps, "user-1", provider.id, {
+      upstreamModel: "gpt-4o-mini",
+    });
+
+    const model = added?.models[0];
+
+    expect(model?.slug).toBe("default/gpt-4o-mini");
+    expect(model?.alias).toBeNull();
+    expect(model?.ref).toBe("default/gpt-4o-mini");
+    expect((await resolvePlan(deps, "user-1", "default/gpt-4o-mini")).attempts).toHaveLength(1);
+  });
+
+  test("two models may share a label", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const alpha = await createProvider(deps, "user-1", {
+      name: "Alpha",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const beta = await createProvider(deps, "user-1", {
+      name: "Beta",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addProviderModel(deps, "user-1", alpha.id, {
+      upstreamModel: "gpt-4o-mini",
+      alias: "Cheap",
+    });
+    await addProviderModel(deps, "user-1", beta.id, {
+      upstreamModel: "gpt-4o-mini",
+      alias: "Cheap",
+    });
+
+    const models = (await listProviders(deps, "user-1")).providers.flatMap(
+      (provider) => provider.models,
+    );
+
+    expect(models.map((model) => model.alias)).toEqual(["Cheap", "Cheap"]);
+    expect(models.map((model) => model.slug)).toEqual(["alpha/gpt-4o-mini", "beta/gpt-4o-mini"]);
+  });
+
+  test("an add refuses an address another model holds", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const alpha = await createProvider(deps, "user-1", {
+      name: "Alpha",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    const beta = await createProvider(deps, "user-1", {
+      name: "Beta",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addProviderModel(deps, "user-1", alpha.id, { upstreamModel: "m" });
+
+    await expect(
+      addProviderModel(deps, "user-1", beta.id, { upstreamModel: "x", slug: "alpha/m" }),
+    ).rejects.toThrow(/UNIQUE constraint failed/);
+  });
+
+  test("a provider ref still resolves after a model takes a custom address", async () => {
+    const handle = freshDb();
+    const deps = await providerDeps(handle);
+
+    const provider = await createProvider(deps, "user-1", {
+      name: "Custom",
+      kind: "openai",
+      baseUrl: "https://example.com",
+      apiKey: "",
+    });
+
+    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "gpt", slug: "fast" });
+
+    expect(
+      (await resolvePlan(deps, "user-1", "fast")).attempts.map((a) => a.upstreamModel),
+    ).toEqual(["gpt"]);
+    expect(
+      (await resolvePlan(deps, "user-1", "custom/gpt")).attempts.map((a) => a.upstreamModel),
+    ).toEqual(["gpt"]);
   });
 
   test("deleting a model renumbers the remaining tag priorities", async () => {
@@ -526,6 +664,111 @@ describe("provider models", () => {
         ),
     ).toThrow(/UNIQUE constraint failed/);
   });
+
+  test("migration 0013 keeps every address and re-derives the label", () => {
+    const handle = openDatabase(":memory:");
+    open.push(handle);
+
+    const all = migrations();
+
+    applyMigrations(
+      handle.sqlite,
+      all.filter((migration) => migration.tag < "0013"),
+    );
+
+    handle.db.insert(user).values({ id: "user-1", name: "User", email: "user-1@test" }).run();
+    handle.sqlite
+      .query(INSERT_PROVIDER_SQL)
+      .run(
+        "provider-1",
+        "user-1",
+        "Provider",
+        "provider",
+        "openai",
+        "https://example.com",
+        "custom",
+        Date.parse("2026-01-01T00:00:00.000Z"),
+      );
+    handle.sqlite
+      .query(INSERT_MODEL_SQL)
+      .run(
+        "model-default",
+        "user-1",
+        "provider-1",
+        "gpt-4o-mini",
+        "gpt-4o-mini",
+        1,
+        Date.parse("2026-01-02T00:00:00.000Z"),
+      );
+    handle.sqlite
+      .query(INSERT_MODEL_SQL)
+      .run(
+        "model-custom",
+        "user-1",
+        "provider-1",
+        "fast",
+        "gpt-4o",
+        1,
+        Date.parse("2026-01-03T00:00:00.000Z"),
+      );
+
+    expect(applyMigrations(handle.sqlite, all).applied).toEqual(["0013_model_slug"]);
+
+    const rows = handle.sqlite
+      .query<{ id: string; slug: string; alias: string | null }, []>(
+        "SELECT id, slug, alias FROM provider_models ORDER BY id",
+      )
+      .all();
+
+    expect(rows).toEqual([
+      { id: "model-custom", slug: "fast", alias: "fast" },
+      { id: "model-default", slug: "gpt-4o-mini", alias: null },
+    ]);
+
+    const indexes = handle.sqlite
+      .query<{ name: string }, []>("PRAGMA index_list(provider_models)")
+      .all()
+      .map((index) => index.name);
+
+    expect(indexes).toContain("provider_models_user_slug");
+    expect(indexes).not.toContain("provider_models_user_alias");
+
+    expect(() =>
+      handle.sqlite
+        .query(INSERT_SLUG_MODEL_SQL)
+        .run(
+          "model-duplicate",
+          "user-1",
+          "provider-1",
+          "fast",
+          "Other",
+          "other",
+          1,
+          Date.parse("2026-01-04T00:00:00.000Z"),
+        ),
+    ).toThrow(/UNIQUE constraint failed/);
+
+    handle.sqlite
+      .query(INSERT_SLUG_MODEL_SQL)
+      .run(
+        "model-shared-label",
+        "user-1",
+        "provider-1",
+        "shared-label",
+        "fast",
+        "shared",
+        1,
+        Date.parse("2026-01-05T00:00:00.000Z"),
+      );
+
+    expect(
+      handle.sqlite
+        .query<{ alias: string }, []>(
+          "SELECT alias FROM provider_models WHERE id = 'model-shared-label'",
+        )
+        .all(),
+    ).toEqual([{ alias: "fast" }]);
+  });
 });
 
 describe("provider updates", () => {
@@ -551,7 +794,7 @@ describe("provider updates", () => {
 });
 
 describe("provider credentials", () => {
-  test("an alias and a provider ref expand to one attempt per credential", async () => {
+  test("an address and a provider ref expand to one attempt per credential", async () => {
     const handle = freshDb();
     const deps = await providerDeps(handle);
 
@@ -566,7 +809,7 @@ describe("provider credentials", () => {
 
     const keyed = await addCredential(deps, provider.id, "second-key");
 
-    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "gpt", alias: "fast" });
+    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "gpt", slug: "fast" });
 
     const ids = keyed.credentials.map((credential) => credential.id);
 
@@ -605,30 +848,24 @@ describe("provider credentials", () => {
 
     const betaKeyed = await addCredential(deps, beta.id, "beta-first");
 
-    const alphaModel = await addProviderModel(deps, "user-1", alpha.id, {
-      upstreamModel: "a",
-      alias: "a",
-    });
+    const alphaModel = await addProviderModel(deps, "user-1", alpha.id, { upstreamModel: "a" });
 
-    const betaModel = await addProviderModel(deps, "user-1", beta.id, {
-      upstreamModel: "b",
-      alias: "b",
-    });
+    const betaModel = await addProviderModel(deps, "user-1", beta.id, { upstreamModel: "b" });
 
     const created = await createTag(deps, "user-1", "chain");
     const tagId = created.tags.find((tag) => tag.slug === "chain")?.id ?? "";
 
     await setTagModels(deps, "user-1", tagId, [
-      alphaModel?.models.find((model) => model.alias === "a")?.id ?? "",
-      betaModel?.models.find((model) => model.alias === "b")?.id ?? "",
+      alphaModel?.models.find((model) => model.upstreamModel === "a")?.id ?? "",
+      betaModel?.models.find((model) => model.upstreamModel === "b")?.id ?? "",
     ]);
 
     const plan = await resolvePlan(deps, "user-1", "tags/chain");
 
-    expect(plan.attempts.map((attempt) => [attempt.alias, attempt.credentialId])).toEqual([
-      ["a", alphaKeyed.credentials[0]?.id],
-      ["a", alphaKeyed.credentials[1]?.id],
-      ["b", betaKeyed.credentials[0]?.id],
+    expect(plan.attempts.map((attempt) => [attempt.slug, attempt.credentialId])).toEqual([
+      ["alpha/a", alphaKeyed.credentials[0]?.id],
+      ["alpha/a", alphaKeyed.credentials[1]?.id],
+      ["beta/b", betaKeyed.credentials[0]?.id],
     ]);
   });
 
@@ -643,7 +880,7 @@ describe("provider credentials", () => {
       apiKey: "",
     });
 
-    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "local", alias: "local" });
+    await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "local", slug: "local" });
 
     const attempt = (await resolvePlan(deps, "user-1", "local")).attempts[0];
 
@@ -870,6 +1107,7 @@ describe("provider credentials", () => {
       "0010_cooldown_error_message",
       "0011_petite_leopardon",
       "0012_tiresome_amphibian",
+      "0013_model_slug",
     ]);
 
     const rows = handle.sqlite

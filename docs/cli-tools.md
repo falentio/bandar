@@ -13,12 +13,12 @@ So every tool here connects and answers a prompt. None of them finishes a tool c
 
 ## What the gateway serves
 
-| Ingress                 | Path                        | Shape                            |
-| ----------------------- | --------------------------- | -------------------------------- |
-| OpenAI chat completions | `/v1/chat/completions`      | text in, text out, streaming     |
-| Anthropic messages      | `/v1/messages`              | text blocks, streaming           |
-| Anthropic token count   | `/v1/messages/count_tokens` | estimate                         |
-| Model list              | `/v1/models`                | aliases, provider refs, tag refs |
+| Ingress                 | Path                        | Shape                              |
+| ----------------------- | --------------------------- | ---------------------------------- |
+| OpenAI chat completions | `/v1/chat/completions`      | text in, text out, streaming       |
+| Anthropic messages      | `/v1/messages`              | text blocks, streaming             |
+| Anthropic token count   | `/v1/messages/count_tokens` | estimate                           |
+| Model list              | `/v1/models`                | addresses, provider refs, tag refs |
 
 Not served: `/v1/responses`, tool definitions, tool results, images, prompt caching headers. A key travels as `Authorization: Bearer <key>` or `x-api-key: <key>`.
 
@@ -26,11 +26,11 @@ Not served: `/v1/responses`, tool definitions, tool results, images, prompt cach
 
 Every tool below needs the ref bandar resolves, not the vendor model name. Three forms work:
 
-- an alias, such as `sonnet`
+- an address, such as `sonnet`
 - a provider ref, such as `kilocode/anthropic/claude-sonnet-4.5`
 - a tag ref, such as `tags/coding`
 
-Claude Code asks for `claude-sonnet-4-6` unless you set `ANTHROPIC_MODEL`. That name will not resolve unless a model carries it as an alias, so set the variable.
+Claude Code asks for `claude-sonnet-4-6` unless you set `ANTHROPIC_MODEL`. That name will not resolve unless a model carries it as its address, so set the variable.
 
 On each setup page the model ref is a picker. It lists tags first, then each provider's models.
 

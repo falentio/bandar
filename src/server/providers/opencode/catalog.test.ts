@@ -27,21 +27,21 @@ describe("opencode go catalog", () => {
     expect(opencodeEntries(["glm-5.3", "gemini-4-argon", "beam-free"])).toEqual([
       {
         upstreamModel: "gemini-4-argon",
-        alias: "gemini-4-argon",
+        label: "gemini-4-argon",
         inputPricePerMtok: null,
         cacheInputPricePerMtok: null,
         outputPricePerMtok: null,
       },
       {
         upstreamModel: "glm-5.3",
-        alias: "glm-5.3",
+        label: "glm-5.3",
         inputPricePerMtok: 1.4,
         cacheInputPricePerMtok: null,
         outputPricePerMtok: 4.4,
       },
       {
         upstreamModel: "beam-free",
-        alias: "beam-free",
+        label: "beam-free",
         inputPricePerMtok: 0,
         cacheInputPricePerMtok: null,
         outputPricePerMtok: 0,

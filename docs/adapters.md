@@ -37,6 +37,12 @@ and `chatAdapter({ kind, label, headers })`, both returning `ProviderAdapter<K>`
 organization header and its own auth error; Token Harbor, Yeta, River, Nous Portal,
 Hyper, and the OpenCode Go chat wire reach it through `bearerAdapter`.
 
+`src/server/providers/openai/responses.ts` is a fourth options factory with that
+shape: `responsesAdapter({ kind, label, headers })` speaks the OpenAI Responses
+wire and maps it into the same canonical types. It is a separate wire rather than
+a mode of `chatAdapter`, so a kind can declare both and a gateway can mount each
+where it likes.
+
 The Messages and GenAI adapters are options factories with the same shape:
 `anthropicAdapter({ kind, label, headers })` and
 `googleAdapter({ kind, label, headers })`. Their native instances pass
@@ -275,7 +281,7 @@ even when one is seeded later than the rest.
 The distinction is about existence, not wire shape. Token Harbor, Yeta, River,
 Nous Portal, and Hyper build the shared OpenAI adapter, and their `index.ts` adds
 only the catalog, the login, or the renewal that is theirs. Kilo Code needs its
-own adapter headers, and OpenCode Go is the one built-in that serves three wires.
+own adapter headers, and OpenCode Go is the one built-in that serves four wires.
 
 ## Catalogs
 
@@ -386,6 +392,28 @@ optional fields the canonical request does not carry. That is one adapter
 implementation, not six: Kilo Code, Token Harbor, Yeta, River, Nous Portal, and
 Hyper all differ only in their headers and their catalogs.
 
+### Responses wire
+
+`POST {base}/responses` with `{ model, input, stream?, max_output_tokens?,
+temperature?, top_p? }`. `input` is the canonical messages, one item per message:
+`{ role, content: [{ type: "input_text", text }] }`. A system message stays an
+item; the wire's `instructions` field is not used.
+
+The canonical `stop` has no Responses equivalent, so the adapter drops it. A model
+that only speaks this wire cannot honour a stop sequence.
+
+A non-streamed answer is the concatenation of every `output[]` item whose `type`
+is `"message"`, through the `content[]` parts whose `type` is `"output_text"`.
+Usage comes from `input_tokens` and `output_tokens`.
+
+A stream carries typed events. `response.output_text.delta` is text;
+`response.completed` and `response.incomplete` carry the response's `usage` and
+`status`; `response.failed` and `error` throw a `protocolError`; any other event
+type is ignored. `[DONE]` ends the stream when a proxy sends one.
+
+The finish reason maps `completed` to `stop`, `incomplete` with
+`max_output_tokens` to `length`, and passes any other incomplete reason through.
+
 Kilo Code has two URLs: the OpenRouter-shaped gateway at
 `https://api.kilo.ai/api/openrouter` for chat, and the catalog at
 `https://api.kilo.ai/api/gateway/models`. Its `index.ts` builds the shared
@@ -397,7 +425,7 @@ which is why it can list models before any key is saved.
 
 ## Multi-wire gateways
 
-OpenCode Go is one kind serving three wires under one bearer. Its table lives in
+OpenCode Go is one kind serving four wires under one bearer. Its table lives in
 `./src/server/providers/opencode/models.ts`; the mount and the adapter for each
 wire live in one `Record<OpenCodeWire, OpenCodeRoute>`, so a wire cannot be added
 without its route:
@@ -405,6 +433,7 @@ without its route:
 | Wire        | Mount               | Adapter            | Auth                                          |
 | ----------- | ------------------- | ------------------ | --------------------------------------------- |
 | `openai`    | `/go/openai/v1`     | `chatAdapter`      | `Authorization: Bearer`                       |
+| `responses` | `/go/openai/v1`     | `responsesAdapter` | `Authorization: Bearer`                       |
 | `anthropic` | `/go/anthropic/v1`  | `anthropicAdapter` | `Authorization: Bearer` + `anthropic-version` |
 | `google`    | `/go/google/v1beta` | `googleAdapter`    | `Authorization: Bearer`                       |
 
@@ -419,13 +448,13 @@ Two rules keep a multi-wire catalog honest:
 1. **The table is the authority; the live list is the gate.** Only rows that are
    both listed and callable import, in table order, so a model bandar cannot route
    never becomes a row the router will try.
-2. **A gap is data, not an omission.** The five Responses-only ids (`grok-4.7`,
-   `gpt-6-luna`, `gpt-5.6-luna`, `muse-spark-1.3-contributor`,
-   `muse-spark-1.2-contributor`) and the eight ids the docs omit (`glm-5.1`,
+2. **A gap is data, not an omission.** The eight ids the docs omit (`glm-5.1`,
    `grok-4.6`, `kimi-k2.6`, `minimax-m2.5`, `minimax-m2.7`, `omen-alpha`,
    `qwen3.6-plus`, `qwen3.7-max`) stay in the table with their reason, so a
-   hand-added id fails with that reason instead of a generic error. bandar has no
-   Responses adapter, so the first five cannot be called at all.
+   hand-added id fails with that reason instead of a generic error. The five ids
+   the gateway serves only on the Responses wire (`grok-4.7`, `gpt-6-luna`,
+   `gpt-5.6-luna`, `muse-spark-1.3-contributor`, `muse-spark-1.2-contributor`)
+   route there and import unpriced, because the docs publish no price for them.
 
 A single-wire gateway is the opposite policy: Hyper imports every id its public
 list returns, because its one wire cannot list a model it cannot serve.
@@ -575,7 +604,7 @@ The built-in checks go through fake catalog, pricing, and device-auth servers.
 They import each catalog: one keyed with null prices, one keyed with a ratio join,
 one public with per-token prices, one public with per-million-token prices, and one
 public id list that must intersect a built-in table. OpenCode Go answers one chat
-on each of its three mounts, and a hand-added Responses-only model is a 400 with no
+on each of its four wires, and a hand-added undocumented model is a 400 with no
 upstream request. They approve both device logins, prove Nous
 Portal rejects an API key, call the gateway with each credential, renew a Nous
 token under two concurrent chats and assert exactly one refresh with no replayed

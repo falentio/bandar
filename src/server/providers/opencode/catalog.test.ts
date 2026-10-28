@@ -15,6 +15,7 @@ describe("opencode go catalog", () => {
     ]);
 
     expect(entries.map((entry) => entry.upstreamModel)).toEqual([
+      "gpt-6-luna",
       "claude-haiku-5-5",
       "gemini-4-argon",
       "glm-5.3",
@@ -50,16 +51,16 @@ describe("opencode go catalog", () => {
   });
 
   test("a gapped or unknown id never imports, even when the gateway lists it", () => {
-    expect(opencodeEntries(["gpt-6-luna", "glm-5.1", "not-a-go-model"])).toEqual([]);
+    expect(opencodeEntries(["omen-alpha", "glm-5.1", "not-a-go-model"])).toEqual([]);
   });
 });
 
 describe("opencode go catalog against the full gateway list", () => {
-  test("the 38 listed ids import as the 25 servable rows", () => {
+  test("the 38 listed ids import as the 30 servable rows", () => {
     const listed = OPENCODE_MODELS.map((model) => model.id);
     const entries = opencodeEntries(listed);
 
-    expect(entries).toHaveLength(25);
+    expect(entries).toHaveLength(30);
     expect(new Set(entries.map((entry) => entry.upstreamModel))).toEqual(
       new Set(OPENCODE_MODELS.filter((model) => model.wire !== null).map((model) => model.id)),
     );

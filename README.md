@@ -25,7 +25,7 @@ SQLite.
 - Seven built-in providers on every account: Kilo Code, Token Harbor, Yeta,
   River, Nous Portal, Hyper, and OpenCode Go. Most speak the OpenAI wire; Kilo Code
   and Nous Portal also sign in with a device code, and OpenCode Go picks a wire per
-  model across the chat, messages, and GenAI endpoints.
+  model across the chat, responses, messages, and GenAI endpoints.
 - Custom providers added from the dashboard without changing code.
 - Provider and model-alias management in the dashboard or over `/api`.
 - Gateway keys from better-auth's API-key plugin, sent as
@@ -33,8 +33,8 @@ SQLite.
 - Per-request analytics in DuckDB with SQL migrations embedded in the binary.
 - Email/password accounts and per-user data isolation.
 
-Not in v1: tools, images, embeddings, and the responses API. Prices come only
-from a catalog import. The adapter contract is text-only and says so.
+Not in v1: tools, images, and embeddings. Prices come only from a catalog import.
+The adapter contract is text-only and says so.
 
 ## Quickstart
 
@@ -495,7 +495,7 @@ fake upstreams, checks the seven seeded built-ins, imports every catalog (one wi
 an alias collision, one joined to a pricing table, three public), approves fake Kilo
 Code and Nous Portal device logins, renews a Nous token under two concurrent
 chats, calls the gateway streaming and non-streaming, calls one OpenCode Go model
-on each of its three mounts, walks a tag with a failing first model, checks the
+on each of its four wires, walks a tag with a failing first model, checks the
 recorded references, rejects reserved slugs, revokes the key, restarts the binary,
 and proves the analytics rows survived.
 
@@ -679,9 +679,10 @@ yet.
   tier's USD per million tokens and DeepSeek's peak rate, so a long-context tier or
   an off-peak DeepSeek call costs less than the recorded number. Gemini's price is
   not published, so it imports unpriced.
-- **Thirteen OpenCode Go ids cannot be called.** Five answer only on the Responses
-  wire, which bandar does not speak, and the docs name no wire for eight more.
-  Neither group imports; typing one in fails with a 400 that names the gap.
+- **Eight OpenCode Go ids cannot be called.** The docs name no wire for them, so
+  they never import and typing one in fails with a 400 that names the gap. The
+  five ids the gateway serves only on the Responses wire are callable, and import
+  unpriced because the docs publish no price for them.
 - **Built-ins can share an upstream model id.** Aliases are unique across providers,
   so importing a catalog skips an id another provider already imported. Add the
   second copy with a distinct alias, or remove the first.

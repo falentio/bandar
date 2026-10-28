@@ -140,6 +140,20 @@ const StreamChunkSchema = v.object({
   ),
 });
 
+const ResponsesBodySchema = v.strictObject({
+  model: v.string(),
+  input: v.array(
+    v.object({
+      role: v.picklist(["system", "user", "assistant"]),
+      content: v.array(v.object({ type: v.literal("input_text"), text: v.string() })),
+    }),
+  ),
+  stream: v.optional(v.boolean()),
+  max_output_tokens: v.optional(v.number()),
+  temperature: v.optional(v.number()),
+  top_p: v.optional(v.number()),
+});
+
 const expectedMigration = lastJournalTag();
 const expectedDuckMigration = lastDuckTag();
 const workDir = mkdtempSync(join(tmpdir(), "bandar-smoke-"));
@@ -1013,7 +1027,7 @@ try {
       200,
     );
 
-    assert.equal(refresh.added, 3);
+    assert.equal(refresh.added, 4);
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
@@ -1022,15 +1036,19 @@ try {
       "claude-haiku-5-5",
       "gemini-4-argon",
       "glm-5.3",
+      "gpt-6-luna",
     ]);
 
     const glm = detail.provider.models.find((model) => model.alias === "glm-5.3");
     const gemini = detail.provider.models.find((model) => model.alias === "gemini-4-argon");
+    const luna = detail.provider.models.find((model) => model.alias === "gpt-6-luna");
 
     assert.equal(glm?.inputPricePerMtok, 1.4);
     assert.equal(glm?.outputPricePerMtok, 4.4);
     assert.equal(gemini?.inputPricePerMtok, null);
     assert.equal(gemini?.outputPricePerMtok, null);
+    assert.equal(luna?.inputPricePerMtok, null);
+    assert.equal(luna?.outputPricePerMtok, null);
   });
 
   await check("OpenCode Go answers chat on each wire with one bearer", async () => {
@@ -1083,28 +1101,66 @@ try {
     assert.equal(googleEvents.text, "Hello from OpenCode Google");
     assert.equal(googleEvents.usage?.prompt_tokens, 4);
     assert.equal(googleEvents.usage?.completion_tokens, 2);
+
+    const responses = await chatRequest("gpt-6-luna", false);
+
+    assert.equal(responses.status, 200);
+
+    const responsesBody = v.parse(CompletionSchema, await responses.json());
+
+    assert.equal(responsesBody.choices[0]?.message.content, "Hello from OpenCode Responses");
+    assert.equal(responsesBody.usage?.prompt_tokens, 7);
+    assert.equal(responsesBody.usage?.completion_tokens, 3);
+
+    const responsesStream = await chatRequest("gpt-6-luna", true);
+
+    assert.equal(responsesStream.status, 200);
+
+    const responsesEvents = await readStream(responsesStream);
+
+    assert.equal(responsesEvents.text, "Hello from OpenCode Responses");
+    assert.equal(responsesEvents.usage?.prompt_tokens, 7);
+    assert.equal(responsesEvents.usage?.completion_tokens, 3);
   });
 
-  await check("a hand-added responses model is a 400 before any request", async () => {
+  await check("a hand-added responses model answers on the responses wire", async () => {
     const id = opencodeProvider.provider?.id ?? "";
 
     await postJson(
       providerPaths.models(id),
-      { upstreamModel: "gpt-6-luna", alias: "luna-gap" },
+      { upstreamModel: "grok-4.7", alias: "grok-luna" },
+      ProviderSchema,
+      201,
+    );
+
+    const response = await chatRequest("grok-luna", false);
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await response.json()).choices[0]?.message.content,
+      "Hello from OpenCode Responses",
+    );
+  });
+
+  await check("an undocumented go model is a 400 before any request", async () => {
+    const id = opencodeProvider.provider?.id ?? "";
+
+    await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "omen-alpha", alias: "omen-gap" },
       ProviderSchema,
       201,
     );
 
     const before = opencodeState.requests;
-    const response = await chatRequest("luna-gap", false);
+    const response = await chatRequest("omen-gap", false);
 
     assert.equal(response.status, 400);
 
     const error = await openAiError(response);
 
     assert.equal(error.code, "invalid_request");
-    assert.match(error.message, /gpt-6-luna/);
-    assert.match(error.message, /responses/);
+    assert.match(error.message, /omen-alpha/);
     assert.equal(opencodeState.requests, before);
   });
 
@@ -3326,6 +3382,54 @@ function startBuiltIns() {
             },
           ],
           usage: { prompt_tokens: 8, completion_tokens: 2 },
+        });
+      }
+
+      if (url.pathname === "/opencode/inference/go/openai/v1/responses") {
+        if (authorization !== "Bearer opencode_test") return jsonError(401, "bad opencode key");
+
+        if (request.headers.has("x-api-key") || request.headers.has("x-goog-api-key")) {
+          return jsonError(401, "opencode go takes one bearer");
+        }
+
+        const parsed = v.safeParse(ResponsesBodySchema, await request.json());
+
+        if (!parsed.success) {
+          return jsonError(400, "opencode go responses wants the responses body");
+        }
+
+        if (parsed.output.stream === true) {
+          return sse([
+            { type: "response.created", response: { status: "in_progress", output: [] } },
+            { type: "response.output_text.delta", delta: "Hello from OpenCode " },
+            { type: "response.output_text.delta", delta: "Responses" },
+            {
+              type: "response.completed",
+              response: {
+                status: "completed",
+                output: [
+                  {
+                    type: "message",
+                    content: [{ type: "output_text", text: "Hello from OpenCode Responses" }],
+                  },
+                ],
+                usage: { input_tokens: 7, output_tokens: 3 },
+              },
+            },
+            "[DONE]",
+          ]);
+        }
+
+        return Response.json({
+          status: "completed",
+          output: [
+            { type: "reasoning", summary: [] },
+            {
+              type: "message",
+              content: [{ type: "output_text", text: "Hello from OpenCode Responses" }],
+            },
+          ],
+          usage: { input_tokens: 7, output_tokens: 3 },
         });
       }
 

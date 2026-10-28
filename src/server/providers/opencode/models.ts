@@ -1,11 +1,11 @@
 import { NO_PRICE, type ModelPrices } from "../catalog";
 
-export const OPENCODE_WIRES = ["openai", "anthropic", "google"] as const;
+export const OPENCODE_WIRES = ["openai", "responses", "anthropic", "google"] as const;
 
 export type OpenCodeWire = (typeof OPENCODE_WIRES)[number];
 
 /** Why a listed Go model cannot be called through bandar yet. */
-export type OpenCodeGap = "responses" | "undocumented";
+export type OpenCodeGap = "undocumented";
 
 export type OpenCodeModel =
   | { readonly id: string; readonly wire: OpenCodeWire; readonly prices: ModelPrices }
@@ -16,13 +16,13 @@ export type OpenCodeModel =
  * million tokens at the base context tier, and DeepSeek quotes peak.
  *
  * The gap rows are here so a hand-added id fails with a reason rather than a
- * generic error: bandar has no responses adapter, and the docs name no wire for
- * the eight ids the gateway lists without pricing them.
+ * generic error: the docs name no wire for the eight ids the gateway lists
+ * without pricing them.
  */
 export const OPENCODE_MODELS: readonly OpenCodeModel[] = [
-  { id: "grok-4.7", wire: null, gap: "responses" },
-  { id: "gpt-6-luna", wire: null, gap: "responses" },
-  { id: "gpt-5.6-luna", wire: null, gap: "responses" },
+  { id: "grok-4.7", wire: "responses", prices: NO_PRICE },
+  { id: "gpt-6-luna", wire: "responses", prices: NO_PRICE },
+  { id: "gpt-5.6-luna", wire: "responses", prices: NO_PRICE },
   {
     id: "claude-haiku-5-5",
     wire: "anthropic",
@@ -93,8 +93,8 @@ export const OPENCODE_MODELS: readonly OpenCodeModel[] = [
     wire: "anthropic",
     prices: { inputPricePerMtok: 0.3, outputPricePerMtok: 1.2 },
   },
-  { id: "muse-spark-1.3-contributor", wire: null, gap: "responses" },
-  { id: "muse-spark-1.2-contributor", wire: null, gap: "responses" },
+  { id: "muse-spark-1.3-contributor", wire: "responses", prices: NO_PRICE },
+  { id: "muse-spark-1.2-contributor", wire: "responses", prices: NO_PRICE },
   {
     id: "qwen3.8-max",
     wire: "anthropic",
@@ -145,8 +145,6 @@ export function opencodeModelOf(upstreamModel: string): OpenCodeModel | undefine
 
 export function gapMessage(gap: OpenCodeGap, upstreamModel: string): string {
   switch (gap) {
-    case "responses":
-      return `${upstreamModel} answers only on the responses wire, which bandar does not speak`;
     case "undocumented":
       return `the opencode go docs do not name a wire for ${upstreamModel}`;
   }

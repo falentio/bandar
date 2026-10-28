@@ -91,9 +91,11 @@ export async function* sseData(
     for (;;) {
       const { value, done } = await reader.read();
 
-      if (done) break;
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
 
-      buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+      // An upstream that closes right after its last data line still owes that event.
+      if (done) buffer += "\n\n";
 
       let boundary = buffer.indexOf("\n\n");
 
@@ -112,7 +114,7 @@ export async function* sseData(
         boundary = buffer.indexOf("\n\n");
       }
 
-      if (signal.aborted) return;
+      if (done || signal.aborted) return;
     }
   } finally {
     reader.releaseLock();

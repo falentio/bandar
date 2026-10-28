@@ -2,6 +2,7 @@ import { anthropicAdapter } from "../anthropic/adapter";
 import { googleAdapter } from "../google/adapter";
 import { bearerHeaders, joinUrl } from "../http";
 import { chatAdapter } from "../openai/compatible";
+import { responsesAdapter } from "../openai/responses";
 import {
   UpstreamError,
   type AdapterInput,
@@ -19,6 +20,7 @@ type OpenCodeRoute = {
 export const OPENCODE_MOUNTS = {
   models: "/go/v1",
   openai: "/go/openai/v1",
+  responses: "/go/openai/v1",
   anthropic: "/go/anthropic/v1",
   google: "/go/google/v1beta",
 } as const;
@@ -29,6 +31,14 @@ const ROUTES: Record<OpenCodeWire, OpenCodeRoute> = {
     adapter: chatAdapter({
       kind: "opencode",
       label: "opencode go (openai)",
+      headers: bearerHeaders,
+    }),
+  },
+  responses: {
+    mount: OPENCODE_MOUNTS.responses,
+    adapter: responsesAdapter({
+      kind: "opencode",
+      label: "opencode go (responses)",
       headers: bearerHeaders,
     }),
   },

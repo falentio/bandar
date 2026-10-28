@@ -10,12 +10,27 @@ describe("opencode go model table", () => {
     expect(OPENCODE_MODELS.length).toBe(38);
   });
 
-  test("25 rows split across the three wires and 13 carry a gap", () => {
+  test("30 rows split across the four wires and 8 carry a gap", () => {
     expect(count((model) => model.wire === "openai")).toBe(19);
+    expect(count((model) => model.wire === "responses")).toBe(5);
     expect(count((model) => model.wire === "anthropic")).toBe(5);
     expect(count((model) => model.wire === "google")).toBe(1);
-    expect(count((model) => model.wire === null && model.gap === "responses")).toBe(5);
     expect(count((model) => model.wire === null && model.gap === "undocumented")).toBe(8);
+  });
+
+  test("every responses-only id is callable and unpriced", () => {
+    for (const id of [
+      "grok-4.7",
+      "gpt-6-luna",
+      "gpt-5.6-luna",
+      "muse-spark-1.3-contributor",
+      "muse-spark-1.2-contributor",
+    ]) {
+      expect(opencodeModelOf(id)).toMatchObject({
+        wire: "responses",
+        prices: { inputPricePerMtok: null, outputPricePerMtok: null },
+      });
+    }
   });
 
   test("every id is unique and resolves back to its own row", () => {
@@ -61,11 +76,8 @@ describe("opencode go model table", () => {
   });
 
   test("a gap message names the model and the reason", () => {
-    const responses = gapMessage("responses", "gpt-6-luna");
     const undocumented = gapMessage("undocumented", "omen-alpha");
 
-    expect(responses).toContain("gpt-6-luna");
-    expect(responses).toContain("responses");
     expect(undocumented).toContain("omen-alpha");
     expect(undocumented).not.toContain("responses");
   });

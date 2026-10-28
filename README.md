@@ -382,8 +382,8 @@ a large ad-hoc scan would need a worker.
 Tag the commit you want to ship, then push the tag:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 `.github/workflows/release.yml` takes over from there, and `.bun-version` pins
@@ -394,30 +394,30 @@ the tag.
 
 | Asset                                 | Platform    |
 | ------------------------------------- | ----------- |
-| `bandar-0.1.0-linux-x64`              | Linux x64   |
-| `bandar-0.1.0-linux-x64.sha256`       | Linux x64   |
-| `bandar-0.1.0-windows-x64.exe`        | Windows x64 |
-| `bandar-0.1.0-windows-x64.exe.sha256` | Windows x64 |
+| `bandar-0.2.0-linux-x64`              | Linux x64   |
+| `bandar-0.2.0-linux-x64.sha256`       | Linux x64   |
+| `bandar-0.2.0-windows-x64.exe`        | Windows x64 |
+| `bandar-0.2.0-windows-x64.exe.sha256` | Windows x64 |
 
 On Linux, mark the binary executable and check it before the first run:
 
 ```sh
-chmod +x bandar-0.1.0-linux-x64
-sha256sum -c bandar-0.1.0-linux-x64.sha256
+chmod +x bandar-0.2.0-linux-x64
+sha256sum -c bandar-0.2.0-linux-x64.sha256
 ```
 
 On Windows, compare the two hashes:
 
 ```powershell
-(Get-FileHash bandar-0.1.0-windows-x64.exe).Hash
-Get-Content bandar-0.1.0-windows-x64.exe.sha256
+(Get-FileHash bandar-0.2.0-windows-x64.exe).Hash
+Get-Content bandar-0.2.0-windows-x64.exe.sha256
 ```
 
 `scripts/release.ts` names the artifact and writes the checksum. To run that
 packaging step by hand against a local build:
 
 ```sh
-BANDAR_RELEASE_VERSION=0.1.0 bun scripts/release.ts
+BANDAR_RELEASE_VERSION=0.2.0 bun scripts/release.ts
 ```
 
 A re-run of a failed job republishes with `--clobber`, so a tag converges

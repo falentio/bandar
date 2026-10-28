@@ -11,7 +11,7 @@
     "build:client": "vp build",
     "compile": "bun run duck:fetch && bun scripts/gen.ts --strict && bun build --compile src/server/main.ts --outfile dist/bandar",
     "build": "bun run build:client && bun run compile",
-    "start": "./dist/bandar",
+    "start": "bun scripts/start.ts",
     "check": "bun run gen && vp check",
     "check:fix": "bun run gen && vp check --fix",
     "test": "bun run gen && bun --bun vp test run",

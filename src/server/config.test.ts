@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, vi } from "vite-plus/test";
+import { DEFAULT_API_PORT } from "../shared/topology";
 import { ConfigError, loadConfig, parseConfig } from "./config";
 
 describe("config", () => {
@@ -131,7 +132,7 @@ describe("the settings file", () => {
     const config = loadConfig({ BANDAR_HOME: home }, missingFile);
 
     expect(config.host).toBe("0.0.0.0");
-    expect(config.port).toBe(3000);
+    expect(config.port).toBe(DEFAULT_API_PORT);
   });
 
   test("an invalid file fails the boot, naming the file and the field", () => {

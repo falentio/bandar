@@ -301,10 +301,20 @@ version_from_location() {
   printf '%s' "${tag#v}"
 }
 
-check_version() {
+# A version lands in install.json as a JSON value and in the asset name as a URL path segment, so
+# it is held to what a release tag really uses: letters, digits, dot, dash, plus.
+is_version() {
   case $1 in
-    '' | */* | *' '*) die "the latest release page did not redirect to a version tag: $latest_release_page" ;;
+    '' | *[!0-9A-Za-z.+-]*) return 1 ;;
   esac
+}
+
+check_version() {
+  if is_version "$1"; then
+    return 0
+  fi
+
+  die "the release names '$1' as its version, which bandar will not install: a version is letters, digits, dot, dash, or plus, such as 1.2.3 or 1.2.3-rc.1"
 }
 
 host_of() {
@@ -361,9 +371,7 @@ asset_host_allowed() {
 
 if [ -n "${BANDAR_VERSION:-}" ]; then
   version=${BANDAR_VERSION#v}
-  case $version in
-    '' | */* | *' '*) die "BANDAR_VERSION must look like 0.1.0, got '$BANDAR_VERSION'" ;;
-  esac
+  is_version "$version" || die "BANDAR_VERSION must look like 0.1.0, got '$BANDAR_VERSION'"
 elif [ -n "$api" ]; then
   download_authed "$api" "$tmp/latest.json" application/vnd.github+json ||
     die "cannot read the latest release from $api"
@@ -371,6 +379,7 @@ elif [ -n "$api" ]; then
   tag=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/latest.json" | head -n 1)
   [ -n "$tag" ] || die "no tag_name in the response from $api"
   version=${tag#v}
+  check_version "$version"
 else
   location=$(fetch_location "$latest_release_page") ||
     die "cannot read the latest release page: $latest_release_page"
@@ -450,9 +459,10 @@ if [ -f "$manifest" ]; then
   had_manifest=1
 fi
 
-# A quote, a backslash, or a control character in the path has to reach install.json escaped. An
-# unescaped one writes a manifest that "bandar update" calls unreadable from then on, and the binary
-# it points at can never be replaced again.
+# A quote, a backslash, or a control character in the path or the version has to reach install.json
+# escaped. An unescaped one writes a manifest that "bandar update" calls unreadable from then on, and
+# the binary it points at can never be replaced again. The version is checked before this point, and
+# escaped anyway, so a wider pattern cannot quietly reopen the hole.
 json_escape() {
   printf '%s' "$1" | awk '
     BEGIN { RS = "\001"; ORS = ""; bs = "\\"; dq = "\"" }
@@ -475,7 +485,7 @@ json_escape() {
 # because a binary with no manifest is one "bandar update" can never replace; the reverse order
 # fails the other way, and the manifest is restored if the binary step fails.
 printf '{"source":"install-script","version":"%s","path":"%s"}\n' \
-  "$version" "$(json_escape "$target")" >"$staged_manifest" ||
+  "$(json_escape "$version")" "$(json_escape "$target")" >"$staged_manifest" ||
   die "cannot write $staged_manifest"
 mv -f "$staged_manifest" "$manifest" || {
   rm -f "$staged_manifest"

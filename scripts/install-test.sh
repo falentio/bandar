@@ -770,6 +770,49 @@ else
   pass "foreign asset host: receives no request"
 fi
 
+printf '\ncase: a release tag that is not a version\n'
+# The hostile tag is published for real, so the only thing between it and a manifest is the check.
+publish '1.0.0"x' "$WORK/serves.sh" >/dev/null
+case_dir=$WORK/tag-not-a-version
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+printf '%s\n' '1.0.0"x' >"$STUB/latest"
+run_install "$case_dir"
+expect_status "tag not a version: exits 1" 1
+expect_contains "tag not a version: names the tag it refused" "'1.0.0\"x'"
+expect_contains "tag not a version: says bandar will not install it" "which bandar will not install"
+expect_missing "tag not a version: installs nothing" "$case_dir/bin/$binary"
+expect_missing "tag not a version: writes no manifest" "$case_dir/config/install.json"
+
+case_dir=$WORK/tag-not-a-version-api
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+run_api "$case_dir" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
+expect_status "tag not a version: the private-fork feed is refused too" 1
+expect_contains "tag not a version: the feed is refused as a version" "which bandar will not install"
+expect_missing "tag not a version: the feed installs nothing" "$case_dir/bin/$binary"
+expect_missing "tag not a version: the feed writes no manifest" "$case_dir/config/install.json"
+
+case_dir=$WORK/tag-not-a-version-pinned
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+run_install "$case_dir" BANDAR_VERSION='1.0.0"x'
+expect_status "tag not a version: BANDAR_VERSION is refused too" 1
+expect_contains "tag not a version: names BANDAR_VERSION" "BANDAR_VERSION must look like 0.1.0, got '1.0.0\"x'"
+expect_missing "tag not a version: the pinned version installs nothing" "$case_dir/bin/$binary"
+expect_missing "tag not a version: the pinned version writes no manifest" "$case_dir/config/install.json"
+printf '%s\n' "$VERSION" >"$STUB/latest"
+
+printf '\ncase: a release tag that is a version\n'
+for tag_version in 1.2.3 1.2.3-rc.1 1.2.3+build.5; do
+  case_dir=$WORK/tag-$tag_version
+  mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+  publish "$tag_version" "$WORK/serves.sh" >/dev/null
+  run_install "$case_dir"
+  expect_status "tag $tag_version: exits 0" 0
+  expect_installed "tag $tag_version: installs the binary" "$case_dir/bin/$binary"
+  expect_manifest "tag $tag_version: records the version" "$case_dir/config/install.json" \
+    "$tag_version" "$case_dir/bin/$binary"
+done
+printf '%s\n' "$VERSION" >"$STUB/latest"
+
 printf '\n%s checks, %s failed\n' "$checks" "$failures"
 
 if [ "$failures" -ne 0 ]; then

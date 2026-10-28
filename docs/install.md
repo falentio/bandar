@@ -48,6 +48,11 @@ replaced.
 
 With `BANDAR_VERSION` set, the release page is not read at all.
 
+A tag becomes a version only when it is letters, digits, dot, dash, or plus: `1.2.3`,
+`1.2.3-rc.1`, `1.2.3+build.5`. Any other tag exits 1 with one line that names it, before any asset
+is downloaded, because that version is also a JSON value in `install.json` and a path segment in
+the asset name. The same rule covers `BANDAR_VERSION` and a private fork's `tag_name`.
+
 ### A private fork
 
 A private fork keeps the API route. Point `BANDAR_RELEASE_API_URL` at its latest-release JSON and

@@ -11,10 +11,6 @@ export type OpenCodeModel =
 /**
  * Every id the Go gateway lists, in the docs table's order. Prices are USD per
  * million tokens at the base context tier, and DeepSeek quotes peak.
- *
- * `compat` is the wire the docs put that id on. A row without one is a gap: the
- * docs name no wire for the eight ids the gateway lists without pricing them, so
- * a hand-added id fails with that reason rather than a generic error.
  */
 export const OPENCODE_MODELS: readonly OpenCodeModel[] = [
   { id: "grok-4.7", compat: "responses", prices: NO_PRICE },

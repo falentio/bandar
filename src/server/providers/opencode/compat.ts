@@ -7,7 +7,6 @@ import { responsesAdapter } from "../openai/responses";
 import type { CompatChoice, WireRoute } from "../types";
 import { gapMessage, opencodeModelOf } from "./models";
 
-/** Every path opencode serves, under one base URL. */
 export const OPENCODE_MOUNTS = {
   models: "/go/v1",
   chat: "/go/openai/v1",
@@ -16,7 +15,6 @@ export const OPENCODE_MOUNTS = {
   genai: "/go/google/v1beta",
 } as const;
 
-/** A total record, so a new compat fails to compile until its mount and adapter are named. */
 export const OPENCODE_ROUTES: Record<Compat, WireRoute<"opencode">> = {
   chat: {
     adapter: chatAdapter({
@@ -52,7 +50,6 @@ export const OPENCODE_ROUTES: Record<Compat, WireRoute<"opencode">> = {
   },
 };
 
-/** The wire the Go table names for a model, or a 400 before any request leaves the process. */
 export function opencodeDefaultCompat(upstreamModel: string): CompatChoice {
   const model = opencodeModelOf(upstreamModel);
 

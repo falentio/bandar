@@ -5,14 +5,9 @@ import { UpstreamError, type ProviderAdapter, type ProviderTarget, type WireRout
 
 export type RoutedAttempt = {
   readonly adapter: ProviderAdapter;
-  /** The target with the route's mount already folded into baseUrl. */
   readonly target: ProviderTarget;
 };
 
-/**
- * A declared override wins, then the provider's own default, then a 400. An override this kind no
- * longer declares is treated as absent, so a stale row degrades instead of failing the request.
- */
 export function routeAttempt(
   kind: ProviderKind,
   target: ProviderTarget,

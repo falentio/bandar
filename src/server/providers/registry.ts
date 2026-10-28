@@ -47,7 +47,6 @@ export function definitionFor<K extends ProviderKind>(kind: K): ProviderDefiniti
   return providerDefinitions[kind];
 }
 
-/** The compatibilities a kind declares, in the shared order. */
 export function compatsOf(kind: ProviderKind): Compat[] {
   const routes = definitionFor(kind).routes;
 

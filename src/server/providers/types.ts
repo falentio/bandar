@@ -138,7 +138,6 @@ export type ProviderRoutes<K extends ProviderKind = ProviderKind> = Readonly<
   Partial<Record<Compat, WireRoute<K>>>
 >;
 
-/** What the provider's own rules say about one upstream model. Total: a model it cannot route is a value. */
 export type CompatChoice =
   | { readonly compat: Compat }
   | { readonly compat: null; readonly reason: string };
@@ -152,7 +151,6 @@ export type DefinitionCapabilities<K extends ProviderKind> = {
   readonly renew?: CredentialRenewer;
 };
 
-/** A default that does not depend on the model. */
 export function always(compat: Compat): (upstreamModel: string) => CompatChoice {
   return () => ({ compat });
 }

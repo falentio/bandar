@@ -93,7 +93,6 @@ export const ProviderKindSchema = v.picklist(PROVIDER_KINDS);
 
 export const CompatSchema = v.picklist(COMPATIBILITIES);
 
-/** A compat this build knows, or null. The column and the wire value both pass through here. */
 export function parseCompat(value: string | null): Compat | null {
   return COMPATIBILITIES.find((compat) => compat === value) ?? null;
 }

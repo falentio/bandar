@@ -399,7 +399,8 @@ Helpers in `src/server/providers/http.ts`:
   the same network mapping.
 - `requireOk(response)` reads an error envelope (`error.message`, `message`, or
   plain text) and classifies the status.
-- `sseData(body, signal)` yields the joined `data:` lines of each SSE event.
+- `sseData(body, signal)` yields the joined `data:` lines of each SSE event, including one
+  the upstream closes on without a trailing blank line.
 - `apiKeyHeaders(name)` returns a `HeaderFactory` that omits the header when the
   upstream needs no key, and `bearerHeaders` is the `Authorization: Bearer` one.
 

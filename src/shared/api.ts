@@ -5,6 +5,7 @@ export const GATEWAY_PREFIX = "/v1";
 
 export const apiPaths = {
   health: `${API_PREFIX}/health`,
+  backup: `${API_PREFIX}/backup`,
 };
 
 export const isApiPath = (pathname: string): boolean =>
@@ -27,6 +28,24 @@ export const HealthSchema = v.object({
   duckMigration: v.nullable(v.string()),
 });
 
+export const BackupMemberSchema = v.object({
+  name: v.pipe(v.string(), v.minLength(1)),
+  size: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  sha256: v.pipe(v.string(), v.regex(/^[0-9a-f]{64}$/u)),
+});
+
+export const BackupManifestSchema = v.object({
+  version: v.pipe(v.string(), v.minLength(1)),
+  createdAt: v.pipe(v.string(), v.isoTimestamp()),
+  sqliteTag: v.nullable(v.string()),
+  duckdbTag: v.nullable(v.string()),
+  members: v.array(BackupMemberSchema),
+});
+
 export type ApiErrorBody = v.InferOutput<typeof ApiErrorBodySchema>;
 
 export type Health = v.InferOutput<typeof HealthSchema>;
+
+export type BackupMember = v.InferOutput<typeof BackupMemberSchema>;
+
+export type BackupManifest = v.InferOutput<typeof BackupManifestSchema>;

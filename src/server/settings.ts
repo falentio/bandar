@@ -8,11 +8,41 @@ const SETTINGS_FILE = "config.json";
 // of naming the typo. This runs before strictObject, which only sees the keys it copies.
 const notAnArray = v.custom((value) => !Array.isArray(value), "must hold an object");
 
+const UrlSchema = v.pipe(v.string(), v.trim(), v.url());
+
+// v.url records its issue and still runs the next action, so this check must not throw on a value
+// v.url already rejected.
+const isOrigin = (value: string): boolean => {
+  if (!URL.canParse(value)) return false;
+
+  const url = new URL(value);
+
+  return (
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === "" &&
+    url.username === "" &&
+    url.password === ""
+  );
+};
+
+// A browser compares an origin by scheme, host, and port, so the stored form is the URL's own
+// origin: HTTPS://X.COM/ becomes https://x.com.
+const OriginSchema = v.pipe(
+  UrlSchema,
+  v.check(isOrigin, "must be an origin such as https://llm.example.com, with no path"),
+  v.transform((value) => new URL(value).origin),
+);
+
 const ServerSettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
     host: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
     port: v.optional(v.pipe(v.number(), v.integer(), v.minValue(MIN_PORT), v.maxValue(MAX_PORT))),
+    authUrl: v.optional(UrlSchema),
+    trustedOrigins: v.optional(
+      v.pipe(v.array(OriginSchema), v.minLength(1, "needs at least one origin")),
+    ),
   }),
 );
 
@@ -26,8 +56,8 @@ export const SettingsSchema = v.pipe(
 export type Settings = v.InferOutput<typeof SettingsSchema>;
 
 export type SettingsRead =
-  | { readonly kind: "ok"; readonly settings: Settings }
-  | { readonly kind: "missing" }
+  | { readonly kind: "ok"; readonly path: string; readonly settings: Settings }
+  | { readonly kind: "missing"; readonly path: string }
   | { readonly kind: "invalid"; readonly path: string; readonly reason: string };
 
 export const settingsPath = (home: string): string => join(home, SETTINGS_FILE);
@@ -38,7 +68,7 @@ const isMissingFile = (error: unknown): error is Error =>
 /**
  * Reads the settings through a caller-supplied reader, so the caller owns the filesystem and a
  * test can hand over a string. A missing file is the normal state: every setting has a default.
- * An invalid result names the file it read, so the caller reports the path it actually opened.
+ * Every result names the file, so a caller reports the path it actually opened.
  */
 export function readSettings(home: string, read: (path: string) => string): SettingsRead {
   const path = settingsPath(home);
@@ -47,7 +77,7 @@ export function readSettings(home: string, read: (path: string) => string): Sett
   try {
     text = read(path);
   } catch (error) {
-    if (isMissingFile(error)) return { kind: "missing" };
+    if (isMissingFile(error)) return { kind: "missing", path };
 
     return {
       kind: "invalid",
@@ -58,7 +88,7 @@ export function readSettings(home: string, read: (path: string) => string): Sett
 
   const parsed = v.safeParse(v.pipe(v.string(), v.parseJson(), SettingsSchema), text);
 
-  if (parsed.success) return { kind: "ok", settings: parsed.output };
+  if (parsed.success) return { kind: "ok", path, settings: parsed.output };
 
   return {
     kind: "invalid",

@@ -117,7 +117,7 @@ export function loadSettings(home: string, io: SettingsIo): SettingsRead {
   const parsed = v.safeParse(v.pipe(v.string(), v.parseJson(), SettingsSchema), text);
 
   if (parsed.success) {
-    pointAtSchema(path, parsed.output, io);
+    pointAtSchema(path, text, parsed.output, io);
 
     return { kind: "ok", path, settings: parsed.output };
   }
@@ -147,13 +147,30 @@ function tryWrite(io: SettingsIo, path: string, text: string): void {
   }
 }
 
+const SCHEMA_KEY = `"$schema": ${JSON.stringify(SETTINGS_SCHEMA_REF)}`;
+
 /**
  * Adds the local schema reference to a file that lacks it, so an editor completes and checks the
- * file without a network. A $schema the operator wrote is left alone, and the file keeps its
- * settings: only the key is added.
+ * file without a network. A $schema the operator wrote is left alone, and every other byte of the
+ * file stays as written: the key goes in right after the first brace, holding the indent of the
+ * key that follows it.
  */
-function pointAtSchema(path: string, settings: Settings, io: SettingsIo): void {
+function pointAtSchema(path: string, text: string, settings: Settings, io: SettingsIo): void {
   if (settings.$schema !== undefined) return;
 
-  tryWrite(io, path, JSON.stringify({ $schema: SETTINGS_SCHEMA_REF, ...settings }, null, 2) + "\n");
+  const pointed = withSchemaKey(text);
+
+  if (pointed !== null) tryWrite(io, path, pointed);
+}
+
+function withSchemaKey(text: string): string | null {
+  const open = text.indexOf("{");
+
+  if (open === -1) return null;
+
+  const body = text.slice(open + 1);
+  const indent = /^\s*/u.exec(body)?.[0] ?? "";
+  const empty = body.slice(0, body.lastIndexOf("}")).trim() === "";
+
+  return `${text.slice(0, open + 1)}${indent}${SCHEMA_KEY}${empty ? "" : ","}${body}`;
 }

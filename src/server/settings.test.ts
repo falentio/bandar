@@ -197,13 +197,32 @@ describe("the schema beside the file", () => {
     expect(rest).toEqual([]);
   });
 
-  test("a file without $schema is pointed at the local schema", () => {
-    const [rewrite] = rewritesOf('{"server":{"port":4000}}');
+  test("a file without $schema keeps every byte and gains the key", () => {
+    const [rewrite] = rewritesOf('{"server":{"host":" 127.0.0.1 ","port":4000}}');
 
     expect(rewrite?.[0]).toBe(path);
     expect(rewrite?.[1]).toBe(
-      '{\n  "$schema": "./config.schema.json",\n  "server": {\n    "port": 4000\n  }\n}\n',
+      '{"$schema": "./config.schema.json","server":{"host":" 127.0.0.1 ","port":4000}}',
     );
+    expect(JSON.parse(rewrite?.[1] ?? "null")).toEqual({
+      $schema: "./config.schema.json",
+      server: { host: " 127.0.0.1 ", port: 4000 },
+    });
+  });
+
+  test("the key holds the indent of the key that follows it", () => {
+    const source = '{\n    "server": {\n        "port": 4000\n    }\n}\n';
+
+    const [rewrite] = rewritesOf(source);
+
+    expect(rewrite?.[1]).toBe(
+      '{\n    "$schema": "./config.schema.json",\n    "server": {\n        "port": 4000\n    }\n}\n',
+    );
+  });
+
+  test("an empty object gains the key and nothing else, with no trailing comma", () => {
+    expect(rewritesOf("{}")[0]?.[1]).toBe('{"$schema": "./config.schema.json"}');
+    expect(rewritesOf("{\n}\n")[0]?.[1]).toBe('{\n"$schema": "./config.schema.json"\n}\n');
   });
 
   test("a $schema the operator wrote is left alone", () => {

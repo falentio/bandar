@@ -692,97 +692,62 @@ export function ModelRow({
 
   const wire = COMPAT_LABELS[compatOf(model)];
 
-  const actions = (
-    <>
-      <button
-        type="button"
-        aria-label={`Edit ${model.alias || model.upstreamModel}`}
-        disabled={pending}
-        onClick={() => openEditor(true)}
-        className="rounded p-1.5 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none sm:p-1"
-      >
-        <PencilIcon className="size-4 sm:size-3.5" />
-      </button>
-      <button
-        type="button"
-        aria-label={`Remove ${model.alias || model.upstreamModel}`}
-        disabled={pending}
-        onClick={() => {
-          if (window.confirm(`Remove the alias ${model.alias}?`)) onRemove();
-        }}
-        className="rounded p-1.5 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none sm:p-1"
-      >
-        <TrashIcon className="size-4 sm:size-3.5" />
-      </button>
-    </>
-  );
-
   return (
-    <li className="group/model">
-      <div className="hidden flex-wrap items-center gap-2 px-3 py-2 text-sm sm:flex">
+    <li className="group/model px-3 py-2.5 text-sm">
+      <div className="flex items-start gap-1">
         <button
           type="button"
           onClick={() => openEditor(true)}
           disabled={pending}
           aria-label={`Edit ${model.alias}`}
-          className="flex min-w-0 items-baseline gap-2 rounded text-left transition-colors duration-150 ease-out hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50"
+          className="min-w-0 flex-1 rounded py-0.5 text-left transition-colors duration-150 ease-out hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50"
         >
-          <span className="truncate font-medium">{labelOf(model)}</span>
-          <code className="truncate font-mono text-xs text-muted-foreground">{model.ref}</code>
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="truncate font-medium">{labelOf(model)}</span>
+            <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+              {shortRef(model)}
+            </code>
+          </span>
         </button>
-        {model.shadowed ? (
-          <span className="text-xs text-muted-foreground">an alias with this name wins</span>
-        ) : null}
-        <HealthBadge failures={model.failures} flaggedUntil={model.flaggedUntil} />
-        {tags.map((tag) => (
-          <TagChip key={tag.slug} tag={tag} />
-        ))}
-        <span className="text-xs text-muted-foreground">
-          <PriceTiers model={model} />
-        </span>
-        <span className="rounded-full border px-1.5 py-0.5 text-xs text-muted-foreground">
-          {wire}
-        </span>
-        <div className="ms-auto flex items-center gap-0.5 opacity-0 transition-opacity duration-150 ease-out group-hover/model:opacity-100 focus-within:opacity-100">
-          {actions}
-        </div>
-      </div>
-
-      <div className="px-3 py-2.5 text-sm sm:hidden">
-        <div className="flex items-start gap-1">
+        <div className="-me-1 flex shrink-0 items-center opacity-100 transition-opacity duration-150 ease-out sm:opacity-0 sm:group-hover/model:opacity-100 sm:focus-within:opacity-100">
           <button
             type="button"
-            onClick={() => openEditor(true)}
+            aria-label={`Edit ${model.alias || model.upstreamModel}`}
             disabled={pending}
-            aria-label={`Edit ${model.alias}`}
-            className="min-w-0 flex-1 rounded py-0.5 text-left transition-colors duration-150 ease-out hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50"
+            onClick={() => openEditor(true)}
+            className="rounded p-1.5 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
           >
-            <span className="flex min-w-0 items-baseline gap-1.5">
-              <span className="truncate font-medium">{labelOf(model)}</span>
-              <code className="min-w-0 truncate font-mono text-[0.7rem] text-muted-foreground">
-                {shortRef(model)}
-              </code>
-            </span>
+            <PencilIcon className="size-4" />
           </button>
-          <div className="-me-1 flex shrink-0 items-center">{actions}</div>
+          <button
+            type="button"
+            aria-label={`Remove ${model.alias || model.upstreamModel}`}
+            disabled={pending}
+            onClick={() => {
+              if (window.confirm(`Remove the alias ${model.alias}?`)) onRemove();
+            }}
+            className="rounded p-1.5 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
+          >
+            <TrashIcon className="size-4" />
+          </button>
         </div>
-
-        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] text-muted-foreground">
-          <span className="text-foreground/80">{wire}</span>
-          <span aria-hidden="true">·</span>
-          <PriceTiers model={model} />
-          {model.shadowed ? <span>· shadowed by an alias</span> : null}
-          <HealthBadge failures={model.failures} flaggedUntil={model.flaggedUntil} />
-        </p>
-
-        {tags.length === 0 ? null : (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {tags.map((tag) => (
-              <TagChip key={tag.slug} tag={tag} />
-            ))}
-          </div>
-        )}
       </div>
+
+      <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <span className="text-foreground/80">{wire}</span>
+        <span aria-hidden="true">·</span>
+        <PriceTiers model={model} />
+        {model.shadowed ? <span>· shadowed by an alias</span> : null}
+        <HealthBadge failures={model.failures} flaggedUntil={model.flaggedUntil} />
+      </p>
+
+      {tags.length === 0 ? null : (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {tags.map((tag) => (
+            <TagChip key={tag.slug} tag={tag} />
+          ))}
+        </div>
+      )}
 
       <EditModelDialog
         providerId={providerId}

@@ -165,29 +165,32 @@ for a system one.
 | ----------------------- | ---------------------------- | ------------------------- |
 | `server.host`           | a non-empty string           | `0.0.0.0`                 |
 | `server.port`           | an integer from 0 to 65535   | `3000`                    |
-| `server.authUrl`        | a URL                        | `http://localhost:<port>` |
+| `server.authUrl`        | an http or https URL         | `http://localhost:<port>` |
 | `server.trustedOrigins` | a non-empty array of origins | derived, see below        |
 
 Every key is optional, and so is the `server` section. An origin is a URL with no path,
 query, fragment, or credentials, and it stores as the URL's origin, so `https://X.COM/`
 becomes `https://x.com`. The file is strict: an unknown key, a root that is not a JSON
 object, an empty host, a port that is not a whole number in range, an empty
-`server.trustedOrigins`, an origin with a path, and a file that is not JSON all fail the
-boot, and the message names the file and the field. A typo never falls back to a default.
+`server.trustedOrigins`, an origin with a path, a URL that is not http or https, and a
+file that is not JSON all fail the boot, and the message names the file and the field. A
+typo never falls back to a default.
 
-The default trusted origins follow the resolved port: `http://localhost:<port>` and
-`http://127.0.0.1:<port>`, plus `http://<host>:<port>` when `server.host` names an
-address rather than `0.0.0.0` or `::`. Only a development run adds the web dev server at
-`http://localhost:5173` and `http://127.0.0.1:5173`.
+The default trusted origins start with the auth URL's own origin. They then follow the
+resolved port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
+`http://<host>:<port>` when `server.host` names an address rather than `0.0.0.0` or
+`::`. Only a development run adds the web dev server at `http://localhost:5173` and
+`http://127.0.0.1:5173`.
 
 An environment variable wins over the file, and the file wins over the default. A blank
 environment variable counts as unset. The dev proxy in `vite.config.ts` takes the API port
 from `BANDAR_PORT` rather than the file, so set that variable too when you change
 `server.port` and run `bun run dev`.
 
-Behind a reverse proxy, set both `server.authUrl` and `server.trustedOrigins` to the
-public origin, such as `https://llm.example.com`, so sign-in links and the browser's
-origin check agree. `authSecret` is not a settings key: the data directory is
+Behind a reverse proxy, set `server.authUrl` to the public URL, such as
+`https://llm.example.com`. Its origin joins the default trusted origins, so sign-in links
+and the browser's origin check agree with that one key, and `server.trustedOrigins` is
+for extra origins only. `authSecret` is not a settings key: the data directory is
 world-readable, while the service env file is mode 600.
 
 `bandar` reads the file on every start, so a restart applies an edit. A service unit

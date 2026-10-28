@@ -25,6 +25,7 @@ import {
   providerPaths,
   type Provider,
 } from "../src/shared/providers";
+import { CHARS_PER_TOKEN } from "../src/server/router/anthropic-wire";
 import { TagListSchema, tagPaths } from "../src/shared/tags";
 
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
@@ -70,6 +71,43 @@ const OpenAiErrorSchema = v.object({
   }),
 });
 
+const MessageSchema = v.object({
+  type: v.literal("message"),
+  role: v.literal("assistant"),
+  model: v.string(),
+  content: v.array(v.object({ type: v.literal("text"), text: v.string() })),
+  stop_reason: v.string(),
+  usage: v.object({ input_tokens: v.number(), output_tokens: v.number() }),
+});
+
+const MessageErrorSchema = v.object({
+  type: v.literal("error"),
+  error: v.object({ type: v.string(), message: v.string() }),
+});
+
+const TokenCountSchema = v.object({ input_tokens: v.number() });
+
+const MessageEventSchema = v.object({
+  type: v.string(),
+  delta: v.optional(
+    v.object({
+      type: v.optional(v.string()),
+      text: v.optional(v.nullable(v.string())),
+      stop_reason: v.optional(v.nullable(v.string())),
+    }),
+  ),
+  usage: v.optional(
+    v.object({
+      input_tokens: v.optional(v.number()),
+      output_tokens: v.optional(v.number()),
+    }),
+  ),
+});
+
+const UpstreamChatSchema = v.object({
+  messages: v.array(v.object({ role: v.string(), content: v.string() })),
+});
+
 const StreamChunkSchema = v.object({
   choices: v.optional(
     v.array(
@@ -96,6 +134,7 @@ const duckPath = join(workDir, "smoke.duckdb");
 const authEmail = `${Date.now()}@smoke.test`;
 const authPassword = "smoke-password-1";
 
+const upstreamChats: v.InferOutput<typeof UpstreamChatSchema>[] = [];
 const upstream = startUpstream();
 const upstreamOrigin = `http://127.0.0.1:${upstream.port}`;
 const kilocode = startKilocode();
@@ -124,6 +163,7 @@ const riverProvider: ProviderSlot = { provider: null, modelId: "" };
 const nousProvider: ProviderSlot = { provider: null, modelId: "" };
 const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
 const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
+const wireProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -1943,6 +1983,212 @@ try {
     assert.ok(list.data.some((model) => model.id === ref));
   });
 
+  await check(
+    "POST /v1/messages answers an Anthropic message with a leading system turn",
+    async () => {
+      const provider = await postJson(
+        providerPaths.list,
+        {
+          name: "Wire OpenAI",
+          kind: "openai",
+          baseUrl: `${upstreamOrigin}/openai`,
+          apiKey: "openai-key",
+        },
+        ProviderSchema,
+        201,
+      );
+
+      const withModel = await postJson(
+        providerPaths.models(provider.id),
+        { upstreamModel: "wire-upstream-model", alias: "wire-openai" },
+        ProviderSchema,
+        201,
+      );
+
+      wireProvider.provider = provider;
+      wireProvider.modelId = withModel.models[0]?.id ?? "";
+
+      const response = await postMessages(
+        messageRequest("wire-openai", false, [
+          { type: "text", text: "be" },
+          { type: "text", text: "brief" },
+        ]),
+      );
+
+      assert.equal(response.status, 200);
+
+      const body = v.parse(MessageSchema, await response.json());
+
+      assert.equal(body.model, "wire-openai");
+      assert.equal(body.content[0]?.text, "Hello from OpenAI");
+      assert.equal(body.stop_reason, "end_turn");
+      assert.deepEqual(body.usage, { input_tokens: 11, output_tokens: 7 });
+
+      const upstreamBody = upstreamChats.at(-1);
+
+      if (upstreamBody === undefined) throw new Error("the fake OpenAI upstream saw no chat");
+
+      assert.deepEqual(upstreamBody.messages[0], { role: "system", content: "be\nbrief" });
+
+      const providerRef = await postMessages(
+        messageRequest("wire-openai/wire-upstream-model", false),
+      );
+
+      assert.equal(providerRef.status, 200);
+    },
+  );
+
+  await check("POST /v1/messages streams the Anthropic event order", async () => {
+    const response = await postMessages(messageRequest("claude", true));
+
+    assert.equal(response.status, 200);
+    assert.match(contentType(response), /text\/event-stream/);
+
+    const stream = await readMessageStream(response);
+
+    assert.deepEqual(stream.events, [
+      "message_start",
+      "content_block_start",
+      "content_block_delta",
+      "content_block_delta",
+      "content_block_stop",
+      "message_delta",
+      "message_stop",
+    ]);
+    assert.equal(stream.text, "Hello from Anthropic");
+    assert.equal(stream.stopReason, "end_turn");
+    assert.equal(stream.inputTokens, 9);
+    assert.equal(stream.outputTokens, 5);
+  });
+
+  await check("POST /v1/messages falls through a tag to the next model", async () => {
+    const dead = await postJson(
+      providerPaths.list,
+      {
+        name: "Dead Wire",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "wrong-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    const withModel = await postJson(
+      providerPaths.models(dead.id),
+      { upstreamModel: "dead-wire-model", alias: "dead-wire" },
+      ProviderSchema,
+      201,
+    );
+
+    const deadModel = withModel.models.find((model) => model.alias === "dead-wire");
+    const wireModelId = wireProvider.modelId;
+
+    if (deadModel === undefined) throw new Error("the dead wire model is missing");
+
+    if (wireModelId === "") throw new Error("the wire model is missing");
+
+    const created = await postJson(tagPaths.create, { slug: "wire" }, TagListSchema, 201);
+    const tag = created.tags.find((entry) => entry.slug === "wire");
+
+    if (tag === undefined) throw new Error("the wire tag is missing");
+
+    await putJson(
+      tagPaths.models(tag.id),
+      { modelIds: [deadModel.id, wireModelId] },
+      TagListSchema,
+      200,
+    );
+
+    const response = await postMessages(messageRequest("tags/wire", false));
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(MessageSchema, await response.json());
+
+    assert.equal(body.content[0]?.text, "Hello from OpenAI");
+
+    const rows = await waitForRequests(
+      "tags/wire",
+      (requests) =>
+        requests.some((request) => request.status === "error") &&
+        requests.some((request) => request.status === "success"),
+      "both Anthropic-wire attempts",
+    );
+
+    assert.equal(rows.find((request) => request.status === "error")?.model, "dead-wire");
+    assert.equal(rows.find((request) => request.status === "success")?.model, "wire-openai");
+  });
+
+  await check("POST /v1/messages rejects a tool_use block with 422", async () => {
+    const response = await postMessages({
+      model: "wire-openai",
+      max_tokens: 64,
+      messages: [
+        { role: "user", content: "hello" },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "let me look" },
+            { type: "tool_use", id: "toolu_1", name: "look", input: {} },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(response.status, 422);
+
+    const body = v.parse(MessageErrorSchema, await response.json());
+
+    assert.equal(body.error.type, "invalid_request_error");
+    assert.match(body.error.message, /tool_use/);
+    assert.match(body.error.message, /messages\[1\]\.content\[1\]/);
+  });
+
+  await check(
+    "POST /v1/messages answers an upstream failure in the Anthropic envelope",
+    async () => {
+      const response = await postMessages(messageRequest("dead-model", false));
+
+      assert.equal(response.status, 502);
+
+      const body = v.parse(MessageErrorSchema, await response.json());
+
+      assert.equal(body.error.type, "authentication_error");
+    },
+  );
+
+  await check("POST /v1/messages without a key is an Anthropic 401", async () => {
+    const response = await postMessages(messageRequest("wire-openai", false), {});
+
+    assert.equal(response.status, 401);
+
+    const body = v.parse(MessageErrorSchema, await response.json());
+
+    assert.equal(body.error.type, "authentication_error");
+  });
+
+  await check("POST /v1/messages/count_tokens estimates from the divisor", async () => {
+    const system = "be brief";
+    const text = "hello from count";
+
+    const response = await fetch(new URL("/v1/messages/count_tokens", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...bearer() },
+      body: JSON.stringify({
+        model: "wire-openai",
+        system,
+        messages: [{ role: "user", content: text }],
+      }),
+    });
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(TokenCountSchema, await response.json());
+
+    assert.equal(body.input_tokens, Math.ceil((system.length + 1 + text.length) / CHARS_PER_TOKEN));
+  });
+
   await check("GET /api/providers/:id hides another account's provider", async () => {
     const response = await fetch(
       new URL(`${providerPaths.detail("00000000-0000-0000-0000-000000000000")}?days=30`, origin),
@@ -2194,6 +2440,74 @@ async function putJson<T>(
   return v.parse(schema, await response.json());
 }
 
+function messageRequest(model: string, stream: boolean, system?: Json): Json {
+  const body = {
+    model,
+    stream,
+    max_tokens: 64,
+    thinking: { type: "enabled", budget_tokens: 1024 },
+    metadata: { user_id: "smoke" },
+    top_k: 5,
+    messages: [{ role: "user", content: `hello from ${model}` }],
+  };
+
+  return system === undefined ? body : { ...body, system };
+}
+
+function postMessages(
+  body: Json,
+  headers: Readonly<Record<string, string>> = bearer(),
+): Promise<Response> {
+  return fetch(new URL("/v1/messages", origin), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+async function readMessageStream(response: Response): Promise<{
+  events: readonly string[];
+  text: string;
+  stopReason: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+}> {
+  const raw = await response.text();
+  const events: string[] = [];
+  let text = "";
+  let stopReason: string | null = null;
+  let inputTokens: number | null = null;
+  let outputTokens: number | null = null;
+
+  for (const frame of raw.split("\n\n")) {
+    if (frame.trim() === "") continue;
+
+    const lines = frame.split("\n");
+    const name = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length);
+    const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length);
+
+    assert.ok(
+      name !== undefined && data !== undefined,
+      `frame without an event line and a data line: ${frame}`,
+    );
+
+    const event = v.parse(MessageEventSchema, JSON.parse(data));
+
+    assert.equal(event.type, name, "the event line disagrees with the data type");
+    events.push(name);
+
+    if (event.type === "content_block_delta") text += event.delta?.text ?? "";
+
+    if (event.type === "message_delta") {
+      stopReason = event.delta?.stop_reason ?? null;
+      inputTokens = event.usage?.input_tokens ?? null;
+      outputTokens = event.usage?.output_tokens ?? null;
+    }
+  }
+
+  return { events, text, stopReason, inputTokens, outputTokens };
+}
+
 function chatRequest(model: string, stream: boolean): Promise<Response> {
   return fetch(new URL("/v1/chat/completions", origin), {
     method: "POST",
@@ -2392,7 +2706,8 @@ function startUpstream() {
     port: 0,
     async fetch(request) {
       const url = new URL(request.url);
-      const body = v.safeParse(v.object({ stream: v.optional(v.boolean()) }), await request.json());
+      const raw: unknown = await request.json();
+      const body = v.safeParse(v.object({ stream: v.optional(v.boolean()) }), raw);
       const stream = body.success ? (body.output.stream ?? false) : false;
 
       if (url.pathname === "/openai/chat/completions") {
@@ -2401,6 +2716,10 @@ function startUpstream() {
         }
 
         if (!stream) {
+          const probe = v.safeParse(UpstreamChatSchema, raw);
+
+          if (probe.success) upstreamChats.push(probe.output);
+
           return Response.json({
             choices: [
               {

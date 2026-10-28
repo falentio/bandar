@@ -80,7 +80,7 @@ export function ProvidersPanel() {
                 <CardContent className="py-10 text-center">
                   <p className="text-sm font-medium">No custom providers</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Add an upstream to route your own model aliases.
+                    Add an upstream to route your own models.
                   </p>
                 </CardContent>
               </Card>

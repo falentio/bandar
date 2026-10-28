@@ -1,3 +1,5 @@
+import { modelLabelOf } from "../shared/providers";
+
 export type ModelOption = { readonly value: string; readonly label: string };
 
 export type ModelChoiceGroup = {
@@ -12,14 +14,14 @@ export type ModelChoices = {
 
 type ProviderSource = {
   readonly name: string;
-  readonly models: readonly { readonly alias: string; readonly upstreamModel: string }[];
+  readonly models: readonly {
+    readonly slug: string;
+    readonly alias: string | null;
+    readonly upstreamModel: string;
+  }[];
 };
 
 type TagSource = { readonly ref: string };
-
-function optionLabel(alias: string, upstreamModel: string): string {
-  return alias === upstreamModel ? alias : `${alias} (${upstreamModel})`;
-}
 
 export function modelChoices(
   providers: readonly ProviderSource[],
@@ -41,10 +43,16 @@ export function modelChoices(
     const options: ModelOption[] = [];
 
     for (const model of provider.models) {
-      if (taken.has(model.alias)) continue;
+      if (taken.has(model.slug)) continue;
 
-      taken.add(model.alias);
-      options.push({ value: model.alias, label: optionLabel(model.alias, model.upstreamModel) });
+      taken.add(model.slug);
+
+      const label = modelLabelOf(model);
+
+      options.push({
+        value: model.slug,
+        label: label === model.slug ? label : `${label} (${model.slug})`,
+      });
     }
 
     if (options.length === 0) continue;

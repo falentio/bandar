@@ -29,7 +29,8 @@ function model(overrides: Partial<ProviderModel>): ProviderModel {
   return {
     id: "model-1",
     upstreamModel: "gpt-4o-mini",
-    alias: "gpt-4o-mini",
+    slug: "local-openai/gpt-4o-mini",
+    alias: null,
     ref: "local-openai/gpt-4o-mini",
     shadowed: false,
     compat: null,
@@ -47,13 +48,14 @@ type Scenario = {
   readonly label: string;
   readonly note: string | null;
   readonly model: ProviderModel;
+  readonly twin?: ProviderModel;
   readonly tags: readonly { readonly slug: string; readonly priority: number }[];
   readonly pending: boolean;
   readonly width: string | null;
   readonly flexed: boolean;
 };
 
-const LONG_ALIAS = "a".repeat(100);
+const LONG_LABEL = "a".repeat(100);
 const LONG_REF = `local-openai/${"b".repeat(180)}`;
 
 const TEN_TAGS = [
@@ -73,16 +75,40 @@ const SCENARIOS: readonly Scenario[] = [
   {
     label: "Typical content",
     note: null,
-    model: model({ alias: "gpt-4o-mini-fast", inputPricePerMtok: 0.15, outputPricePerMtok: 0.6 }),
+    model: model({
+      slug: "local-openai/gpt-4o-mini",
+      alias: "gpt-4o-mini-fast",
+      inputPricePerMtok: 0.15,
+      outputPricePerMtok: 0.6,
+    }),
     tags: [{ slug: "production", priority: 1 }],
     pending: false,
     width: null,
     flexed: false,
   },
   {
-    label: "Content length · empty alias",
+    label: "Content length · no label",
     note: "clean: the card falls back to the upstream id, so a name always shows.",
-    model: model({ alias: "", ref: "local-openai/gpt-4o-mini" }),
+    model: model({ slug: "local-openai/gpt-4o-mini", alias: null }),
+    tags: [],
+    pending: false,
+    width: null,
+    flexed: false,
+  },
+  {
+    label: "Content · one label on two models",
+    note: "clean: both rows name themselves the same and the addresses keep them apart.",
+    model: model({ id: "model-1", slug: "river/gpt-4o-mini", alias: "gpt-4o-mini" }),
+    twin: model({ id: "model-2", slug: "yeta/gpt-4o-mini", alias: "gpt-4o-mini" }),
+    tags: [],
+    pending: false,
+    width: null,
+    flexed: false,
+  },
+  {
+    label: "Content · custom address, different label",
+    note: "clean: the label leads and the address sits beside it in muted mono.",
+    model: model({ slug: "fast-cheap", alias: "Fast and cheap" }),
     tags: [],
     pending: false,
     width: null,
@@ -98,9 +124,9 @@ const SCENARIOS: readonly Scenario[] = [
     flexed: false,
   },
   {
-    label: "Content length · 100-char unbreakable alias",
-    note: "clean: the name truncates inside the card and the ref keeps its own line.",
-    model: model({ alias: LONG_ALIAS, ref: "local-openai/gpt-4o-mini" }),
+    label: "Content length · 100-char unbreakable label",
+    note: "clean: the name truncates inside the card and the address keeps its own line.",
+    model: model({ slug: "local-openai/gpt-4o-mini", alias: LONG_LABEL }),
     tags: [],
     pending: false,
     width: null,
@@ -109,17 +135,17 @@ const SCENARIOS: readonly Scenario[] = [
   {
     label: "Content length · 192-char ref",
     note: "clean: the ref truncates to the upstream segment only, which is the part that varies.",
-    model: model({ alias: "long-ref", ref: LONG_REF }),
+    model: model({ slug: "long-ref", alias: "long-ref", ref: LONG_REF }),
     tags: [],
     pending: false,
     width: null,
     flexed: false,
   },
   {
-    label: "Content length · empty alias and 100-char alias together",
+    label: "Content length · two long strings together",
     note: "clean: both truncate on their own line, 96px tall.",
     model: model({
-      alias: LONG_ALIAS,
+      alias: LONG_LABEL,
       ref: LONG_REF,
       inputPricePerMtok: 0.15,
       outputPricePerMtok: 0.6,
@@ -130,18 +156,18 @@ const SCENARIOS: readonly Scenario[] = [
     flexed: false,
   },
   {
-    label: "Content shape · emoji alias",
+    label: "Content shape · emoji label",
     note: "clean: emoji keep the row's line-height, no clipped glyph.",
-    model: model({ alias: "🚀🚀rocket", ref: "local-openai/gpt-4o-mini" }),
+    model: model({ slug: "local-openai/rocket", alias: "🚀🚀rocket" }),
     tags: [],
     pending: false,
     width: null,
     flexed: false,
   },
   {
-    label: "Content shape · Arabic alias",
-    note: "Alias renders RTL while the row's other text runs LTR; the name sits on the wrong side of its own ref.",
-    model: model({ alias: "نموذج-الذكاء", ref: "local-openai/gpt-4o-mini" }),
+    label: "Content shape · Arabic label",
+    note: "A label renders RTL while the row's other text runs LTR; it can sit on the wrong side of its own address.",
+    model: model({ slug: "local-openai/arabic", alias: "نموذج-الذكاء" }),
     tags: [],
     pending: false,
     width: null,
@@ -150,7 +176,7 @@ const SCENARIOS: readonly Scenario[] = [
   {
     label: "Content shape · mixed-direction ref",
     note: "Ref reorders around the Japanese segment, so the path no longer reads left to right.",
-    model: model({ alias: "mixed", ref: "local-openai/モデル-v2" }),
+    model: model({ slug: "mixed", alias: "mixed", ref: "local-openai/モデル-v2" }),
     tags: [],
     pending: false,
     width: null,
@@ -178,7 +204,7 @@ const SCENARIOS: readonly Scenario[] = [
     label: "Container · 320px",
     note: "clean: 120px over three bands, every value visible.",
     model: model({
-      alias: LONG_ALIAS,
+      alias: LONG_LABEL,
       ref: LONG_REF,
       inputPricePerMtok: 0.15,
       outputPricePerMtok: 0.6,
@@ -217,7 +243,7 @@ const SCENARIOS: readonly Scenario[] = [
   },
   {
     label: "State · shadowed",
-    note: "clean: reads 'shadowed by an alias' inline with the meta.",
+    note: "clean: reads 'shadowed by another model's address' inline with the meta.",
     model: model({ alias: "shadowed-model", shadowed: true }),
     tags: [],
     pending: false,
@@ -249,23 +275,26 @@ const SCENARIOS: readonly Scenario[] = [
 ];
 
 function Row({ scenario }: { scenario: Scenario }) {
-  const row = (
+  const twins = scenario.twin === undefined ? [scenario.model] : [scenario.model, scenario.twin];
+
+  return (
     <ul className="divide-y rounded-lg border">
-      <ModelRow
-        providerId={PROVIDER_ID}
-        model={scenario.model}
-        compats={COMPATS}
-        pending={scenario.pending}
-        tags={scenario.tags}
-        providers={scenario.pending ? pendingProviders : noopProviders}
-        onChanged={() => undefined}
-        onEditingChange={() => undefined}
-        onRemove={() => undefined}
-      />
+      {twins.map((model) => (
+        <ModelRow
+          key={model.id}
+          providerId={PROVIDER_ID}
+          model={model}
+          compats={COMPATS}
+          pending={scenario.pending}
+          tags={scenario.tags}
+          providers={scenario.pending ? pendingProviders : noopProviders}
+          onChanged={() => undefined}
+          onEditingChange={() => undefined}
+          onRemove={() => undefined}
+        />
+      ))}
     </ul>
   );
-
-  return row;
 }
 
 export function ModelRowHarness() {

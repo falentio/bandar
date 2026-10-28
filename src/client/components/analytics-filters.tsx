@@ -9,7 +9,12 @@ import {
   type AnalyticsFilterDimension,
   type AnalyticsFilters,
 } from "../../shared/analytics";
-import { PROVIDER_KIND_LABELS, PROVIDER_KINDS, type Provider } from "../../shared/providers";
+import {
+  PROVIDER_KIND_LABELS,
+  PROVIDER_KINDS,
+  modelLabelOf,
+  type Provider,
+} from "../../shared/providers";
 import type { Tag } from "../../shared/tags";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
@@ -59,7 +64,7 @@ export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProp
       />
       <FilterMenu
         label="Model"
-        options={modelAliasOptions(providers.providers)}
+        options={modelOptions(providers.providers)}
         selected={filters.model}
         onChange={(values) => update("model", values)}
       />
@@ -158,12 +163,12 @@ function providerAccountOptions(providers: readonly Provider[]): readonly Filter
   return options;
 }
 
-function modelAliasOptions(providers: readonly Provider[]): readonly FilterOption[] {
+function modelOptions(providers: readonly Provider[]): readonly FilterOption[] {
   const options: FilterOption[] = [];
 
   for (const provider of providers) {
     for (const model of provider.models) {
-      options.push({ value: model.alias, label: model.alias, hint: provider.name });
+      options.push({ value: model.slug, label: modelLabelOf(model), hint: provider.name });
     }
   }
 

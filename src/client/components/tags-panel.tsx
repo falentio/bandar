@@ -4,13 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { modelLabelOf } from "../../shared/providers";
 import type { Tag } from "../../shared/tags";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
 
 type TagCandidate = {
   readonly id: string;
-  readonly alias: string;
+  readonly slug: string;
+  readonly label: string;
   readonly providerName: string;
   readonly ref: string;
 };
@@ -23,7 +25,8 @@ export function TagsPanel() {
   const models: TagCandidate[] = providers.providers.flatMap((provider) =>
     provider.models.map((model) => ({
       id: model.id,
-      alias: model.alias,
+      slug: model.slug,
+      label: modelLabelOf(model),
       providerName: provider.name,
       ref: model.ref,
     })),
@@ -175,14 +178,14 @@ function TagCard({
                 <span className="w-6 shrink-0 text-xs tabular-nums text-muted-foreground">
                   #{model.priority}
                 </span>
-                <span className="font-mono text-sm font-medium">{model.alias}</span>
+                <span className="text-sm font-medium">{modelLabelOf(model)}</span>
                 <span className="text-xs text-muted-foreground">{model.providerName}</span>
                 <code className="font-mono text-xs text-muted-foreground">{model.ref}</code>
                 <span className="ms-auto flex items-center gap-1">
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label={`Move ${model.alias} up`}
+                    aria-label={`Move ${modelLabelOf(model)} up`}
                     disabled={pending || index === 0}
                     onClick={() => move(index, -1)}
                   >
@@ -191,7 +194,7 @@ function TagCard({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label={`Move ${model.alias} down`}
+                    aria-label={`Move ${modelLabelOf(model)} down`}
                     disabled={pending || index === tag.models.length - 1}
                     onClick={() => move(index, 1)}
                   >
@@ -200,7 +203,7 @@ function TagCard({
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label={`Remove ${model.alias} from ${tag.ref}`}
+                    aria-label={`Remove ${modelLabelOf(model)} from ${tag.ref}`}
                     title={
                       tag.models.length === 1
                         ? "Delete the tag to remove its last model"
@@ -230,7 +233,8 @@ function TagCard({
             <option value="">Add model…</option>
             {available.map((model) => (
               <option key={model.id} value={model.id}>
-                {model.providerName} · {model.alias} ({model.ref})
+                {model.providerName} · {model.label}
+                {model.label === model.slug ? "" : ` (${model.slug})`}
               </option>
             ))}
           </select>

@@ -24,6 +24,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run test
+      - run: ./scripts/update-test.sh
+      - run: ./scripts/install-test.sh
 
   build:
     name: build (${{ matrix.name }})

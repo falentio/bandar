@@ -1,4 +1,4 @@
-import { modelLabelOf } from "../shared/providers";
+import { modelLabelOf } from "./model-labels";
 
 export type ModelOption = { readonly value: string; readonly label: string };
 

@@ -24,7 +24,6 @@ import {
   COMPAT_LABELS,
   GENERIC_PROVIDER_KINDS,
   PROVIDER_KIND_LABELS,
-  modelLabelOf,
   type Compat,
   type Provider,
   type ProviderAuthMode,
@@ -32,7 +31,7 @@ import {
   type ProviderModel,
   type ProviderModelRefresh,
 } from "../../shared/providers";
-import { labelForSlug, modelLabels } from "../model-labels";
+import { labelForSlug, modelLabelOf, modelLabels } from "../model-labels";
 import {
   formatExactTokens,
   formatMs,

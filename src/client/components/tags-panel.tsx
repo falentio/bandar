@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { modelLabelOf } from "../../shared/providers";
 import type { Tag } from "../../shared/tags";
+import { modelLabelOf } from "../model-labels";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
 

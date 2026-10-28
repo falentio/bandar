@@ -119,14 +119,6 @@ export const ProviderModelSchema = v.object({
   flaggedUntil: v.nullable(v.string()),
 });
 
-/** A model is named by its label. Shared so the server and the client cannot disagree. */
-export function modelLabelOf(model: {
-  readonly alias: string | null;
-  readonly upstreamModel: string;
-}): string {
-  return model.alias ?? model.upstreamModel;
-}
-
 export const ProviderCredentialSchema = v.object({
   id: v.string(),
   label: v.string(),

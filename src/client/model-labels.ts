@@ -1,11 +1,17 @@
-import { modelLabelOf, type Provider } from "../shared/providers";
+import type { Provider } from "../shared/providers";
+
+export function modelLabelOf(model: {
+  readonly alias: string | null;
+  readonly upstreamModel: string;
+}): string {
+  return model.alias ?? model.upstreamModel;
+}
 
 export type ModelLabels = {
   readonly bySlug: ReadonlyMap<string, string>;
   readonly byId: ReadonlyMap<string, string>;
 };
 
-/** Names for every model the account can route to. The address stays the fallback. */
 export function modelLabels(providers: readonly Provider[]): ModelLabels {
   const bySlug = new Map<string, string>();
   const byId = new Map<string, string>();

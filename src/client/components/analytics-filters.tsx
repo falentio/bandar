@@ -9,13 +9,9 @@ import {
   type AnalyticsFilterDimension,
   type AnalyticsFilters,
 } from "../../shared/analytics";
-import {
-  PROVIDER_KIND_LABELS,
-  PROVIDER_KINDS,
-  modelLabelOf,
-  type Provider,
-} from "../../shared/providers";
+import { PROVIDER_KIND_LABELS, PROVIDER_KINDS, type Provider } from "../../shared/providers";
 import type { Tag } from "../../shared/tags";
+import { modelLabelOf } from "../model-labels";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
 

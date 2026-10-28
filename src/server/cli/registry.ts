@@ -1,5 +1,6 @@
 import { register as registerBackup } from "./backup";
 import { Commands, type Cli, type Command, type Env } from "./command";
+import { register as registerConfig } from "./config";
 import { register as registerService } from "./service";
 import { register as registerUpdate } from "./update";
 
@@ -20,6 +21,7 @@ export function createCli(serve: Serve): Cli {
 
   commands.add(serveCommand);
   registerBackup(commands);
+  registerConfig(commands);
   registerService(commands);
   registerUpdate(commands);
 

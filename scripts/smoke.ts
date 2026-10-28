@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inflateRawSync } from "node:zlib";
 import * as v from "valibot";
 import { BINARY } from "./binary";
 import {
@@ -11,7 +13,12 @@ import {
   type Analytics,
   type RequestEvent,
 } from "../src/shared/analytics";
-import { ApiErrorBodySchema, HealthSchema } from "../src/shared/api";
+import {
+  ApiErrorBodySchema,
+  BackupManifestSchema,
+  HealthSchema,
+  apiPaths,
+} from "../src/shared/api";
 import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
 import { AuthResultSchema } from "../src/shared/auth";
 import { CooldownListSchema, cooldownPaths } from "../src/shared/cooldowns";
@@ -40,6 +47,7 @@ type Journal = { readonly entries: readonly { readonly idx: number; readonly tag
 type Booted = {
   readonly origin: string;
   readonly log: () => string;
+  readonly errors: () => string;
   readonly stop: () => Promise<void>;
 };
 
@@ -2302,6 +2310,78 @@ try {
     assert.equal(response.status, 404);
   });
 
+  await check("GET /api/backup returns a zip of both databases", async () => {
+    const leftovers = readdirSync(tmpdir()).filter((name) => name.startsWith("bandar-backup-"));
+    const health = await getJson("/api/health", HealthSchema, 200);
+    const anonymous = await fetch(new URL(apiPaths.backup, origin));
+
+    assert.equal(anonymous.status, 401);
+
+    const response = await fetch(new URL(apiPaths.backup, origin), { headers: sessionHeaders() });
+
+    if (response.status !== 200) {
+      const body = await response.text();
+
+      // The cause lands on the server stderr; give the reader a moment to collect it.
+      await Bun.sleep(250);
+
+      throw new Error(
+        `the route answered ${String(response.status)}: ${body}\n` +
+          `server stderr: ${first.errors().slice(-1500)}`,
+      );
+    }
+
+    assert.match(contentType(response), /^application\/zip/);
+    assert.match(
+      response.headers.get("content-disposition") ?? "",
+      /^attachment; filename="bandar-backup-[0-9.]+-[0-9]{8}T[0-9]{6}Z[.]zip"$/u,
+    );
+
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const archive = join(workDir, "backup.zip");
+
+    writeFileSync(archive, bytes);
+
+    const members = unzip(bytes);
+
+    assert.deepEqual(
+      members.map((member) => member.name),
+      ["bandar.db", "bandar.duckdb", "manifest.json"],
+    );
+
+    const manifest = v.parse(
+      BackupManifestSchema,
+      JSON.parse(new TextDecoder().decode(unzipMember(members, "manifest.json"))),
+    );
+
+    assert.equal(manifest.sqliteTag, health.migration);
+    assert.equal(manifest.duckdbTag, health.duckMigration);
+
+    for (const recorded of manifest.members) {
+      const data = unzipMember(members, recorded.name);
+
+      assert.equal(data.byteLength, recorded.size);
+      assert.equal(createHash("sha256").update(data).digest("hex"), recorded.sha256);
+    }
+
+    assert.equal(
+      new TextDecoder().decode(unzipMember(members, "bandar.db").subarray(0, 15)),
+      "SQLite format 3",
+    );
+
+    assert.deepEqual(
+      readdirSync(tmpdir()).filter((name) => name.startsWith("bandar-backup-")),
+      leftovers,
+      "a temporary copy outlived the response",
+    );
+
+    if (Bun.which("unzip") !== null) {
+      const checked = Bun.spawnSync(["unzip", "-t", archive], { stdout: "pipe", stderr: "pipe" });
+
+      assert.equal(checked.exitCode, 0, checked.stderr.toString());
+    }
+  });
+
   await check("POST /api/auth/sign-out ends the session", async () => {
     const response = await post("/api/auth/sign-out", {}, { origin: requestOrigin });
     assert.equal(response.status, 200);
@@ -2440,35 +2520,38 @@ async function boot(port = 0): Promise<Booted> {
     stderr: "pipe",
   });
 
-  const decoder = new TextDecoder();
-  let log = "";
-  const stderr = Bun.readableStreamToText(proc.stderr).catch(() => "");
-
-  void (async () => {
-    const reader = proc.stdout.getReader();
-
-    for (;;) {
-      const { value, done } = await reader.read();
-
-      if (done) return;
-      log += decoder.decode(value, { stream: true });
-    }
-  })();
+  const log = collect(proc.stdout);
+  const errors = collect(proc.stderr);
 
   const deadline = Date.now() + 15_000;
 
   while (Date.now() < deadline) {
-    const found = log.match(/listening on (http:\/\/\S+)/)?.[1];
+    const found = log.text().match(/listening on (http:\/\/\S+)/)?.[1];
 
-    if (found) return { origin: found, log: () => log, stop: () => stop(proc) };
+    if (found) return { origin: found, log: log.text, errors: errors.text, stop: () => stop(proc) };
 
     if (proc.exitCode !== null)
-      throw new Error(`the binary exited with ${proc.exitCode}\n${await stderr}`);
+      throw new Error(`the binary exited with ${proc.exitCode}\n${await errors.done}`);
     await Bun.sleep(25);
   }
 
   proc.kill();
-  throw new Error(`the binary never reported a port\n${await stderr}`);
+  throw new Error(`the binary never reported a port\n${await errors.done}`);
+}
+
+type Collected = { readonly text: () => string; readonly done: Promise<string> };
+
+function collect(stream: ReadableStream<Uint8Array>): Collected {
+  let text = "";
+  const decoder = new TextDecoder();
+
+  const done = (async () => {
+    for await (const chunk of stream) text += decoder.decode(chunk, { stream: true });
+
+    return text;
+  })();
+
+  return { text: () => text, done };
 }
 
 async function stop(proc: Bun.Subprocess): Promise<void> {
@@ -2692,6 +2775,46 @@ async function openAiError(
   response: Response,
 ): Promise<v.InferOutput<typeof OpenAiErrorSchema>["error"]> {
   return v.parse(OpenAiErrorSchema, await response.json()).error;
+}
+
+type ZipMember = { readonly name: string; readonly data: Uint8Array };
+
+/** Walk the central directory, the record an extractor starts from. */
+function unzip(bytes: Uint8Array): readonly ZipMember[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const end = bytes.byteLength - 22;
+  const count = view.getUint16(end + 10, true);
+  const members: ZipMember[] = [];
+  let directory = view.getUint32(end + 16, true);
+
+  for (let index = 0; index < count; index += 1) {
+    const method = view.getUint16(directory + 10, true);
+    const compressed = view.getUint32(directory + 20, true);
+    const nameLength = view.getUint16(directory + 28, true);
+    const extraLength = view.getUint16(directory + 30, true);
+    const commentLength = view.getUint16(directory + 32, true);
+    const local = view.getUint32(directory + 42, true);
+
+    const name = new TextDecoder().decode(
+      bytes.subarray(directory + 46, directory + 46 + nameLength),
+    );
+
+    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    const payload = bytes.subarray(start, start + compressed);
+
+    members.push({ name, data: method === 8 ? new Uint8Array(inflateRawSync(payload)) : payload });
+    directory += 46 + nameLength + extraLength + commentLength;
+  }
+
+  return members;
+}
+
+function unzipMember(members: readonly ZipMember[], name: string): Uint8Array {
+  const found = members.find((member) => member.name === name);
+
+  if (found === undefined) throw new Error(`${name} is not in the archive`);
+
+  return found.data;
 }
 
 function sessionHeaders(): Record<string, string> {

@@ -36,7 +36,7 @@ export async function main(env: Env, argv: readonly string[]): Promise<number> {
 
       return 2;
     case "command":
-      return invocation.command.run(env);
+      return invocation.command.run(env, invocation.args ?? []);
   }
 }
 
@@ -58,7 +58,7 @@ async function startServer(env: Env): Promise<void> {
   const auth = createAuth(db, config);
   const sealer = await createSealer(config.authSecret);
 
-  const app = createApp({ db, duck, sealer, client, migration, duckMigration, auth });
+  const app = createApp({ db, sqlite, duck, sealer, client, migration, duckMigration, auth });
   const server = Bun.serve({ hostname: config.host, port: config.port, fetch: app.handle });
 
   console.log(

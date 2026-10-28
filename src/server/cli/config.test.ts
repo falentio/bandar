@@ -144,11 +144,27 @@ describe("the config command", () => {
     ).toBe(true);
   });
 
-  test("the environment prints as the source", async () => {
+  test("the file outranks the environment and prints as the source", async () => {
     write({
       authUrl: "https://file.example.com",
       trustedOrigins: ["https://file.example.com"],
     });
+
+    const { stdout } = await run(["config"], {
+      BANDAR_AUTH_URL: "https://env.example.com",
+      BANDAR_TRUSTED_ORIGINS: "https://one.example.com, https://two.example.com",
+    });
+
+    expect(
+      lineOf(stdout, "server.authUrl").endsWith("https://file.example.com (config.json)"),
+    ).toBe(true);
+    expect(
+      lineOf(stdout, "trustedOrigins").endsWith("https://file.example.com (config.json)"),
+    ).toBe(true);
+  });
+
+  test("the environment prints as the source for a key the file leaves out", async () => {
+    write({ port: 4000 });
 
     const { stdout } = await run(["config"], {
       BANDAR_AUTH_URL: "https://env.example.com",

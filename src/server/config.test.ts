@@ -158,11 +158,21 @@ describe("the settings file", () => {
     expect(config.authUrl).toBe("http://localhost:4000");
   });
 
-  test("the environment overrides the file", () => {
+  test("the file overrides the environment", () => {
     const config = fromFile(file, { BANDAR_HOST: "10.0.0.5", BANDAR_PORT: "5000" });
 
+    expect(config.host).toBe("127.0.0.1");
+    expect(config.port).toBe(4000);
+  });
+
+  test("the environment stands in for a key the file leaves out", () => {
+    const config = fromFile(JSON.stringify({ server: { port: 4000 } }), {
+      BANDAR_HOST: "10.0.0.5",
+      BANDAR_AUTH_URL: "https://env.example.com",
+    });
+
     expect(config.host).toBe("10.0.0.5");
-    expect(config.port).toBe(5000);
+    expect(config.authUrl).toBe("https://env.example.com");
   });
 
   test("a blank environment value falls through to the file", () => {
@@ -186,7 +196,7 @@ describe("the settings file", () => {
     expect(config.trustedOrigins).toEqual(["https://llm.example.com", "https://alt.example.com"]);
   });
 
-  test("the environment overrides the auth URL and the trusted origins", () => {
+  test("the file overrides the environment for the auth URL and the trusted origins", () => {
     const config = fromFile(
       JSON.stringify({
         server: {
@@ -196,11 +206,19 @@ describe("the settings file", () => {
       }),
       {
         BANDAR_AUTH_URL: "https://env.example.com",
-        BANDAR_TRUSTED_ORIGINS: " https://one.example.com/ , https://TWO.example.com ,",
+        BANDAR_TRUSTED_ORIGINS: "https://one.example.com, https://two.example.com",
       },
     );
 
-    expect(config.authUrl).toBe("https://env.example.com");
+    expect(config.authUrl).toBe("https://file.example.com");
+    expect(config.trustedOrigins).toEqual(["https://file.example.com"]);
+  });
+
+  test("the environment trusted origins stand in when the file has none", () => {
+    const config = fromFile(JSON.stringify({ server: {} }), {
+      BANDAR_TRUSTED_ORIGINS: " https://one.example.com/ , https://TWO.example.com ,",
+    });
+
     expect(config.trustedOrigins).toEqual(["https://one.example.com", "https://two.example.com"]);
   });
 
@@ -400,6 +418,33 @@ describe("the config report", () => {
       port: "default",
       authUrl: "default",
       trustedOrigins: "default",
+    });
+  });
+
+  test("a file beats the environment and labels what it supplies", () => {
+    const report = reportOf(
+      {
+        BANDAR_HOST: "10.0.0.5",
+        BANDAR_PORT: "5000",
+        BANDAR_AUTH_URL: "https://env.example.com",
+        BANDAR_TRUSTED_ORIGINS: "https://env.example.com",
+      },
+      "production",
+      JSON.stringify({
+        server: {
+          host: "127.0.0.1",
+          port: 4000,
+          authUrl: "https://llm.example.com",
+          trustedOrigins: ["https://llm.example.com"],
+        },
+      }),
+    );
+
+    expect(report.sources).toEqual({
+      host: "config",
+      port: "config",
+      authUrl: "config",
+      trustedOrigins: "config",
     });
   });
 

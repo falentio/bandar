@@ -197,8 +197,8 @@ A `server.port` of 0 asks the OS for an ephemeral port. The server binds one, bu
 derived auth URL and trusted origins name port 0 and reach nothing, so set
 `server.authUrl` and `server.trustedOrigins` yourself when the port is 0.
 
-An environment variable wins over the file, and the file wins over the default. A blank
-environment variable counts as unset. The dev proxy in `vite.config.ts` takes the API port
+`config.json` wins over the environment, and the environment wins over the built-in
+default. A blank environment variable counts as unset. The dev proxy in `vite.config.ts` takes the API port
 from `BANDAR_PORT` rather than the file, so set that variable too when you change
 `server.port` and run `bun run dev`.
 

@@ -92,7 +92,7 @@ const UNSET_SECRET_WARNING =
   "so every session ends when the process stops. Set it to keep sessions across restarts.";
 
 // Host, port, auth URL, and trusted origins carry no default here: a value missing from the
-// environment comes from the settings file, and only then from the built-in default in buildConfig.
+// settings file falls back to the environment, and only then to the built-in default in buildConfig.
 const ConfigSchema = v.object({
   BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   BANDAR_PORT: v.optional(
@@ -168,7 +168,7 @@ function parseEnv(env: Record<string, string | undefined>): Environment {
 }
 
 /**
- * Fills the config from the environment first, then the settings file, then the built-in default,
+ * Fills the config from the settings file first, then the environment, then the built-in default,
  * and reports which of the three each server value came from. It stays silent: backup, update, and
  * install-service parse the environment without starting a session, so the warning about a
  * generated secret belongs to loadConfigReport.
@@ -186,14 +186,14 @@ function buildConfig(
       ? undefined
       : parseOrigins(environment.BANDAR_TRUSTED_ORIGINS);
 
-  const host = resolve(environment.BANDAR_HOST, server?.host, DEFAULT_HOST);
-  const port = resolve(environment.BANDAR_PORT, server?.port, DEFAULT_API_PORT);
+  const host = resolve(server?.host, environment.BANDAR_HOST, DEFAULT_HOST);
+  const port = resolve(server?.port, environment.BANDAR_PORT, DEFAULT_API_PORT);
 
-  const authUrl = resolve(environment.BANDAR_AUTH_URL, server?.authUrl, authUrlForPort(port.value));
+  const authUrl = resolve(server?.authUrl, environment.BANDAR_AUTH_URL, authUrlForPort(port.value));
 
   const trustedOrigins = resolve(
-    environmentOrigins,
     server?.trustedOrigins,
+    environmentOrigins,
     defaultTrustedOrigins(authUrl.value, host.value, port.value, mode),
   );
 
@@ -223,13 +223,13 @@ type Resolved<T> = {
 };
 
 /**
- * The one place the three tiers are ordered: the environment, then the settings file, then the
+ * The one place the three tiers are ordered: the settings file, then the environment, then the
  * built-in default. Each tier returns its own label beside the value it supplied.
  */
-function resolve<T>(environment: T | undefined, file: T | undefined, fallback: T): Resolved<T> {
-  if (environment !== undefined) return { value: environment, source: "environment" };
-
+function resolve<T>(file: T | undefined, environment: T | undefined, fallback: T): Resolved<T> {
   if (file !== undefined) return { value: file, source: "config" };
+
+  if (environment !== undefined) return { value: environment, source: "environment" };
 
   return { value: fallback, source: "default" };
 }

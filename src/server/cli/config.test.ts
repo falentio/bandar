@@ -109,7 +109,7 @@ describe("the config command", () => {
       ),
     ).toBe(true);
 
-    const origins = lineOf(stdout, "trustedOrigins");
+    const origins = lineOf(stdout, "server.trustedOrigins");
 
     expect(origins).toContain(`http://localhost:${String(DEFAULT_API_PORT)}`);
     expect(origins).toContain(`http://127.0.0.1:${String(DEFAULT_API_PORT)}`);
@@ -138,7 +138,7 @@ describe("the config command", () => {
       true,
     );
     expect(
-      lineOf(stdout, "trustedOrigins").endsWith(
+      lineOf(stdout, "server.trustedOrigins").endsWith(
         "https://llm.example.com, https://alt.example.com (config.json)",
       ),
     ).toBe(true);
@@ -159,7 +159,7 @@ describe("the config command", () => {
       lineOf(stdout, "server.authUrl").endsWith("https://file.example.com (config.json)"),
     ).toBe(true);
     expect(
-      lineOf(stdout, "trustedOrigins").endsWith("https://file.example.com (config.json)"),
+      lineOf(stdout, "server.trustedOrigins").endsWith("https://file.example.com (config.json)"),
     ).toBe(true);
   });
 
@@ -175,7 +175,7 @@ describe("the config command", () => {
       true,
     );
     expect(
-      lineOf(stdout, "trustedOrigins").endsWith(
+      lineOf(stdout, "server.trustedOrigins").endsWith(
         "https://one.example.com, https://two.example.com (environment)",
       ),
     ).toBe(true);
@@ -197,7 +197,7 @@ describe("the config command", () => {
       "server.host",
       "server.port",
       "server.authUrl",
-      "trustedOrigins",
+      "server.trustedOrigins",
     ]);
   });
 

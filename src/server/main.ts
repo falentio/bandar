@@ -4,7 +4,7 @@ import { createAuth } from "./auth";
 import { parseArgs } from "./cli/args";
 import type { Env } from "./cli/command";
 import { createCli, renderUsage } from "./cli/registry";
-import { loadConfig } from "./config";
+import { loadConfig, warnIfAuthSecretUnset } from "./config";
 import { openDatabase } from "./db/client";
 import { applyMigrations } from "./db/migrate";
 import { DuckDb } from "./duck/client";
@@ -42,6 +42,8 @@ export async function main(env: Env, argv: readonly string[]): Promise<number> {
 }
 
 async function startServer(env: Env): Promise<void> {
+  warnIfAuthSecretUnset(env);
+
   const config = loadConfig(env, settingsIo);
 
   const { sqlite, db } = openDatabase(config.databasePath);

@@ -34,7 +34,13 @@ export type RunMode = "development" | "production";
 
 export type ConfigSource = "environment" | "config" | "default";
 
-export type ConfigSources = {
+export type ConfigRow = {
+  readonly key: string;
+  readonly value: string;
+  readonly source: ConfigSource;
+};
+
+type ConfigSources = {
   readonly host: ConfigSource;
   readonly port: ConfigSource;
   readonly authUrl: ConfigSource;
@@ -51,7 +57,7 @@ export type ConfigReport = {
   readonly mode: RunMode;
   readonly settingsPath: string;
   readonly settingsFound: boolean;
-  readonly sources: ConfigSources;
+  readonly rows: readonly ConfigRow[];
 };
 
 export class ConfigError extends Error {
@@ -171,7 +177,7 @@ function parseEnv(env: Record<string, string | undefined>): Environment {
  * Fills the config from the settings file first, then the environment, then the built-in default,
  * and reports which of the three each server value came from. It stays silent: backup, update, and
  * install-service parse the environment without starting a session, so the warning about a
- * generated secret belongs to loadConfigReport.
+ * generated secret belongs to the callers that start one.
  */
 function buildConfig(
   environment: Environment,
@@ -287,6 +293,27 @@ function defaultTrustedOrigins(
   return [...new Set(origins)];
 }
 
+function serverRows(config: Config, sources: ConfigSources): readonly ConfigRow[] {
+  return [
+    { key: "server.host", value: config.host, source: sources.host },
+    { key: "server.port", value: String(config.port), source: sources.port },
+    { key: "server.authUrl", value: config.authUrl, source: sources.authUrl },
+    {
+      key: "server.trustedOrigins",
+      value: config.trustedOrigins.join(", "),
+      source: sources.trustedOrigins,
+    },
+  ];
+}
+
+/**
+ * A secret with no default and no settings key: a random one keeps this boot alive, so the
+ * operator is told once per boot that sessions will not survive it.
+ */
+export function warnIfAuthSecretUnset(env: Record<string, string | undefined>): void {
+  if ((env.BANDAR_AUTH_SECRET ?? "") === "") console.warn(UNSET_SECRET_WARNING);
+}
+
 export function parseConfig(
   env: Record<string, string | undefined>,
   mode: RunMode = detectRunMode(),
@@ -321,9 +348,13 @@ export function loadConfigReport(
     report.kind === "ok" ? report.settings : {},
   );
 
-  if ((env.BANDAR_AUTH_SECRET ?? "") === "") console.warn(UNSET_SECRET_WARNING);
-
-  return { config, mode, settingsPath: report.path, settingsFound: report.kind === "ok", sources };
+  return {
+    config,
+    mode,
+    settingsPath: report.path,
+    settingsFound: report.kind === "ok",
+    rows: serverRows(config, sources),
+  };
 }
 
 export function loadConfig(

@@ -8,6 +8,9 @@ import {
   loadConfig,
   loadConfigReport,
   parseConfig,
+  warnIfAuthSecretUnset,
+  type ConfigReport,
+  type ConfigSource,
   type RunMode,
 } from "./config";
 
@@ -34,6 +37,9 @@ const reportOf = (
     ioOf(() => json),
     mode,
   );
+
+const sourcesOf = (report: ConfigReport): Record<string, ConfigSource> =>
+  Object.fromEntries(report.rows.map((row) => [row.key, row.source]));
 
 describe("config", () => {
   test("a provider origin that is not a URL fails at boot", () => {
@@ -322,14 +328,25 @@ describe("the settings file", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     try {
-      loadConfig({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set" }, ioOf(missingFile));
+      warnIfAuthSecretUnset({ BANDAR_AUTH_SECRET: "set" });
       expect(warn).not.toHaveBeenCalled();
 
-      loadConfig({ BANDAR_HOME: home }, ioOf(missingFile));
+      warnIfAuthSecretUnset({});
       expect(warn).toHaveBeenCalledTimes(1);
 
-      loadConfig({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "" }, ioOf(missingFile));
+      warnIfAuthSecretUnset({ BANDAR_AUTH_SECRET: "" });
       expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a config load leaves the warning to the caller that starts a session", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      loadConfig({ BANDAR_HOME: home }, ioOf(missingFile));
+      expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
     }
@@ -404,6 +421,32 @@ describe("the config report", () => {
     }
   });
 
+  test("the rows name the server keys in order", () => {
+    expect(reportOf().rows.map((row) => row.key)).toEqual([
+      "server.host",
+      "server.port",
+      "server.authUrl",
+      "server.trustedOrigins",
+    ]);
+  });
+
+  test("a row carries the resolved value beside its source", () => {
+    const rows = reportOf(
+      {},
+      "production",
+      JSON.stringify({
+        server: { trustedOrigins: ["https://a.example.com", "https://b.example.com"] },
+      }),
+    ).rows;
+
+    expect(rows.map((row) => row.value)).toEqual([
+      "0.0.0.0",
+      String(DEFAULT_API_PORT),
+      `http://localhost:${String(DEFAULT_API_PORT)}`,
+      "https://a.example.com, https://b.example.com",
+    ]);
+  });
+
   test("a missing file reports the path, no file, and every default", () => {
     const report = loadConfigReport(
       { BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set" },
@@ -413,11 +456,11 @@ describe("the config report", () => {
 
     expect(report.settingsPath).toBe("/srv/bandar/config.json");
     expect(report.settingsFound).toBe(false);
-    expect(report.sources).toEqual({
-      host: "default",
-      port: "default",
-      authUrl: "default",
-      trustedOrigins: "default",
+    expect(sourcesOf(report)).toEqual({
+      "server.host": "default",
+      "server.port": "default",
+      "server.authUrl": "default",
+      "server.trustedOrigins": "default",
     });
   });
 
@@ -440,11 +483,11 @@ describe("the config report", () => {
       }),
     );
 
-    expect(report.sources).toEqual({
-      host: "config",
-      port: "config",
-      authUrl: "config",
-      trustedOrigins: "config",
+    expect(sourcesOf(report)).toEqual({
+      "server.host": "config",
+      "server.port": "config",
+      "server.authUrl": "config",
+      "server.trustedOrigins": "config",
     });
   });
 
@@ -463,11 +506,11 @@ describe("the config report", () => {
     );
 
     expect(report.settingsFound).toBe(true);
-    expect(report.sources).toEqual({
-      host: "config",
-      port: "config",
-      authUrl: "config",
-      trustedOrigins: "config",
+    expect(sourcesOf(report)).toEqual({
+      "server.host": "config",
+      "server.port": "config",
+      "server.authUrl": "config",
+      "server.trustedOrigins": "config",
     });
   });
 
@@ -479,11 +522,11 @@ describe("the config report", () => {
       BANDAR_TRUSTED_ORIGINS: "https://llm.example.com",
     });
 
-    expect(report.sources).toEqual({
-      host: "environment",
-      port: "environment",
-      authUrl: "environment",
-      trustedOrigins: "environment",
+    expect(sourcesOf(report)).toEqual({
+      "server.host": "environment",
+      "server.port": "environment",
+      "server.authUrl": "environment",
+      "server.trustedOrigins": "environment",
     });
 
     const blank = reportOf({
@@ -493,11 +536,11 @@ describe("the config report", () => {
       BANDAR_TRUSTED_ORIGINS: "",
     });
 
-    expect(blank.sources).toEqual({
-      host: "default",
-      port: "default",
-      authUrl: "default",
-      trustedOrigins: "default",
+    expect(sourcesOf(blank)).toEqual({
+      "server.host": "default",
+      "server.port": "default",
+      "server.authUrl": "default",
+      "server.trustedOrigins": "default",
     });
   });
 
@@ -508,11 +551,11 @@ describe("the config report", () => {
       JSON.stringify({ server: { host: "127.0.0.1", port: 4000 } }),
     );
 
-    expect(report.sources).toEqual({
-      host: "config",
-      port: "config",
-      authUrl: "environment",
-      trustedOrigins: "default",
+    expect(sourcesOf(report)).toEqual({
+      "server.host": "config",
+      "server.port": "config",
+      "server.authUrl": "environment",
+      "server.trustedOrigins": "default",
     });
   });
 });

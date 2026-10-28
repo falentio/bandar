@@ -873,6 +873,26 @@ expect_installed "recorded: replaces the binary the manifest names" "$case_dir/h
 expect_manifest "recorded: keeps the recorded path" "$case_dir/config/install.json" \
   "$VERSION" "$case_dir/home/.local/bin/$binary"
 
+printf '\ncase: a manifest that names a symlinked fallback\n'
+case_dir=$WORK/recorded-symlink
+mkdir -p "$case_dir/real" "$case_dir/config" "$case_dir/tmp" "$case_dir/home/.local"
+ln -s "$case_dir/real" "$case_dir/home/.local/bin"
+printf '{"source":"install-script","version":"0.0.1","path":"%s"}\n' \
+  "$case_dir/home/.local/bin/$binary" >"$case_dir/config/install.json"
+run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/sh
+expect_status "recorded symlink: exits 0" 0
+expect_installed "recorded symlink: replaces the binary behind the link" "$case_dir/real/$binary"
+expect_manifest "recorded symlink: records the resolved directory" "$case_dir/config/install.json" \
+  "$VERSION" "$case_dir/real/$binary"
+
+printf '{"source":"install-script","version":"0.0.1","path":"%s"}\n' \
+  "$case_dir/real/$binary" >"$case_dir/config/install.json"
+run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/sh
+expect_status "recorded resolved path: exits 0" 0
+expect_installed "recorded resolved path: replaces the binary" "$case_dir/real/$binary"
+expect_manifest "recorded resolved path: keeps the resolved path" "$case_dir/config/install.json" \
+  "$VERSION" "$case_dir/real/$binary"
+
 printf '\ncase: a manifest that names a directory outside the default\n'
 case_dir=$WORK/recorded-elsewhere
 mkdir -p "$case_dir/old/bin" "$case_dir/config" "$case_dir/tmp" "$case_dir/home"

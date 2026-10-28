@@ -416,6 +416,14 @@ else
   pass "token: is never written next to the install"
 fi
 
+case_dir=$WORK/token-latest
+mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp"
+run_install_api "$case_dir" BANDAR_GITHUB_TOKEN="$STUB_TOKEN"
+expect_status "token latest: exits 0" 0
+expect_installed "token latest: installs the binary" "$case_dir/bin/$binary"
+expect_manifest "token latest: records the resolved version" "$case_dir/config/install.json" \
+  "$VERSION" "$case_dir/bin/$binary"
+
 real_curl=$(command -v curl || true)
 if [ -n "$real_curl" ]; then
   mkdir -p "$WORK/shim"

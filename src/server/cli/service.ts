@@ -213,7 +213,7 @@ export function planService(input: ServiceInput): ServicePlan {
     dataDir,
     databasePath: join(dataDir, DATABASE_FILE),
     duckdbPath: join(dataDir, DUCKDB_FILE),
-    port: input.flags.port ?? namedPort(input.env),
+    port: input.flags.port,
     user: operatorUser(input.env, input.currentUser),
     envFile: join(config.configDir, ENV_FILE_NAME),
     unitDir,
@@ -447,14 +447,6 @@ function writeEnvFile(path: string, secret: string): boolean {
   setMode(path, ENV_FILE_MODE);
 
   return true;
-}
-
-// parseConfig has already rejected a BANDAR_PORT that is not a whole port in range, so this reads
-// the value back instead of parsing it again.
-function namedPort(env: Env): number | undefined {
-  const written = (env.BANDAR_PORT ?? "").trim();
-
-  return written === "" ? undefined : Number(written);
 }
 
 function defaultDataDir(scope: Scope, env: Env, home: string): string {

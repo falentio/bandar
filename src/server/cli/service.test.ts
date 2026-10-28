@@ -304,13 +304,17 @@ describe("planService", () => {
     expect(plan.binary).toBe("/usr/local/bin/bandar");
   });
 
-  test("BANDAR_PORT in the environment pins the port", () => {
-    expect(planOf({}, { BANDAR_PORT: "8081" }).port).toBe(8081);
+  test("--port names the port", () => {
+    expect(planOf({ port: 8081 }).port).toBe(8081);
   });
 
-  test("neither --port nor BANDAR_PORT names a port", () => {
-    expect(planOf().port).toBeUndefined();
-    expect(planOf({}, { BANDAR_PORT: "" }).port).toBeUndefined();
+  test("an inherited BANDAR_PORT never pins the port, so the file keeps the last word", () => {
+    for (const port of ["8081", "", " "]) {
+      const plan = planOf({}, { BANDAR_PORT: port });
+
+      expect(plan.port).toBeUndefined();
+      expect(renderUnit(plan)).not.toContain("BANDAR_PORT");
+    }
   });
 
   test("a relative --data-dir resolves against the working directory", () => {
@@ -395,10 +399,10 @@ describe("installService", () => {
     expect(unit).toContain("Environment=BANDAR_PORT=8080");
   });
 
-  test("BANDAR_PORT in the environment pins the port in the written unit", async () => {
+  test("an inherited BANDAR_PORT stays out of the written unit", async () => {
     await invoke("install-service", [], { env: envOf({ BANDAR_PORT: "8081" }) });
 
-    expect(readFileSync(unitPath(), "utf8")).toContain("Environment=BANDAR_PORT=8081");
+    expect(readFileSync(unitPath(), "utf8")).not.toContain("BANDAR_PORT");
   });
 
   test("an install that names no port leaves the line out, so config.json keeps the last word", async () => {

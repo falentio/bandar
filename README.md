@@ -164,5 +164,5 @@ An environment variable wins over the file, and the file wins over the default. 
 environment variable counts as unset.
 
 `bandar` reads the file on every start, so a restart applies an edit. A service unit
-that pins a port outranks the file; `bandar install-service` pins one only when you
-name it. Read [`docs/service.md`](./docs/service.md) for the unit.
+outranks the file only when `bandar install-service` was given `--port`. Read
+[`docs/service.md`](./docs/service.md) for the unit.

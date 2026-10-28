@@ -27,13 +27,13 @@ stderr: which files it wrote, and which ones it kept.
 | ------------ | -------------------------------------------------------------------- |
 | `--scope`    | `user`                                                               |
 | `--data-dir` | `~/.local/share/bandar` for user scope, `/var/lib/bandar` for system |
-| `--port`     | none: `serve` reads the port from `BANDAR_PORT` or `config.json`     |
+| `--port`     | none: the unit pins no port, and `serve` reads `config.json`         |
 | `--binary`   | the executable running the command                                   |
 
 The data directory comes from `--data-dir`, else `XDG_DATA_HOME` or `~/.local/share/bandar` for
-user scope and `/var/lib/bandar` for system scope. A `BANDAR_PORT` in the shell lands in the unit,
-because the install reads the environment it inherits. The unit pins a port only when `--port` or
-`BANDAR_PORT` names one, so a port in `config.json` is picked up on the next start.
+user scope and `/var/lib/bandar` for system scope. The unit pins a port only when `--port` names
+one, so a port in `config.json` is picked up on the next start. A `BANDAR_PORT` in the shell is not
+written into the unit; `serve` reads it at start, where it still wins over the file.
 
 ## What the unit holds
 

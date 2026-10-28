@@ -325,6 +325,17 @@ describe("installService", () => {
     expect(readFileSync(unitPath(), "utf8")).toBe(renderUnit(planOf()));
   });
 
+  test("a fresh install creates the directory the unit names as its working directory", async () => {
+    await invoke("install-service");
+
+    const unit = readFileSync(unitPath(), "utf8");
+    // Read the path out of the unit itself, so the mkdir and the rendered directive cannot drift.
+    const workingDirectory = /^WorkingDirectory=(.+)$/mu.exec(unit)?.[1] ?? "";
+
+    expect(workingDirectory).toBe(join(root, ".local", "share", "bandar"));
+    expect(existsSync(workingDirectory)).toBe(true);
+  });
+
   posix("the unit directory is 755 and the unit is 644", async () => {
     await invoke("install-service");
 

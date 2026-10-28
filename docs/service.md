@@ -62,10 +62,16 @@ and both database paths are written out in full instead of left to whichever dir
 happens to start in. A `BANDAR_DB` or `BANDAR_DUCKDB` that is already absolute is kept as it is;
 a relative one is placed under the data directory.
 
+The install creates every directory the unit names: the unit directory, the data directory, and
+the config directory that holds the env file. `WorkingDirectory=` is not optional to systemd — a
+missing directory fails the start with a CHDIR error, which `Restart=on-failure` would repeat
+every five seconds — so the data directory exists before the unit does.
+
 A system unit adds `User=` and `StateDirectory=bandar`, and starts at `multi-user.target`.
 `User=` is the account that ran `sudo`, so the service does not run as root. `StateDirectory`
 makes systemd create `/var/lib/bandar` for that account; when `--data-dir` points somewhere else,
-that directory has to exist and be writable by the same account.
+the install creates it as the account that ran `sudo`, so `chown` it to the service account before
+starting the unit.
 
 ## The environment file
 

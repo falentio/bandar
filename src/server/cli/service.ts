@@ -242,7 +242,11 @@ export async function installService(request: ServiceRequest): Promise<number> {
       execPath: context.execPath,
     });
 
+    // WorkingDirectory= must exist: systemd fails the start with CHDIR when it does not, and
+    // Restart=on-failure turns that into a loop. The install creates every directory the unit
+    // names, so the printed start command works on a fresh account.
     createDirectories(plan.unitDir);
+    createDirectories(plan.dataDir);
     writeFileSync(plan.unitPath, renderUnit(plan), { mode: UNIT_FILE_MODE });
 
     const written = writeEnvFile(plan.envFile, randomBytes(32).toString("hex"));

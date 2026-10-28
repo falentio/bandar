@@ -156,6 +156,7 @@ function buildConfig(
   const server = settings.server;
   const host = values.BANDAR_HOST ?? server?.host ?? DEFAULT_HOST;
   const port = values.BANDAR_PORT ?? server?.port ?? DEFAULT_API_PORT;
+  const authUrl = values.BANDAR_AUTH_URL ?? server?.authUrl ?? `http://localhost:${port}`;
 
   const environmentOrigins =
     values.BANDAR_TRUSTED_ORIGINS === undefined
@@ -169,10 +170,12 @@ function buildConfig(
       databasePath: join(home, DATABASE_FILE),
       duckdbPath: join(home, DUCKDB_FILE),
       configDir: values.BANDAR_CONFIG_DIR,
-      authUrl: values.BANDAR_AUTH_URL ?? server?.authUrl ?? `http://localhost:${port}`,
+      authUrl,
       authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
       trustedOrigins:
-        environmentOrigins ?? server?.trustedOrigins ?? defaultTrustedOrigins(host, port, mode),
+        environmentOrigins ??
+        server?.trustedOrigins ??
+        defaultTrustedOrigins(authUrl, host, port, mode),
     },
     sources: {
       host: sourceOf(values.BANDAR_HOST, server?.host),
@@ -197,11 +200,17 @@ function splitOrigins(value: string): readonly string[] {
 }
 
 /**
- * The origins a browser can reach a fresh install from. The dev web server runs on its own port, so
- * only a development run can sign in through it.
+ * The origins a browser can reach a fresh install from: the auth URL's own origin first, since that
+ * the public face, then the loopback on the listening port. The dev web server runs on its own port,
+ * so only a development run can sign in through it.
  */
-function defaultTrustedOrigins(host: string, port: number, mode: RunMode): readonly string[] {
-  const origins = [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
+function defaultTrustedOrigins(
+  authUrl: string,
+  host: string,
+  port: number,
+  mode: RunMode,
+): readonly string[] {
+  const origins = [new URL(authUrl).origin, `http://localhost:${port}`, `http://127.0.0.1:${port}`];
   const anywhere = host === "0.0.0.0" || host === "::";
 
   if (!anywhere) origins.push(`http://${host.includes(":") ? `[${host}]` : host}:${port}`);

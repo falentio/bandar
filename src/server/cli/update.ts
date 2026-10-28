@@ -117,13 +117,6 @@ type ConfigDirectory =
   | { readonly kind: "dir"; readonly directory: string }
   | { readonly kind: "error"; readonly reason: string };
 
-/** The flags that follow the command name, wherever the invocation put the script path. */
-export function commandArguments(argv: readonly string[]): readonly string[] {
-  const index = argv.indexOf(COMMAND);
-
-  return index === -1 ? [] : argv.slice(index + 1);
-}
-
 export function parseUpdateFlags(argv: readonly string[]): UpdateInvocation {
   let check = false;
   let archive: string | null = null;
@@ -231,10 +224,10 @@ export async function runUpdate(run: UpdateRun): Promise<number> {
   return update(run, invocation.flags.archive);
 }
 
-export async function run(argv: readonly string[], env: Env): Promise<number> {
+export async function run(args: readonly string[], env: Env): Promise<number> {
   return runUpdate({
     env,
-    argv: commandArguments(argv),
+    argv: args,
     installed: installedVersion,
     platform: process.platform,
     arch: process.arch,
@@ -249,7 +242,8 @@ export function register(commands: Commands): void {
   commands.add({
     name: COMMAND,
     summary: "replace this binary with the latest release",
-    run: (env) => run(process.argv, env),
+    takesArguments: true,
+    run: (env, args) => run(args, env),
   });
 }
 

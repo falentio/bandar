@@ -11,15 +11,16 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vite-plus/test";
+import { Commands } from "./command";
 import { detectInstall } from "./install-source";
 import {
   apiBase,
-  commandArguments,
   compareVersions,
   githubToken,
   latestReleaseUrl,
   parseChecksum,
   parseUpdateFlags,
+  register,
   releaseNames,
   runUpdate,
   type HttpSend,
@@ -261,15 +262,19 @@ describe("install source", () => {
   });
 });
 
-describe("arguments", () => {
-  test("the flags follow the command wherever the script path sits", () => {
-    expect(commandArguments(["/usr/local/bin/bandar", "update", "--check"])).toEqual(["--check"]);
-    expect(commandArguments(["bun", "src/server/main.ts", "update", "--check"])).toEqual([
-      "--check",
-    ]);
-    expect(commandArguments(["bun", "src/server/main.ts", "--version"])).toEqual([]);
-  });
+describe("registration", () => {
+  test("update takes arguments so its flags reach the command", () => {
+    const commands = new Commands();
 
+    register(commands);
+
+    const command = commands.all.find((candidate) => candidate.name === "update");
+
+    expect(command?.takesArguments).toBe(true);
+  });
+});
+
+describe("arguments", () => {
   test("--check and --archive parse", () => {
     expect(parseUpdateFlags(["--check"])).toEqual({
       kind: "run",

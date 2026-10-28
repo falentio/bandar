@@ -327,13 +327,11 @@ else
 fi
 
 echo
-echo "case: --check entry point"
+echo "case: --check"
 case_dir check install-script
 stage_release 0.2.0 'new binary payload'
-env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_UPDATE_URL=$API" "BANDAR_GITHUB_TOKEN=$STUB_TOKEN" \
-  bun -e 'import { run } from "./src/server/cli/update.ts"; process.exitCode = await run(["update", "--check"], Bun.env);' \
-  >"$work/logs/check.out" 2>"$work/logs/check.err"
-status=$?
+run check env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_UPDATE_URL=$API" \
+  "BANDAR_GITHUB_TOKEN=$STUB_TOKEN" bun src/server/main.ts update --check
 expect_exit check 0
 expect_stdout check "installed $installed"
 expect_stdout check "latest 0.2.0"
@@ -342,7 +340,7 @@ expect_stdout check "update-available"
 echo
 echo "case: --check without a token"
 run notokencheck env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_UPDATE_URL=$API" \
-  bun -e 'import { run } from "./src/server/cli/update.ts"; process.exitCode = await run(["update", "--check"], Bun.env);'
+  bun src/server/main.ts update --check
 expect_exit notokencheck 1
 expect_stderr notokencheck "a GitHub token is required: set BANDAR_GITHUB_TOKEN"
 expect_stdout notokencheck "latest unknown"
@@ -362,8 +360,8 @@ case_dir archive install-script
 ARCHIVE="$work/logs/bandar-0.4.0-linux-x64"
 printf 'offline binary payload' >"$ARCHIVE"
 printf '%s  %s\n' "$(sha256_of "$ARCHIVE")" "$(basename "$ARCHIVE")" >"$ARCHIVE.sha256"
-run archive env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "ARCHIVE=$ARCHIVE" \
-  bun -e 'import { run } from "./src/server/cli/update.ts"; process.exitCode = await run(["update", "--archive", Bun.env.ARCHIVE ?? ""], Bun.env);'
+run archive env "BANDAR_CONFIG_DIR=$CASE_DIR/config" \
+  bun src/server/main.ts update --archive "$ARCHIVE"
 expect_exit archive 0
 expect_same "$CASE_DIR/bin/bandar" "$ARCHIVE" "archive: the binary is the archive"
 expect_mode "$CASE_DIR/bin/bandar" 755 archive

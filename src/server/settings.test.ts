@@ -3,6 +3,8 @@ import { readSettings, settingsPath } from "./settings";
 
 const home = "/home/andrew/.bandar";
 
+const path = settingsPath(home);
+
 const readerOf = (text: string) => () => text;
 
 const reasonOf = (result: ReturnType<typeof readSettings>): string => {
@@ -20,8 +22,8 @@ describe("settings", () => {
     expect(settingsPath(home)).toBe("/home/andrew/.bandar/config.json");
   });
 
-  test("a missing file reads as missing", () => {
-    expect(readSettings(home, missingFile)).toEqual({ kind: "missing" });
+  test("a missing file reads as missing, naming the path", () => {
+    expect(readSettings(home, missingFile)).toEqual({ kind: "missing", path });
   });
 
   test("any other read failure is invalid, carrying the error message", () => {
@@ -38,17 +40,19 @@ describe("settings", () => {
   });
 
   test("a file without a server section is ok", () => {
-    expect(readSettings(home, readerOf("{}"))).toEqual({ kind: "ok", settings: {} });
+    expect(readSettings(home, readerOf("{}"))).toEqual({ kind: "ok", path, settings: {} });
   });
 
   test("a partial server section is ok", () => {
     expect(readSettings(home, readerOf('{"server":{"host":"127.0.0.1"}}'))).toEqual({
       kind: "ok",
+      path,
       settings: { server: { host: "127.0.0.1" } },
     });
 
     expect(readSettings(home, readerOf('{"server":{"port":4000}}'))).toEqual({
       kind: "ok",
+      path,
       settings: { server: { port: 4000 } },
     });
   });
@@ -56,8 +60,61 @@ describe("settings", () => {
   test("the host is trimmed", () => {
     expect(readSettings(home, readerOf('{"server":{"host":" 127.0.0.1 "}}'))).toEqual({
       kind: "ok",
+      path,
       settings: { server: { host: "127.0.0.1" } },
     });
+  });
+
+  test("an auth URL is accepted, trimmed, and kept as written", () => {
+    expect(
+      readSettings(home, readerOf('{"server":{"authUrl":" https://llm.example.com/api "}}')),
+    ).toEqual({
+      kind: "ok",
+      path,
+      settings: { server: { authUrl: "https://llm.example.com/api" } },
+    });
+  });
+
+  test("an auth URL that is not a URL is invalid", () => {
+    for (const authUrl of ["alias", "", "llm.example.com"]) {
+      const reason = reasonOf(
+        readSettings(home, readerOf(`{"server":{"authUrl":${JSON.stringify(authUrl)}}}`)),
+      );
+
+      expect(reason).toContain("server.authUrl");
+    }
+  });
+
+  test("a trusted origin stores as its URL origin", () => {
+    expect(
+      readSettings(home, readerOf('{"server":{"trustedOrigins":["https://X.COM/"]}}')),
+    ).toEqual({
+      kind: "ok",
+      path,
+      settings: { server: { trustedOrigins: ["https://x.com"] } },
+    });
+  });
+
+  test("a trusted origin with a path, a query, a fragment, or credentials is invalid", () => {
+    for (const origin of [
+      "https://llm.example.com/api",
+      "https://llm.example.com?tenant=acme",
+      "https://llm.example.com#top",
+      "https://user:secret@llm.example.com",
+    ]) {
+      const reason = reasonOf(
+        readSettings(home, readerOf(`{"server":{"trustedOrigins":[${JSON.stringify(origin)}]}}`)),
+      );
+
+      expect(reason).toContain("server.trustedOrigins.0");
+      expect(reason).toContain("must be an origin");
+    }
+  });
+
+  test("an empty trusted-origins list is invalid", () => {
+    expect(reasonOf(readSettings(home, readerOf('{"server":{"trustedOrigins":[]}}')))).toContain(
+      "server.trustedOrigins",
+    );
   });
 
   test("an unknown key is invalid at either level", () => {

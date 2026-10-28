@@ -139,7 +139,10 @@ for updates, and [`docs/service.md`](./docs/service.md) for the service unit.
 ## Configuration
 
 `bandar` reads `config.json` from `BANDAR_HOME`, which defaults to `~/.bandar`, on
-every start. A missing file means the defaults.
+every start. A missing file means the defaults. A service unit moves `BANDAR_HOME` to
+its data directory, so the service reads `<data dir>/config.json`:
+`~/.local/share/bandar/config.json` for a user unit and `/var/lib/bandar/config.json`
+for a system one.
 
 ```json
 {

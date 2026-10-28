@@ -4,6 +4,7 @@ import { homedir, userInfo } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import { MAX_PORT, MIN_PORT } from "../../shared/topology";
 import { parseConfig } from "../config";
+import { settingsPath } from "../settings";
 import type { Commands, Env } from "./command";
 
 export const UNIT_NAME = "bandar.service";
@@ -262,6 +263,7 @@ export async function installService(request: ServiceRequest): Promise<number> {
         ? `${PREFIX}wrote ${plan.envFile}`
         : `${PREFIX}kept ${plan.envFile}, which already exists`,
     );
+    context.stderr(`${PREFIX}serve reads settings from ${settingsPath(plan.dataDir)}`);
 
     for (const line of startCommands(plan)) context.stdout(line);
 

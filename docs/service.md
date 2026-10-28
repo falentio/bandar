@@ -59,6 +59,8 @@ WantedBy=default.target
 
 The unit points the binary at its data directory through `BANDAR_HOME`, so the databases land there
 whatever directory systemd happens to start in, and `--data-dir` moves both files with the unit.
+`config.json` sits in that same directory: the service reads `<data dir>/config.json`, and the
+install prints the path it will read.
 
 The install creates every directory the unit names: the unit directory, the data directory, and
 the config directory that holds the env file. `WorkingDirectory=` is not optional to systemd — a

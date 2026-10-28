@@ -337,7 +337,11 @@ describe("installService", () => {
       "systemctl --user start bandar.service",
       "systemctl --user status bandar.service",
     ]);
-    expect(stderr).toEqual([`bandar: wrote ${unitPath()}`, `bandar: wrote ${envPath()}`]);
+    expect(stderr).toEqual([
+      `bandar: wrote ${unitPath()}`,
+      `bandar: wrote ${envPath()}`,
+      `bandar: serve reads settings from ${join(root, ".local", "share", "bandar", "config.json")}`,
+    ]);
     expect(readFileSync(unitPath(), "utf8")).toBe(renderUnit(planOf()));
   });
 

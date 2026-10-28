@@ -37,12 +37,14 @@ import {
   ProviderDetailSchema,
   ProviderInputSchema,
   ProviderListSchema,
+  ProviderModelCompatInputSchema,
   ProviderModelInputSchema,
   ProviderModelRefreshSchema,
   ProviderOAuthPollSchema,
   ProviderOAuthStartSchema,
   ProviderSchema,
   providerPaths,
+  type Compat,
   type Provider,
   type ProviderCreateInput,
   type ProviderCredentialInput,
@@ -120,6 +122,11 @@ export const providerApi = {
     }),
   removeModel: (id: string, modelId: string): Promise<Provider> =>
     request(providerPaths.model(id, modelId), ProviderSchema, { method: "DELETE" }),
+  setModelCompat: (id: string, modelId: string, compat: Compat | null): Promise<Provider> =>
+    request(providerPaths.model(id, modelId), ProviderSchema, {
+      method: "PUT",
+      body: JSON.stringify(v.parse(ProviderModelCompatInputSchema, { compat })),
+    }),
   refreshModels: (id: string): Promise<ProviderModelRefresh> =>
     request(providerPaths.refreshModels(id), ProviderModelRefreshSchema, { method: "POST" }),
   startOauth: (id: string): Promise<ProviderOAuthStart> =>

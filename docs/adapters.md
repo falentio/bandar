@@ -523,6 +523,12 @@ On OpenCode Go, `defaultCompat` is the table, so the override is how a listed id
 put on another wire. Importing a catalog never touches an existing row: a re-import
 skips an upstream model it already has, so it cannot clobber a user's override.
 
+The Models tab renders one native select per row, labelled `Compatibility for
+<alias>`. Its first option is `Provider default (<wire>)`, or `Provider default
+(no wire)` for a model the provider cannot route, then one option per
+`provider.compats`. Choosing the default clears the column; the select is disabled
+while a write is in flight.
+
 ## Streaming rules
 
 1. `stream()` yields text events only for non-empty deltas.

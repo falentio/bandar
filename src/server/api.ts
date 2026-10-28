@@ -10,6 +10,7 @@ import {
   ProviderCredentialInputSchema,
   ProviderCredentialOrderInputSchema,
   ProviderCredentialParamsSchema,
+  ProviderCredentialProbeSchema,
   ProviderModelRefreshSchema,
   ProviderDetailSchema,
   ProviderInputSchema,
@@ -48,6 +49,7 @@ import {
   updateProvider,
   type ProviderDeps,
 } from "./providers";
+import { probeProviderCredential } from "./providers/probe";
 import { UpstreamError } from "./providers/types";
 import { createTag, listTags, removeTag, setTagModels, TagRuleError } from "./tags";
 import { InputError, parseInput, type ParseableInput } from "./validation";
@@ -373,6 +375,35 @@ export function createApi(deps: ApiDeps) {
       );
 
       return result.kind === "ok" ? result.provider : credentialFailure(result, id, credentialId);
+    })
+    .post("/providers/:id/credentials/:credentialId/test", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id, credentialId } = parseInput(ProviderCredentialParamsSchema, params);
+      const provider = await readProvider(deps.providers, caller.userId, id);
+
+      if (provider === null) {
+        set.status = 404;
+
+        return failure("not_found", `provider ${id} not found`);
+      }
+
+      const probe = await probeProviderCredential(
+        deps.providers,
+        provider,
+        credentialId,
+        request.signal,
+      );
+
+      if (probe === null) {
+        set.status = 404;
+
+        return failure("not_found", `credential ${credentialId} not found`);
+      }
+
+      return v.parse(ProviderCredentialProbeSchema, probe);
     })
     .post("/providers/:id/models", async ({ body, params, request, set }) => {
       const caller = await authenticate(deps.auth, request);

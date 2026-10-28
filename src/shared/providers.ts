@@ -200,6 +200,13 @@ export const ProviderCredentialOrderInputSchema = v.object({
   ),
 });
 
+export const ProviderCredentialProbeSchema = v.object({
+  ok: v.boolean(),
+  status: v.nullable(v.number()),
+  latencyMs: v.number(),
+  error: v.nullable(v.string()),
+});
+
 export const ProviderOAuthStartSchema = v.object({
   userCode: v.string(),
   verificationUrl: v.string(),
@@ -231,6 +238,8 @@ export const providerPaths = {
   credentialOrder: (id: string) => `/api/providers/${id}/credentials/order`,
   credential: (id: string, credentialId: string) =>
     `/api/providers/${id}/credentials/${credentialId}`,
+  credentialTest: (id: string, credentialId: string) =>
+    `/api/providers/${id}/credentials/${credentialId}/test`,
   models: (id: string) => `/api/providers/${id}/models`,
   refreshModels: (id: string) => `/api/providers/${id}/models/refresh`,
   model: (id: string, modelId: string) => `/api/providers/${id}/models/${modelId}`,
@@ -254,6 +263,8 @@ export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;
 
 export type ProviderAuthMode = v.InferOutput<typeof ProviderAuthModeSchema>;
+
+export type ProviderCredentialProbe = v.InferOutput<typeof ProviderCredentialProbeSchema>;
 
 export type ProviderOAuthStart = v.InferOutput<typeof ProviderOAuthStartSchema>;
 

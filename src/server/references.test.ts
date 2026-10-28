@@ -763,6 +763,7 @@ describe("provider credentials", () => {
     expect(applyMigrations(handle.sqlite, all).applied).toEqual([
       "0008_provider_credentials",
       "0009_remarkable_ronan",
+      "0010_cooldown_error_message",
     ]);
 
     const rows = handle.sqlite

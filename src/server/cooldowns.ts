@@ -23,6 +23,7 @@ export async function readCooldowns(db: Db, userId: string, limit: number): Prom
       credentialId: row.credentialId,
       credentialName: row.credentialName,
       errorKind: row.errorKind,
+      errorMessage: row.errorMessage,
       reference: row.reference,
       failures: row.failures,
       cooldownMs: row.cooldownMs,

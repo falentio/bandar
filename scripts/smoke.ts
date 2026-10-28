@@ -16,6 +16,7 @@ import { API_KEY_HEADER, CreatedApiKeySchema } from "../src/shared/api-keys";
 import { AuthResultSchema } from "../src/shared/auth";
 import { CooldownListSchema, cooldownPaths } from "../src/shared/cooldowns";
 import {
+  ProviderCredentialProbeSchema,
   ProviderDetailSchema,
   ProviderListSchema,
   ProviderModelRefreshSchema,
@@ -1382,6 +1383,7 @@ try {
     assert.equal(event.providerName, "Dead");
     assert.equal(event.modelAlias, "dead-model");
     assert.equal(event.credentialName, "");
+    assert.equal(event.errorMessage, "bad openai key");
   });
 
   await check("GET /v1/models and GET /api/tags list the tag in priority order", async () => {
@@ -1492,6 +1494,108 @@ try {
 
     assert.deepEqual(rows.map((request) => request.status).sort(), ["error", "success"]);
     assert.equal(rows.find((request) => request.status === "error")?.errorKind, "auth");
+  });
+
+  await check("POST /api/providers/:id/credentials/:credentialId/test probes one key", async () => {
+    const provider = await postJson(
+      providerPaths.list,
+      {
+        name: "Probing",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "openai-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    await postJson(
+      providerPaths.models(provider.id),
+      { upstreamModel: "fake-openai-model", alias: "probing" },
+      ProviderSchema,
+      201,
+    );
+
+    const good = provider.credentials[0];
+
+    if (good === undefined) throw new Error("the Probing provider has no credential");
+
+    const withBad = await postJson(
+      providerPaths.credentials(provider.id),
+      { label: "expired", apiKey: "wrong-key" },
+      ProviderSchema,
+      201,
+    );
+
+    const bad = withBad.credentials.find((credential) => credential.label === "expired");
+
+    if (bad === undefined) throw new Error("the expired credential is missing");
+
+    const passed = await postJson(
+      providerPaths.credentialTest(provider.id, good.id),
+      {},
+      ProviderCredentialProbeSchema,
+      200,
+    );
+
+    assert.equal(passed.ok, true);
+    assert.equal(passed.error, null);
+    assert.ok(passed.latencyMs >= 0);
+
+    const failed = await postJson(
+      providerPaths.credentialTest(provider.id, bad.id),
+      {},
+      ProviderCredentialProbeSchema,
+      200,
+    );
+
+    assert.equal(failed.ok, false);
+    assert.equal(failed.status, 401);
+    assert.equal(failed.error, "bad openai key");
+
+    const detail = await getJson(
+      providerPaths.detail(provider.id) + "?days=30",
+      ProviderDetailSchema,
+      200,
+    );
+
+    assert.deepEqual(
+      detail.provider.credentials.map((credential) => credential.failures),
+      [0, 0],
+      "the probe flagged a credential for cooldown",
+    );
+
+    const cooldowns = await getJson(cooldownPaths.list, CooldownListSchema, 200);
+
+    assert.equal(
+      cooldowns.events.some((event) => event.providerName === "Probing"),
+      false,
+      "the probe wrote a cooldown event",
+    );
+
+    assert.equal((await referenceRows("probing")).length, 0, "the probe wrote an analytics row");
+
+    const list = await getJson(providerPaths.list, ProviderListSchema, 200);
+    const other = list.providers.find((entry) => entry.id !== provider.id && entry.credentials[0]);
+
+    if (other?.credentials[0] === undefined) throw new Error("no second provider has a credential");
+
+    const foreign = await post(
+      providerPaths.credentialTest(provider.id, other.credentials[0].id),
+      {},
+    );
+
+    const absent = await post(providerPaths.credentialTest(provider.id, "no-such-credential"), {});
+
+    assert.equal(foreign.status, 404);
+    assert.equal(absent.status, 404);
+
+    const anonymous = await fetch(
+      new URL(providerPaths.credentialTest(provider.id, good.id), origin),
+      { method: "POST" },
+    );
+
+    assert.equal(anonymous.status, 401);
   });
 
   await check(

@@ -48,12 +48,9 @@ export async function probeProviderCredential(
 
     return { ...read, latencyMs: Math.round(performance.now() - started) };
   } catch (error) {
-    return {
-      ok: false,
-      status: null,
-      latencyMs: Math.round(performance.now() - started),
-      error: error instanceof Error ? error.message : "the credential could not be read",
-    };
+    const fault = error instanceof Error ? error : new Error("the credential could not be read");
+
+    return { ...failed(fault), latencyMs: Math.round(performance.now() - started) };
   }
 }
 
@@ -89,14 +86,14 @@ async function probeRead(
 
     return PASSED;
   } catch (error) {
-    if (error instanceof UpstreamError) {
-      return { ok: false, status: error.status, error: error.message };
-    }
-
-    return {
-      ok: false,
-      status: null,
-      error: error instanceof Error ? error.message : "the test failed",
-    };
+    return failed(error instanceof Error ? error : new Error("the test failed"));
   }
+}
+
+function failed(error: Error): ProbeRead {
+  if (error instanceof UpstreamError) {
+    return { ok: false, status: error.status, error: error.message };
+  }
+
+  return { ok: false, status: null, error: error.message };
 }

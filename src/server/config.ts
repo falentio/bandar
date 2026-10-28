@@ -18,6 +18,27 @@ export type Config = {
 
 export type RunMode = "development" | "production";
 
+export type ConfigSource = "environment" | "config" | "default";
+
+export type ConfigSources = {
+  readonly host: ConfigSource;
+  readonly port: ConfigSource;
+  readonly authUrl: ConfigSource;
+  readonly trustedOrigins: ConfigSource;
+};
+
+type BuiltConfig = {
+  readonly config: Config;
+  readonly sources: ConfigSources;
+};
+
+export type ConfigReport = {
+  readonly config: Config;
+  readonly settingsPath: string;
+  readonly settingsFound: boolean;
+  readonly sources: ConfigSources;
+};
+
 export class ConfigError extends Error {
   readonly issues: readonly string[];
 
@@ -27,11 +48,6 @@ export class ConfigError extends Error {
     this.issues = issues;
   }
 }
-
-const DEFAULT_TRUSTED_ORIGINS = [
-  `http://localhost:${DEFAULT_WEB_PORT}`,
-  `http://127.0.0.1:${DEFAULT_WEB_PORT}`,
-].join(",");
 
 const ProviderUrlSchema = v.pipe(v.string(), v.trim(), v.url());
 
@@ -58,8 +74,8 @@ const UNSET_SECRET_WARNING =
   "bandar: BANDAR_AUTH_SECRET is unset; a random secret was generated for this boot, " +
   "so every session ends when the process stops. Set it to keep sessions across restarts.";
 
-// The host and the port carry no default here: a value missing from the environment comes from the
-// settings file, and only then from the built-in default in buildConfig.
+// Host, port, auth URL, and trusted origins carry no default here: a value missing from the
+// environment comes from the settings file, and only then from the built-in default in buildConfig.
 const ConfigSchema = v.object({
   BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   BANDAR_PORT: v.optional(
@@ -78,10 +94,7 @@ const ConfigSchema = v.object({
   ),
   BANDAR_AUTH_URL: v.optional(v.pipe(v.string(), v.trim(), v.url())),
   BANDAR_AUTH_SECRET: v.optional(v.pipe(v.string(), v.minLength(1))),
-  BANDAR_TRUSTED_ORIGINS: v.optional(
-    v.pipe(v.string(), v.trim(), v.minLength(1)),
-    DEFAULT_TRUSTED_ORIGINS,
-  ),
+  BANDAR_TRUSTED_ORIGINS: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   // Providers read these at request time, so the shape is checked here instead.
   BANDAR_KILOCODE_API: v.optional(ProviderUrlSchema),
   BANDAR_KILOCODE_MODELS_URL: v.optional(ProviderUrlSchema),
@@ -108,15 +121,17 @@ function resolveHome(env: Record<string, string | undefined>, mode: RunMode): st
 }
 
 /**
- * Fills the config from the environment first, then the settings file, then the built-in default.
- * It stays silent: backup, update, and install-service parse the environment without starting a
- * session, so the warning about a generated secret belongs to loadConfig.
+ * Fills the config from the environment first, then the settings file, then the built-in default,
+ * and reports which of the three each server value came from. It stays silent: backup, update, and
+ * install-service parse the environment without starting a session, so the warning about a
+ * generated secret belongs to loadConfigReport.
  */
 function buildConfig(
   env: Record<string, string | undefined>,
   home: string,
+  mode: RunMode,
   settings: Settings,
-): Config {
+): BuiltConfig {
   // A blank value means "unset" for every variable but BANDAR_CONFIG_DIR: install.sh writes its
   // manifest under the config directory it was given, so a blank one has to fail, not fall back.
   const given = Object.fromEntries(
@@ -138,47 +153,104 @@ function buildConfig(
   }
 
   const values = parsed.output;
-  const port = values.BANDAR_PORT ?? settings.server?.port ?? DEFAULT_API_PORT;
+  const server = settings.server;
+  const host = values.BANDAR_HOST ?? server?.host ?? DEFAULT_HOST;
+  const port = values.BANDAR_PORT ?? server?.port ?? DEFAULT_API_PORT;
+
+  const environmentOrigins =
+    values.BANDAR_TRUSTED_ORIGINS === undefined
+      ? undefined
+      : splitOrigins(values.BANDAR_TRUSTED_ORIGINS);
 
   return {
-    host: values.BANDAR_HOST ?? settings.server?.host ?? DEFAULT_HOST,
-    port,
-    databasePath: join(home, DATABASE_FILE),
-    duckdbPath: join(home, DUCKDB_FILE),
-    configDir: values.BANDAR_CONFIG_DIR,
-    authUrl: values.BANDAR_AUTH_URL ?? `http://localhost:${port}`,
-    authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
-    trustedOrigins: values.BANDAR_TRUSTED_ORIGINS.split(",")
-      .map((origin) => origin.trim())
-      .filter((origin) => origin !== ""),
+    config: {
+      host,
+      port,
+      databasePath: join(home, DATABASE_FILE),
+      duckdbPath: join(home, DUCKDB_FILE),
+      configDir: values.BANDAR_CONFIG_DIR,
+      authUrl: values.BANDAR_AUTH_URL ?? server?.authUrl ?? `http://localhost:${port}`,
+      authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
+      trustedOrigins:
+        environmentOrigins ?? server?.trustedOrigins ?? defaultTrustedOrigins(host, port, mode),
+    },
+    sources: {
+      host: sourceOf(values.BANDAR_HOST, server?.host),
+      port: sourceOf(values.BANDAR_PORT, server?.port),
+      authUrl: sourceOf(values.BANDAR_AUTH_URL, server?.authUrl),
+      trustedOrigins: sourceOf(environmentOrigins, server?.trustedOrigins),
+    },
   };
+}
+
+function sourceOf<T>(environment: T | undefined, file: T | undefined): ConfigSource {
+  if (environment !== undefined) return "environment";
+
+  return file === undefined ? "default" : "config";
+}
+
+function splitOrigins(value: string): readonly string[] {
+  return value
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin !== "");
+}
+
+/**
+ * The origins a browser can reach a fresh install from. The dev web server runs on its own port, so
+ * only a development run can sign in through it.
+ */
+function defaultTrustedOrigins(host: string, port: number, mode: RunMode): readonly string[] {
+  const origins = [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
+  const anywhere = host === "0.0.0.0" || host === "::";
+
+  if (!anywhere) origins.push(`http://${host.includes(":") ? `[${host}]` : host}:${port}`);
+
+  if (mode === "development")
+    origins.push(`http://localhost:${DEFAULT_WEB_PORT}`, `http://127.0.0.1:${DEFAULT_WEB_PORT}`);
+
+  return [...new Set(origins)];
 }
 
 export function parseConfig(
   env: Record<string, string | undefined>,
   mode: RunMode = detectRunMode(),
 ): Config {
-  return buildConfig(env, resolveHome(env, mode), {});
+  return buildConfig(env, resolveHome(env, mode), mode, {}).config;
 }
 
 /**
- * Reads the settings file and the environment into one config. A file that cannot be read or
- * parsed fails the boot, because a typo there would otherwise start the server on a default.
+ * Reads the settings file and the environment into one config, plus the path it read and where
+ * each server value came from. A file that cannot be read or parsed fails the boot, because a typo
+ * there would otherwise start the server on a default.
  */
-export function loadConfig(
+export function loadConfigReport(
   env: Record<string, string | undefined>,
   read: (path: string) => string,
   mode: RunMode = detectRunMode(),
-): Config {
+): ConfigReport {
   const home = resolveHome(env, mode);
   const report = readSettings(home, read);
 
   if (report.kind === "invalid")
     throw new ConfigError([`${report.path}: ${report.reason}`], "invalid configuration");
 
-  const config = buildConfig(env, home, report.kind === "ok" ? report.settings : {});
+  const { config, sources } = buildConfig(
+    env,
+    home,
+    mode,
+    report.kind === "ok" ? report.settings : {},
+  );
 
   if ((env.BANDAR_AUTH_SECRET ?? "") === "") console.warn(UNSET_SECRET_WARNING);
 
-  return config;
+  return { config, settingsPath: report.path, settingsFound: report.kind === "ok", sources };
+}
+
+export function loadConfig(
+  env: Record<string, string | undefined>,
+  read: (path: string) => string,
+  mode: RunMode = detectRunMode(),
+): Config {
+  return loadConfigReport(env, read, mode).config;
 }

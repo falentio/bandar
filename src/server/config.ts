@@ -34,6 +34,7 @@ type BuiltConfig = {
 
 export type ConfigReport = {
   readonly config: Config;
+  readonly mode: RunMode;
   readonly settingsPath: string;
   readonly settingsFound: boolean;
   readonly sources: ConfigSources;
@@ -299,7 +300,7 @@ export function loadConfigReport(
 
   if ((env.BANDAR_AUTH_SECRET ?? "") === "") console.warn(UNSET_SECRET_WARNING);
 
-  return { config, settingsPath: report.path, settingsFound: report.kind === "ok", sources };
+  return { config, mode, settingsPath: report.path, settingsFound: report.kind === "ok", sources };
 }
 
 export function loadConfig(

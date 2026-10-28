@@ -14,18 +14,11 @@ export function register(commands: Commands): void {
   commands.add({
     name: "config",
     summary: "print the settings file and the config it resolves",
-    takesArguments: true,
     run: config,
   });
 }
 
-async function config(env: Env, args: readonly string[]): Promise<number> {
-  if (args.length > 0) {
-    console.error(`${PREFIX}takes no arguments`);
-
-    return 2;
-  }
-
+async function config(env: Env): Promise<number> {
   try {
     const report = loadConfigReport(env, (path) => readFileSync(path, "utf8"));
 

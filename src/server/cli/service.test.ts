@@ -287,10 +287,10 @@ describe("planService", () => {
     expect(plan.duckdbPath).toBe(join(root, "data", "bandar.duckdb"));
   });
 
-  test("an absolute BANDAR_DB is kept, a relative one follows the data dir", () => {
-    const plan = planOf({}, { BANDAR_DB: join(root, "keep.db"), BANDAR_DUCKDB: "./other.duckdb" });
+  test("a renamed BANDAR_DB keeps its name and joins the data dir", () => {
+    const plan = planOf({}, { BANDAR_DB: "/srv/keep.db", BANDAR_DUCKDB: "other.duckdb" });
 
-    expect(plan.databasePath).toBe(join(root, "keep.db"));
+    expect(plan.databasePath).toBe(join(plan.dataDir, "keep.db"));
     expect(plan.duckdbPath).toBe(join(plan.dataDir, "other.duckdb"));
   });
 

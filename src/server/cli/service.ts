@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
-import { dirname, isAbsolute, join, parse, resolve } from "node:path";
+import { basename, dirname, join, parse, resolve } from "node:path";
 import { parseConfig } from "../config";
 import type { Commands, Env } from "./command";
 
@@ -206,8 +206,8 @@ export function planService(input: ServiceInput): ServicePlan {
     scope,
     binary,
     dataDir,
-    databasePath: besideDataDir(dataDir, config.databasePath),
-    duckdbPath: besideDataDir(dataDir, config.duckdbPath),
+    databasePath: join(dataDir, basename(config.databasePath)),
+    duckdbPath: join(dataDir, basename(config.duckdbPath)),
     port: input.flags.port ?? config.port,
     user: operatorUser(input.env, input.currentUser),
     envFile: join(config.configDir, ENV_FILE_NAME),
@@ -442,10 +442,6 @@ function writeEnvFile(path: string, secret: string): boolean {
   setMode(path, ENV_FILE_MODE);
 
   return true;
-}
-
-function besideDataDir(dataDir: string, configured: string): string {
-  return isAbsolute(configured) ? configured : join(dataDir, configured);
 }
 
 function defaultDataDir(scope: Scope, env: Env, home: string): string {

@@ -2869,7 +2869,10 @@ async function currentModel(providerId: string, modelId: string): Promise<Provid
   return model;
 }
 
-function modelEdit(model: ProviderModel, change: Partial<ProviderModelEditInput>): Json {
+function modelEdit(
+  model: ProviderModel,
+  change: Partial<ProviderModelEditInput>,
+): ProviderModelEditInput {
   return {
     alias: model.alias,
     compat: model.compat,

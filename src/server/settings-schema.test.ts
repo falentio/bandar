@@ -54,6 +54,15 @@ const GeneratedSchema = v.strictObject({
         opencode: ProviderObject,
       }),
     }),
+    update: v.strictObject({
+      type: v.literal("object"),
+      additionalProperties: v.literal(false),
+      required: v.array(v.string()),
+      properties: v.strictObject({
+        webUrl: Property,
+        apiUrl: Property,
+      }),
+    }),
   }),
 });
 
@@ -63,6 +72,8 @@ const server = document.properties.server.properties;
 
 const providers = document.properties.providers.properties;
 
+const update = document.properties.update.properties;
+
 describe("the generated schema", () => {
   test("it names the document", () => {
     expect(document.$schema).toContain("json-schema.org");
@@ -71,7 +82,7 @@ describe("the generated schema", () => {
   });
 
   test("it lists the keys the parser reads, and no others", () => {
-    expect(Object.keys(document.properties)).toEqual(["$schema", "server", "providers"]);
+    expect(Object.keys(document.properties)).toEqual(["$schema", "server", "providers", "update"]);
     expect(Object.keys(server)).toEqual(["host", "port", "authUrl", "trustedOrigins"]);
     expect(Object.keys(providers)).toEqual([...BUILT_IN_PROVIDER_KINDS]);
     expect(Object.keys(providers.kilocode.properties)).toEqual(["baseUrl", "catalogUrl"]);
@@ -81,12 +92,14 @@ describe("the generated schema", () => {
     expect(Object.keys(providers.nous.properties)).toEqual(["baseUrl", "authUrl"]);
     expect(Object.keys(providers.hyper.properties)).toEqual(["baseUrl"]);
     expect(Object.keys(providers.opencode.properties)).toEqual(["baseUrl"]);
+    expect(Object.keys(update)).toEqual(["webUrl", "apiUrl"]);
   });
 
   test("every key is optional, as the parser has it", () => {
     expect(document.required).toEqual([]);
     expect(document.properties.server.required).toEqual([]);
     expect(document.properties.providers.required).toEqual([]);
+    expect(document.properties.update.required).toEqual([]);
 
     for (const provider of Object.values(providers)) expect(provider.required).toEqual([]);
   });
@@ -100,6 +113,7 @@ describe("the generated schema", () => {
     const fields = [
       ...Object.values(server),
       ...Object.values(providers).flatMap((provider) => Object.values(provider.properties)),
+      ...Object.values(update),
       document.properties.$schema,
     ];
 

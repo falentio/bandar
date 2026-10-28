@@ -172,6 +172,38 @@ describe("settings", () => {
     expect(reason).toContain("must be an http or https URL");
   });
 
+  test("an update section parses its two URLs", () => {
+    expect(
+      settingsFrom(
+        readerOf(
+          '{"update":{"webUrl":"https://web.example.test/bandar","apiUrl":"https://api.example.test/latest"}}',
+        ),
+      ),
+    ).toEqual({
+      kind: "ok",
+      path,
+      settings: {
+        update: {
+          webUrl: "https://web.example.test/bandar",
+          apiUrl: "https://api.example.test/latest",
+        },
+      },
+    });
+  });
+
+  test("an unknown update key is invalid", () => {
+    expect(reasonOf(settingsFrom(readerOf('{"update":{"pageUrl":"https://x.test"}}')))).toContain(
+      "update.pageUrl",
+    );
+  });
+
+  test("an update URL must be http or https", () => {
+    const reason = reasonOf(settingsFrom(readerOf('{"update":{"apiUrl":"ftp://x.test/latest"}}')));
+
+    expect(reason).toContain("update.apiUrl");
+    expect(reason).toContain("must be an http or https URL");
+  });
+
   test("a providers section that is not an object is invalid", () => {
     expect(reasonOf(settingsFrom(readerOf('{"providers":[]}')))).toContain("providers");
   });

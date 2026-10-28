@@ -38,6 +38,7 @@ export type Config = {
   readonly authSecret: string;
   readonly trustedOrigins: readonly string[];
   readonly providers: ProviderEndpoints;
+  readonly update: { readonly webUrl: string; readonly apiUrl: string | null };
 };
 
 export type RunMode = "development" | "production";
@@ -55,6 +56,8 @@ type ConfigSources = {
   readonly port: ConfigSource;
   readonly authUrl: ConfigSource;
   readonly trustedOrigins: ConfigSource;
+  readonly updateWebUrl: ConfigSource;
+  readonly updateApiUrl: ConfigSource;
 };
 
 type BuiltConfig = {
@@ -102,6 +105,8 @@ const DATABASE_FILE = "bandar.db";
 
 const DUCKDB_FILE = "bandar.duckdb";
 
+const PUBLIC_WEB_URL = "https://github.com/falentio/bandar";
+
 const UNSET_SECRET_WARNING =
   "bandar: BANDAR_AUTH_SECRET is unset; a random secret was generated for this boot, " +
   "so every session ends when the process stops. Set it to keep sessions across restarts.";
@@ -127,6 +132,8 @@ const ConfigSchema = v.object({
   BANDAR_AUTH_URL: v.optional(HttpUrlSchema),
   BANDAR_AUTH_SECRET: v.optional(v.pipe(v.string(), v.minLength(1))),
   BANDAR_TRUSTED_ORIGINS: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
+  BANDAR_RELEASE_WEB_URL: v.optional(HttpUrlSchema),
+  BANDAR_RELEASE_API_URL: v.optional(HttpUrlSchema),
 });
 
 /**
@@ -334,6 +341,10 @@ function buildConfig(
     defaultTrustedOrigins(authUrl.value, host.value, port.value, mode),
   );
 
+  const update = settings.update;
+  const updateWebUrl = resolve(update?.webUrl, environment.BANDAR_RELEASE_WEB_URL, PUBLIC_WEB_URL);
+  const updateApiUrl = resolve(update?.apiUrl, environment.BANDAR_RELEASE_API_URL, null);
+
   return {
     config: {
       host: host.value,
@@ -345,12 +356,15 @@ function buildConfig(
       authSecret: environment.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
       trustedOrigins: trustedOrigins.value,
       providers: providers.endpoints,
+      update: { webUrl: updateWebUrl.value, apiUrl: updateApiUrl.value },
     },
     sources: {
       host: host.source,
       port: port.source,
       authUrl: authUrl.source,
       trustedOrigins: trustedOrigins.source,
+      updateWebUrl: updateWebUrl.source,
+      updateApiUrl: updateApiUrl.source,
     },
     providerRows: providers.rows,
   };
@@ -439,6 +453,17 @@ function serverRows(config: Config, sources: ConfigSources): readonly ConfigRow[
   ];
 }
 
+function updateRows(config: Config, sources: ConfigSources): readonly ConfigRow[] {
+  return [
+    { key: "update.webUrl", value: config.update.webUrl, source: sources.updateWebUrl },
+    {
+      key: "update.apiUrl",
+      value: config.update.apiUrl ?? "none",
+      source: sources.updateApiUrl,
+    },
+  ];
+}
+
 /**
  * A secret with no default and no settings key: a random one keeps this boot alive, so the
  * operator is told once per boot that sessions will not survive it.
@@ -489,7 +514,7 @@ export function loadConfigReport(
     mode,
     settingsPath: report.path,
     settingsFound: report.kind === "ok",
-    rows: [...serverRows(config, sources), ...providerRows],
+    rows: [...serverRows(config, sources), ...providerRows, ...updateRows(config, sources)],
   };
 }
 

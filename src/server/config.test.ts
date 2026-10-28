@@ -689,3 +689,86 @@ describe("the provider endpoints", () => {
     }
   });
 });
+
+describe("the update feed", () => {
+  test("the defaults name the public repository and no API feed", () => {
+    expect(reportOf().config.update).toEqual({
+      webUrl: "https://github.com/falentio/bandar",
+      apiUrl: null,
+    });
+  });
+
+  test("the file supplies both URLs", () => {
+    const config = fromFile(
+      JSON.stringify({
+        update: {
+          webUrl: "https://web.example.test/bandar",
+          apiUrl: "https://api.example.test/releases/latest",
+        },
+      }),
+    );
+
+    expect(config.update).toEqual({
+      webUrl: "https://web.example.test/bandar",
+      apiUrl: "https://api.example.test/releases/latest",
+    });
+  });
+
+  test("the environment stands in when the file is silent", () => {
+    const config = fromFile("{}", {
+      BANDAR_RELEASE_WEB_URL: "https://web.example.test/bandar",
+      BANDAR_RELEASE_API_URL: "https://api.example.test/releases/latest",
+    });
+
+    expect(config.update).toEqual({
+      webUrl: "https://web.example.test/bandar",
+      apiUrl: "https://api.example.test/releases/latest",
+    });
+  });
+
+  test("the file outranks the environment", () => {
+    const config = fromFile(
+      JSON.stringify({ update: { webUrl: "https://file.example.test/bandar" } }),
+      {
+        BANDAR_RELEASE_WEB_URL: "https://env.example.test/bandar",
+        BANDAR_RELEASE_API_URL: "https://api.example.test/releases/latest",
+      },
+    );
+
+    expect(config.update).toEqual({
+      webUrl: "https://file.example.test/bandar",
+      apiUrl: "https://api.example.test/releases/latest",
+    });
+  });
+
+  test("the rows name the update keys, printing none for an absent feed", () => {
+    const rows = reportOf(
+      {},
+      "production",
+      JSON.stringify({ update: { webUrl: "https://web.example.test/bandar" } }),
+    ).rows.filter((row) => row.key.startsWith("update."));
+
+    expect(rows).toEqual([
+      {
+        key: "update.webUrl",
+        value: "https://web.example.test/bandar",
+        source: "config",
+      },
+      { key: "update.apiUrl", value: "none", source: "default" },
+    ]);
+  });
+
+  test("an update URL that is not http or https fails the boot", () => {
+    const attempt = () => fromFile('{"update":{"webUrl":"javascript:alert(1)"}}');
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("update.webUrl");
+  });
+
+  test("an unknown update key fails the boot", () => {
+    const attempt = () => fromFile('{"update":{"pageUrl":"https://x.test"}}');
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("update.pageUrl");
+  });
+});

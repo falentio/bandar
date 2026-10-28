@@ -140,6 +140,26 @@ const OpenCodeSettingsSchema = v.pipe(
   v.strictObject({ baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.opencode.baseUrl) }),
 );
 
+const UpdateSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({
+    webUrl: v.optional(
+      v.pipe(
+        HttpUrlSchema,
+        v.description("The release web base for downloads. Defaults to the public repository."),
+      ),
+    ),
+    apiUrl: v.optional(
+      v.pipe(
+        HttpUrlSchema,
+        v.description(
+          "The latest-release feed of a private fork. Absent: the public release page.",
+        ),
+      ),
+    ),
+  }),
+);
+
 const ProvidersSettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
@@ -166,6 +186,7 @@ export const SettingsSchema = v.pipe(
     ),
     server: v.optional(ServerSettingsSchema),
     providers: v.optional(ProvidersSettingsSchema),
+    update: v.optional(UpdateSettingsSchema),
   }),
   v.metadata({
     title: "bandar config.json",

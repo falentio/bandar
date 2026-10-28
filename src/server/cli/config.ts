@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { ConfigError, loadConfigReport, type ConfigReport, type ConfigSource } from "../config";
 import type { Commands, Env } from "./command";
 
@@ -20,7 +20,10 @@ export function register(commands: Commands): void {
 
 async function config(env: Env): Promise<number> {
   try {
-    const report = loadConfigReport(env, (path) => readFileSync(path, "utf8"));
+    const report = loadConfigReport(env, {
+      read: (path) => readFileSync(path, "utf8"),
+      write: (path, text) => writeFileSync(path, text),
+    });
 
     for (const line of renderReport(report)) console.log(line);
 

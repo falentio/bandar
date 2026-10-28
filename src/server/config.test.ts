@@ -18,6 +18,8 @@ const MODE_HOMES = [
 
 const home = "/srv/bandar";
 
+const ioOf = (read: (path: string) => string) => ({ read, write: () => {} });
+
 const missingFile = (): string => {
   throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
 };
@@ -26,7 +28,12 @@ const reportOf = (
   env: Record<string, string | undefined> = {},
   mode: RunMode = "production",
   json = "{}",
-) => loadConfigReport({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set", ...env }, () => json, mode);
+) =>
+  loadConfigReport(
+    { BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set", ...env },
+    ioOf(() => json),
+    mode,
+  );
 
 describe("config", () => {
   test("a provider origin that is not a URL fails at boot", () => {
@@ -137,7 +144,11 @@ describe("the settings file", () => {
   const file = JSON.stringify({ server: { host: "127.0.0.1", port: 4000 } });
 
   const fromFile = (json: string, env: Record<string, string | undefined> = {}) =>
-    loadConfig({ BANDAR_HOME: home, ...env }, () => json, "production");
+    loadConfig(
+      { BANDAR_HOME: home, ...env },
+      ioOf(() => json),
+      "production",
+    );
 
   test("the file supplies the host and the port", () => {
     const config = fromFile(file);
@@ -227,24 +238,31 @@ describe("the settings file", () => {
   test("loadConfig reads config.json under BANDAR_HOME", () => {
     const asked: string[] = [];
 
-    loadConfig({ BANDAR_HOME: home }, (path) => {
-      asked.push(path);
+    loadConfig(
+      { BANDAR_HOME: home },
+      ioOf((path) => {
+        asked.push(path);
 
-      return "{}";
-    });
+        return "{}";
+      }),
+    );
 
     expect(asked).toEqual(["/srv/bandar/config.json"]);
   });
 
   test("a missing file leaves the defaults", () => {
-    const config = loadConfig({ BANDAR_HOME: home }, missingFile);
+    const config = loadConfig({ BANDAR_HOME: home }, ioOf(missingFile));
 
     expect(config.host).toBe("0.0.0.0");
     expect(config.port).toBe(DEFAULT_API_PORT);
   });
 
   test("an invalid file fails the boot, naming the file and the field", () => {
-    const attempt = () => loadConfig({ BANDAR_HOME: home }, () => '{"server":{"port":70000}}');
+    const attempt = () =>
+      loadConfig(
+        { BANDAR_HOME: home },
+        ioOf(() => '{"server":{"port":70000}}'),
+      );
 
     expect(attempt).toThrow(ConfigError);
     expect(attempt).toThrow("invalid configuration");
@@ -252,7 +270,7 @@ describe("the settings file", () => {
   });
 
   test("a blank BANDAR_HOME fails before the file is read", () => {
-    const attempt = () => loadConfig({ BANDAR_HOME: "" }, missingFile);
+    const attempt = () => loadConfig({ BANDAR_HOME: "" }, ioOf(missingFile));
 
     expect(attempt).toThrow("BANDAR_HOME: must be an absolute path");
   });
@@ -261,13 +279,13 @@ describe("the settings file", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     try {
-      loadConfig({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set" }, missingFile);
+      loadConfig({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set" }, ioOf(missingFile));
       expect(warn).not.toHaveBeenCalled();
 
-      loadConfig({ BANDAR_HOME: home }, missingFile);
+      loadConfig({ BANDAR_HOME: home }, ioOf(missingFile));
       expect(warn).toHaveBeenCalledTimes(1);
 
-      loadConfig({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "" }, missingFile);
+      loadConfig({ BANDAR_HOME: home, BANDAR_AUTH_SECRET: "" }, ioOf(missingFile));
       expect(warn).toHaveBeenCalledTimes(2);
     } finally {
       warn.mockRestore();
@@ -346,7 +364,7 @@ describe("the config report", () => {
   test("a missing file reports the path, no file, and every default", () => {
     const report = loadConfigReport(
       { BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set" },
-      missingFile,
+      ioOf(missingFile),
       "production",
     );
 

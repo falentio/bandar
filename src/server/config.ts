@@ -3,7 +3,13 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
-import { HttpUrlSchema, OriginSchema, readSettings, type Settings } from "./settings";
+import {
+  HttpUrlSchema,
+  OriginSchema,
+  readSettings,
+  type Settings,
+  type SettingsIo,
+} from "./settings";
 
 export type Config = {
   readonly host: string;
@@ -284,11 +290,11 @@ export function parseConfig(
  */
 export function loadConfigReport(
   env: Record<string, string | undefined>,
-  read: (path: string) => string,
+  io: SettingsIo,
   mode: RunMode = detectRunMode(),
 ): ConfigReport {
   const home = resolveHome(env, mode);
-  const report = readSettings(home, read);
+  const report = readSettings(home, io);
 
   if (report.kind === "invalid")
     throw new ConfigError([`${report.path}: ${report.reason}`], "invalid configuration");
@@ -307,8 +313,8 @@ export function loadConfigReport(
 
 export function loadConfig(
   env: Record<string, string | undefined>,
-  read: (path: string) => string,
+  io: SettingsIo,
   mode: RunMode = detectRunMode(),
 ): Config {
-  return loadConfigReport(env, read, mode).config;
+  return loadConfigReport(env, io, mode).config;
 }

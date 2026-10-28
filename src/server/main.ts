@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createApp } from "./app";
 import { createClientBundle } from "./assets";
 import { createAuth } from "./auth";
@@ -42,7 +42,10 @@ export async function main(env: Env, argv: readonly string[]): Promise<number> {
 }
 
 async function startServer(env: Env): Promise<void> {
-  const config = loadConfig(env, (path) => readFileSync(path, "utf8"));
+  const config = loadConfig(env, {
+    read: (path) => readFileSync(path, "utf8"),
+    write: (path, text) => writeFileSync(path, text),
+  });
 
   const { sqlite, db } = openDatabase(config.databasePath);
   const migration = applyMigrations(sqlite, migrations);

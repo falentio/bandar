@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import type { ProviderKind } from "../../shared/providers";
+import { parseCompat, type Compat, type ProviderKind } from "../../shared/providers";
 import { TAG_REF_PREFIX, providerRefOf, tagRefOf } from "../../shared/slugs";
 import { providerCredentials, providerModels, providers, tagModels, tags } from "../db/schema";
 import type { ProviderDeps } from "../providers";
@@ -7,6 +7,7 @@ import type { ProviderDeps } from "../providers";
 export type ResolvedAttempt = {
   readonly alias: string;
   readonly upstreamModel: string;
+  readonly compat: Compat | null;
   readonly inputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;
   readonly providerId: string;
@@ -33,6 +34,7 @@ export type ModelRef = { readonly id: string; readonly createdAt: Date };
 type AttemptRow = {
   readonly alias: string;
   readonly upstreamModel: string;
+  readonly compat: string | null;
   readonly inputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;
   readonly providerId: string;
@@ -51,6 +53,7 @@ type AttemptRow = {
 const attemptColumns = {
   alias: providerModels.alias,
   upstreamModel: providerModels.upstreamModel,
+  compat: providerModels.compat,
   inputPricePerMtok: providerModels.inputPricePerMtok,
   outputPricePerMtok: providerModels.outputPricePerMtok,
   providerId: providers.id,
@@ -70,6 +73,7 @@ const attemptColumns = {
 function attemptsOf(rows: readonly AttemptRow[]): readonly ResolvedAttempt[] {
   return rows.map((row) => ({
     ...row,
+    compat: parseCompat(row.compat),
     credentialLabel: row.credentialLabel ?? "",
     sealedKey: row.sealedKey ?? "",
   }));

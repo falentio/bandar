@@ -1,4 +1,9 @@
-import { BUILT_IN_PROVIDER_KINDS, type ProviderKind } from "../../shared/providers";
+import {
+  BUILT_IN_PROVIDER_KINDS,
+  COMPATIBILITIES,
+  type Compat,
+  type ProviderKind,
+} from "../../shared/providers";
 import { TAG_SLUG } from "../../shared/slugs";
 import { anthropic } from "./anthropic";
 import { google } from "./google";
@@ -40,6 +45,12 @@ const providerDefinitions: ProviderDefinitionRecord = {
 
 export function definitionFor<K extends ProviderKind>(kind: K): ProviderDefinitionRecord[K] {
   return providerDefinitions[kind];
+}
+
+export function compatsOf(kind: ProviderKind): Compat[] {
+  const routes = definitionFor(kind).routes;
+
+  return COMPATIBILITIES.filter((compat) => routes[compat] !== undefined);
 }
 
 export const builtInProviders: readonly BuiltInProviderDefinition[] = BUILT_IN_PROVIDER_KINDS.map(

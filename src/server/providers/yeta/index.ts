@@ -2,7 +2,12 @@ import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
 import { entryOf, NO_PRICE, optionalPrices, readModelIds } from "../catalog";
 import { apiBaseUrl } from "../env";
 import { bearerAdapter } from "../openai/compatible";
-import type { BuiltInProviderDefinition, CatalogRequest, ModelCatalogEntry } from "../types";
+import {
+  always,
+  type BuiltInProviderDefinition,
+  type CatalogRequest,
+  type ModelCatalogEntry,
+} from "../types";
 import { fetchYetaPricing } from "./pricing";
 
 const settings = BUILT_IN_PROVIDERS.yeta;
@@ -15,7 +20,8 @@ export const yeta: BuiltInProviderDefinition<"yeta"> = {
     slug: settings.slug,
     baseUrl: () => apiBaseUrl("BANDAR_YETA_API", settings.baseUrl),
   },
-  adapter: bearerAdapter("yeta"),
+  routes: { chat: { adapter: bearerAdapter("yeta") } },
+  defaultCompat: always("chat"),
   catalog: fetchYetaCatalog,
 };
 

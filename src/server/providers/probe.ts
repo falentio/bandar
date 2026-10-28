@@ -4,6 +4,7 @@ import type { Credential } from "../credential";
 import { providerCredentials } from "../db/schema";
 import { readCredential, type ProviderDeps } from "./index";
 import { definitionFor } from "./registry";
+import { routeAttempt } from "./route";
 import { UpstreamError } from "./types";
 
 /** One token of one model is the cheapest read every wire answers the same way. */
@@ -72,17 +73,19 @@ async function probeRead(
       return PASSED;
     }
 
-    await definitionFor(provider.kind).adapter.chat({
-      target: {
+    const route = routeAttempt(
+      provider.kind,
+      {
         providerId: provider.id,
         kind: provider.kind,
         baseUrl: provider.baseUrl,
         credential,
         upstreamModel: model.upstreamModel,
       },
-      request: PROBE_REQUEST,
-      signal,
-    });
+      model.compat,
+    );
+
+    await route.adapter.chat({ target: route.target, request: PROBE_REQUEST, signal });
 
     return PASSED;
   } catch (error) {

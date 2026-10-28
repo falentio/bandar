@@ -97,7 +97,7 @@ function sqliteFixture(dir: string): Database {
 function duckFixture(dir: string): DuckDb {
   const duck = new DuckDb(join(dir, "live.duckdb"), LIBRARY);
 
-  duck.run("CREATE TABLE requests (id VARCHAR)");
+  duck.run("CREATE TABLE requests (id VARCHAR PRIMARY KEY)");
   duck.run("INSERT INTO requests VALUES ('r1')");
   cleanups.push(() => duck.close());
 
@@ -199,7 +199,7 @@ describe("createBackup", () => {
     expect(statSync(`${live}-wal`).size).toBeGreaterThan(0);
   });
 
-  test("the duckdb member is checkpointed before the copy", async () => {
+  test("the duckdb member is a complete export of the live catalog", async () => {
     const dir = workDir();
     const duck = duckFixture(dir);
 
@@ -215,11 +215,39 @@ describe("createBackup", () => {
 
     try {
       expect(copy.query("SELECT id FROM requests")).toEqual([{ id: "r1" }]);
+      expect(() => copy.run("INSERT INTO requests VALUES ('r1')")).toThrow(/constraint/iu);
     } finally {
       copy.close();
     }
 
     expect(existsSync(`${duck.path}.wal`)).toBe(false);
+  });
+
+  test("exports a consistent snapshot while another connection holds a write", async () => {
+    const dir = workDir();
+    const duck = duckFixture(dir);
+    const writer = new DuckDb(join(dir, "live.duckdb"), LIBRARY);
+
+    cleanups.push(() => writer.close());
+    writer.run("BEGIN");
+    writer.run("INSERT INTO requests VALUES ('r2')");
+
+    const members = membersOf(
+      (await createBackup({ sqlite: sqliteFixture(dir), duck, sqliteTag: null, duckdbTag: null }))
+        .bytes,
+    );
+
+    const copy = new DuckDb(
+      copyTo(dir, "snapshot.duckdb", member(members, DUCKDB_MEMBER)),
+      LIBRARY,
+    );
+
+    try {
+      expect(copy.query("SELECT id FROM requests")).toEqual([{ id: "r1" }]);
+    } finally {
+      copy.close();
+      writer.run("ROLLBACK");
+    }
   });
 
   test("removes the temporary copies on both exits", async () => {

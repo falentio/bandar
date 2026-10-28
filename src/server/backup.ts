@@ -1,11 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as v from "valibot";
 import { BackupManifestSchema, type BackupManifest, type BackupMember } from "../shared/api";
-import type { DuckDb } from "./duck/client";
+import { sqlText, type DuckDb } from "./duck/client";
 import { version } from "./generated/version";
 import { createZip } from "./zip";
 
@@ -45,8 +45,7 @@ export async function createBackup(
     const analytics = join(work, DUCKDB_MEMBER);
 
     source.sqlite.run("VACUUM INTO ?", [snapshot]);
-    source.duck.run("CHECKPOINT");
-    copyFileSync(source.duck.path, analytics);
+    exportAnalytics(source.duck, analytics);
 
     const sqliteBytes = new Uint8Array(await Bun.file(snapshot).arrayBuffer());
     const duckdbBytes = new Uint8Array(await Bun.file(analytics).arrayBuffer());
@@ -76,6 +75,40 @@ export async function createBackup(
 
 function encode(manifest: BackupManifest): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+const SNAPSHOT = "bandar_snapshot";
+
+/**
+ * DuckDB holds its file open for the life of the instance, and Windows refuses a
+ * second handle on it, so the analytics copy is made by DuckDB itself: attach a
+ * fresh file and copy the catalog into it. The copy reads through MVCC, so a
+ * concurrent transaction neither blocks it nor lands in it.
+ */
+function exportAnalytics(duck: DuckDb, target: string): void {
+  const catalog = currentCatalog(duck);
+
+  duck.run("CHECKPOINT");
+  duck.run(`ATTACH ? AS ${SNAPSHOT}`, [sqlText(target)]);
+
+  try {
+    duck.run(`COPY FROM DATABASE ${identifier(catalog)} TO ${SNAPSHOT}`);
+  } finally {
+    duck.run(`DETACH ${SNAPSHOT}`);
+  }
+}
+
+function currentCatalog(duck: DuckDb): string {
+  const row = duck.query("SELECT current_database() AS name")[0];
+
+  if (row?.name === null || row?.name === undefined)
+    throw new Error("DuckDB did not report its own catalog name");
+
+  return row.name;
+}
+
+function identifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
 }
 
 function member(name: string, data: Uint8Array): BackupMember {

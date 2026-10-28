@@ -36,7 +36,7 @@ export async function main(env: Env, argv: readonly string[]): Promise<number> {
 
       return 2;
     case "command":
-      return invocation.command.run(env);
+      return invocation.command.run(env, invocation.args ?? []);
   }
 }
 

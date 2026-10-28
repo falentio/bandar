@@ -2364,6 +2364,163 @@ try {
     assert.equal(body.input_tokens, Math.ceil((system.length + 1 + text.length) / CHARS_PER_TOKEN));
   });
 
+  await check("PUT a model's compat moves its traffic to the responses wire", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const added = await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "fake-openai-override", alias: "override-fast" },
+      ProviderSchema,
+      201,
+    );
+
+    overrideModelId = added.models.find((model) => model.alias === "override-fast")?.id ?? "";
+
+    const moved = await putJson(
+      providerPaths.model(id, overrideModelId),
+      { compat: "responses" },
+      ProviderSchema,
+      200,
+    );
+
+    const model = moved.models.find((row) => row.id === overrideModelId);
+
+    assert.equal(model?.compat, "responses");
+    assert.equal(model?.defaultCompat, "chat");
+
+    const response = await fetch(new URL("/v1/chat/completions", origin), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...bearer() },
+      body: JSON.stringify({
+        model: "override-fast",
+        stream: false,
+        temperature: 0.1,
+        max_tokens: 32,
+        stop: ["stop-here"],
+        messages: [{ role: "user", content: "hello from the override" }],
+      }),
+    });
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from OpenAI Responses");
+    assert.deepEqual(body.usage, { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 });
+
+    const cleared = await putJson(
+      providerPaths.model(id, overrideModelId),
+      { compat: null },
+      ProviderSchema,
+      200,
+    );
+
+    assert.equal(cleared.models.find((row) => row.id === overrideModelId)?.compat, null);
+
+    const back = await chatRequest("override-fast", false);
+
+    assert.equal(back.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await back.json()).choices[0]?.message.content,
+      "Hello from OpenAI",
+    );
+  });
+
+  await check("a compat the provider kind does not declare is a 422", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const response = await put(providerPaths.model(id, overrideModelId), { compat: "genai" });
+
+    assert.equal(response.status, 422);
+    assert.equal((await errorBody(response)).code, "validation");
+  });
+
+  await check("PUT a model's compat on a missing model is a 404", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const response = await put(providerPaths.model(id, "missing-model"), { compat: "chat" });
+
+    assert.equal(response.status, 404);
+  });
+
+  await check("a stored compat this build does not know answers on the default", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+    const db = new Database(dbPath);
+
+    try {
+      db.query("UPDATE provider_models SET compat = 'rubbish' WHERE id = ?").run(overrideModelId);
+    } finally {
+      db.close();
+    }
+
+    const response = await chatRequest("override-fast", false);
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await response.json()).choices[0]?.message.content,
+      "Hello from OpenAI",
+    );
+
+    const healed = await putJson(
+      providerPaths.model(id, overrideModelId),
+      { compat: null },
+      ProviderSchema,
+      200,
+    );
+
+    assert.equal(healed.models.find((row) => row.id === overrideModelId)?.compat, null);
+  });
+
+  await check("a failed responses body is an error, not an empty success", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const added = await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "fake-openai-broken", alias: "openai-broken" },
+      ProviderSchema,
+      201,
+    );
+
+    const brokenId = added.models.find((model) => model.alias === "openai-broken")?.id ?? "";
+
+    await putJson(providerPaths.model(id, brokenId), { compat: "responses" }, ProviderSchema, 200);
+
+    const response = await chatRequest("openai-broken", false);
+
+    assert.equal(response.status, 502);
+
+    const error = await openAiError(response);
+
+    assert.equal(error.code, "protocol");
+    assert.match(error.message, /the model is broken/);
+  });
+
+  await check("a responses stream that fails mid-flight sends an error frame", async () => {
+    const id = openaiProvider.provider?.id ?? "";
+
+    const added = await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "fake-openai-stream-broken", alias: "openai-stream-broken" },
+      ProviderSchema,
+      201,
+    );
+
+    const brokenId = added.models.find((model) => model.alias === "openai-stream-broken")?.id ?? "";
+
+    await putJson(providerPaths.model(id, brokenId), { compat: "responses" }, ProviderSchema, 200);
+
+    const response = await chatRequest("openai-stream-broken", true);
+
+    assert.equal(response.status, 200);
+
+    const raw = await response.text();
+
+    assert.match(raw, /Half an answer/);
+    assert.match(raw, /"code":"protocol"/);
+    assert.match(raw, /the stream broke/);
+    assert.match(raw, /data: \[DONE\]/);
+  });
+
   await check("GET /api/providers/:id hides another account's provider", async () => {
     const response = await fetch(
       new URL(`${providerPaths.detail("00000000-0000-0000-0000-000000000000")}?days=30`, origin),
@@ -3014,7 +3171,7 @@ function startUpstream() {
     port: 0,
     async fetch(request) {
       const url = new URL(request.url);
-      const raw: unknown = await request.json();
+      const raw: unknown = await request.clone().json();
       const body = v.safeParse(v.object({ stream: v.optional(v.boolean()) }), raw);
       const stream = body.success ? (body.output.stream ?? false) : false;
 
@@ -3058,6 +3215,16 @@ function startUpstream() {
         const parsed = v.safeParse(ResponsesBodySchema, await request.json());
 
         if (!parsed.success) return jsonError(400, "the openai responses body is off");
+
+        if (parsed.output.model === "fake-openai-stream-broken") {
+          return sse([
+            { type: "response.output_text.delta", delta: "Half an answer" },
+            {
+              type: "response.failed",
+              response: { status: "failed", output: [], error: { message: "the stream broke" } },
+            },
+          ]);
+        }
 
         if (parsed.output.model === "fake-openai-broken") {
           return Response.json({

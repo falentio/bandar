@@ -485,7 +485,7 @@ BANDAR_DB=/srv/bandar/bandar.db BANDAR_DUCKDB=/srv/bandar/bandar.duckdb bandar s
 | `bun run check`          | Format, lint, and type-check.                                                              |
 | `bun run check:fix`      | The same with fixes.                                                                       |
 | `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                                 |
-| `bun run smoke`          | Boot the compiled binary and run 72 end-to-end checks against fake upstreams.              |
+| `bun run smoke`          | Boot the compiled binary and run 87 end-to-end checks against fake upstreams.              |
 | `bun run verify`         | `check`, `test`, `build`, `smoke`.                                                         |
 | `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                              |
 | `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                                 |

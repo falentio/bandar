@@ -2432,6 +2432,10 @@ try {
 
   await check("PUT a model's compat on a missing model is a 404", async () => {
     const id = openaiProvider.provider?.id ?? "";
+    const { provider } = await getJson(providerPaths.detail(id), ProviderDetailSchema, 200);
+    const aliasFree = provider.models.every((row) => row.alias !== "missing-model-alias");
+
+    assert.ok(aliasFree, "a model holds missing-model-alias, so the alias clash answers first");
 
     const response = await put(
       providerPaths.model(id, "missing-model"),

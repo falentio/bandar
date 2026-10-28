@@ -6,7 +6,15 @@ import { MAX_UPSTREAM_MODEL_LENGTH, SlugSchema, TAG_REF_PREFIX } from "./slugs";
 export const GENERIC_PROVIDER_KINDS = ["openai", "anthropic", "google"] as const;
 
 // Built-in providers come from code, exist for every account, and are not added by hand.
-export const BUILT_IN_PROVIDER_KINDS = ["kilocode"] as const;
+export const BUILT_IN_PROVIDER_KINDS = [
+  "kilocode",
+  "tokenharbor",
+  "yeta",
+  "river",
+  "nous",
+  "hyper",
+  "opencode",
+] as const;
 
 export const PROVIDER_KINDS = [...GENERIC_PROVIDER_KINDS, ...BUILT_IN_PROVIDER_KINDS] as const;
 
@@ -22,6 +30,42 @@ export const BUILT_IN_PROVIDERS = {
     name: "Kilo Code",
     slug: "kilo",
     baseUrl: "https://api.kilo.ai/api/openrouter",
+  },
+  tokenharbor: {
+    kind: "tokenharbor",
+    name: "Token Harbor",
+    slug: "tokenharbor",
+    baseUrl: "https://tokenharbor.ai/v1",
+  },
+  yeta: {
+    kind: "yeta",
+    name: "Yeta",
+    slug: "yeta",
+    baseUrl: "https://platform.yeta.ai/v1",
+  },
+  river: {
+    kind: "river",
+    name: "River",
+    slug: "river",
+    baseUrl: "https://api.river.ai/v1",
+  },
+  nous: {
+    kind: "nous",
+    name: "Nous Portal",
+    slug: "nous",
+    baseUrl: "https://inference-api.nousresearch.com/v1",
+  },
+  hyper: {
+    kind: "hyper",
+    name: "Hyper",
+    slug: "hyper",
+    baseUrl: "https://hyper.charm.land/v1",
+  },
+  opencode: {
+    kind: "opencode",
+    name: "OpenCode Go",
+    slug: "opencode",
+    baseUrl: "https://opencode.ai/inference",
   },
 } satisfies Record<
   BuiltInProviderKind,
@@ -67,6 +111,7 @@ export const ProviderSchema = v.object({
   origin: ProviderOriginSchema,
   baseUrl: v.string(),
   authModes: v.array(ProviderAuthModeSchema),
+  hasCatalog: v.boolean(),
   credentials: v.array(ProviderCredentialSchema),
   models: v.array(ProviderModelSchema),
   createdAt: v.string(),
@@ -153,6 +198,7 @@ export const ProviderOAuthStartSchema = v.object({
   userCode: v.string(),
   verificationUrl: v.string(),
   expiresInSeconds: v.number(),
+  intervalSeconds: v.pipe(v.number(), v.minValue(1)),
 });
 
 export const ProviderOAuthPollSchema = v.object({
@@ -190,7 +236,13 @@ export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
   openai: "OpenAI compatible",
   anthropic: "Anthropic compatible",
   google: "Google GenAI compatible",
-  kilocode: "Kilo Code",
+  kilocode: BUILT_IN_PROVIDERS.kilocode.name,
+  tokenharbor: BUILT_IN_PROVIDERS.tokenharbor.name,
+  yeta: BUILT_IN_PROVIDERS.yeta.name,
+  river: BUILT_IN_PROVIDERS.river.name,
+  nous: BUILT_IN_PROVIDERS.nous.name,
+  hyper: BUILT_IN_PROVIDERS.hyper.name,
+  opencode: BUILT_IN_PROVIDERS.opencode.name,
 };
 
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;

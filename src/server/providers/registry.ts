@@ -2,8 +2,14 @@ import { BUILT_IN_PROVIDER_KINDS, type ProviderKind } from "../../shared/provide
 import { TAG_SLUG } from "../../shared/slugs";
 import { anthropic } from "./anthropic";
 import { google } from "./google";
+import { hyper } from "./hyper";
 import { kilocode } from "./kilocode";
+import { nous } from "./nous";
+import { opencode } from "./opencode";
 import { openai } from "./openai";
+import { river } from "./river";
+import { tokenharbor } from "./tokenharbor";
+import { yeta } from "./yeta";
 import type {
   BuiltInProviderDefinition,
   BuiltInProviderDefinitions,
@@ -19,6 +25,12 @@ const genericDefinitions = {
 
 const builtInDefinitions = {
   kilocode,
+  tokenharbor,
+  yeta,
+  river,
+  nous,
+  hyper,
+  opencode,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {

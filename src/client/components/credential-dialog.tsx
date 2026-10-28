@@ -197,9 +197,13 @@ export function AddCredentialDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add credential</DialogTitle>
+          <DialogTitle>
+            {provider.authModes.includes("api-key") ? "Add credential" : `Connect ${provider.name}`}
+          </DialogTitle>
           <DialogDescription>
-            A new credential joins the end of the chain for {provider.name}.
+            {provider.authModes.includes("api-key")
+              ? `A new credential joins the end of the chain for ${provider.name}.`
+              : `A new connection joins the chain for ${provider.name} or replaces an expiring one.`}
           </DialogDescription>
         </DialogHeader>
         <Tabs

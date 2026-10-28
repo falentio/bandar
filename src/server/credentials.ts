@@ -1,9 +1,15 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import type { Provider, ProviderAuthMode, ProviderCredentialInput } from "../shared/providers";
 import type { Db } from "./db/client";
-import type { Credential } from "./credential";
+import { EXPIRING_CONNECTION_MS, type Credential } from "./credential";
 import { providerCredentials } from "./db/schema";
-import { readProvider, sealApiKey, type ProviderDeps } from "./providers";
+import {
+  definitionFor,
+  readCredential,
+  readProvider,
+  sealApiKey,
+  type ProviderDeps,
+} from "./providers";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -17,7 +23,8 @@ export type CredentialWriteResult =
   | { readonly kind: "ok"; readonly provider: Provider }
   | { readonly kind: "missing_provider" }
   | { readonly kind: "missing_credential" }
-  | { readonly kind: "invalid_order" };
+  | { readonly kind: "invalid_order" }
+  | { readonly kind: "unsupported_mode" };
 
 export async function addProviderCredential(
   deps: ProviderDeps,
@@ -25,7 +32,13 @@ export async function addProviderCredential(
   providerId: string,
   input: ProviderCredentialInput,
 ): Promise<CredentialWriteResult> {
-  if ((await readProvider(deps, userId, providerId)) === null) return { kind: "missing_provider" };
+  const provider = await readProvider(deps, userId, providerId);
+
+  if (provider === null) return { kind: "missing_provider" };
+
+  if (!definitionFor(provider.kind).authModes.includes("api-key")) {
+    return { kind: "unsupported_mode" };
+  }
 
   const sealed = await sealApiKey(deps, input.apiKey);
 
@@ -40,7 +53,13 @@ export async function addProviderCredentials(
   providerId: string,
   apiKeys: readonly string[],
 ): Promise<CredentialWriteResult> {
-  if ((await readProvider(deps, userId, providerId)) === null) return { kind: "missing_provider" };
+  const provider = await readProvider(deps, userId, providerId);
+
+  if (provider === null) return { kind: "missing_provider" };
+
+  if (!definitionFor(provider.kind).authModes.includes("api-key")) {
+    return { kind: "unsupported_mode" };
+  }
 
   const entries = await Promise.all(
     apiKeys.map(async (apiKey): Promise<AppendedCredential> => ({
@@ -126,10 +145,49 @@ export async function addOAuthCredential(
   if (provider === null) return null;
 
   const sealed = await deps.sealer.seal(JSON.stringify(credential));
+  const expired = await expiringConnection(deps, providerId);
+
+  if (expired !== null) {
+    deps.db
+      .update(providerCredentials)
+      .set({ credential: sealed, authMode: "oauth" })
+      .where(eq(providerCredentials.id, expired))
+      .run();
+
+    return readProvider(deps, userId, providerId);
+  }
 
   appendCredentials(deps, providerId, [{ label: "", sealed, authMode: credential.authMode }]);
 
   return readProvider(deps, userId, providerId);
+}
+
+// A connection due for renewal is the one a reconnection replaces, not a second account.
+async function expiringConnection(deps: ProviderDeps, providerId: string): Promise<string | null> {
+  const rows = await deps.db
+    .select({ id: providerCredentials.id, credential: providerCredentials.credential })
+    .from(providerCredentials)
+    .where(
+      and(
+        eq(providerCredentials.providerId, providerId),
+        eq(providerCredentials.authMode, "oauth"),
+      ),
+    )
+    .orderBy(asc(providerCredentials.priority));
+
+  for (const row of rows) {
+    const credential = await readCredential(deps, row.credential).catch(() => null);
+
+    if (
+      credential?.authMode === "oauth" &&
+      credential.expiresAt !== null &&
+      credential.expiresAt <= Date.now() + EXPIRING_CONNECTION_MS
+    ) {
+      return row.id;
+    }
+  }
+
+  return null;
 }
 
 function writeRanks(

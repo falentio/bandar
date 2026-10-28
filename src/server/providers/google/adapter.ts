@@ -1,13 +1,13 @@
 import * as v from "valibot";
+import type { ProviderKind } from "../../../shared/providers";
 import {
-  apiKeyHeader,
   joinUrl,
   postJson,
   protocolError,
   requireBody,
   requireOk,
-  secretOf,
   sseData,
+  type HeaderFactory,
 } from "../http";
 import {
   UpstreamError,
@@ -52,86 +52,98 @@ type ChatBody = {
   };
 };
 
-export const googleAdapter: ProviderAdapter = {
-  kind: "google",
-
-  async chat(input: AdapterInput): Promise<CanonicalResult> {
-    const response = await postJson({
-      url: chatUrl(input, false),
-      headers: headersFor(secretOf(input.target.credential)),
-      body: JSON.stringify(bodyFor(input)),
-      signal: input.signal,
-    });
-
-    await requireOk(response);
-
-    const parsed = v.safeParse(ResponseSchema, await response.json());
-
-    if (!parsed.success) throw protocolError("google returned an unexpected response shape");
-
-    const candidate = parsed.output.candidates?.[0];
-
-    if (candidate === undefined) throw protocolError("google returned no candidates");
-
-    return {
-      text: textOf(candidate),
-      finishReason: finishReason(candidate.finishReason ?? null),
-      usage: usageOf(parsed.output.usageMetadata),
-    };
-  },
-
-  async *stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void> {
-    const response = await postJson({
-      url: chatUrl(input, true),
-      headers: headersFor(secretOf(input.target.credential)),
-      body: JSON.stringify(bodyFor(input)),
-      signal: input.signal,
-    });
-
-    await requireOk(response);
-
-    let reason: string | null = null;
-    let usage: CanonicalUsage | null = null;
-
-    for await (const data of sseData(requireBody(response), input.signal)) {
-      let parsed: v.InferOutput<typeof ResponseSchema>;
-
-      try {
-        const result = v.safeParse(ResponseSchema, JSON.parse(data));
-
-        if (!result.success) continue;
-
-        parsed = result.output;
-      } catch {
-        continue;
-      }
-
-      if (parsed.error !== undefined) {
-        throw protocolError(parsed.error.message ?? "google stream returned an error");
-      }
-
-      if (parsed.usageMetadata !== undefined && parsed.usageMetadata !== null) {
-        usage = usageOf(parsed.usageMetadata);
-      }
-
-      const candidate = parsed.candidates?.[0];
-
-      if (candidate === undefined) continue;
-
-      const text = textOf(candidate);
-
-      if (text !== "") yield { type: "text", text };
-
-      if (candidate.finishReason !== undefined && candidate.finishReason !== null) {
-        reason = finishReason(candidate.finishReason);
-      }
-    }
-
-    if (usage !== null) yield { type: "usage", usage };
-
-    yield { type: "finish", reason };
-  },
+export type GoogleOptions<K extends ProviderKind> = {
+  readonly kind: K;
+  readonly label: string;
+  readonly headers: HeaderFactory;
 };
+
+export function googleAdapter<K extends ProviderKind>({
+  kind,
+  label,
+  headers: headersOf,
+}: GoogleOptions<K>): ProviderAdapter<K> {
+  return {
+    kind,
+
+    async chat(input: AdapterInput): Promise<CanonicalResult> {
+      const response = await postJson({
+        url: chatUrl(input, false),
+        headers: headersOf(input.target.credential),
+        body: JSON.stringify(bodyFor(input)),
+        signal: input.signal,
+      });
+
+      await requireOk(response);
+
+      const parsed = v.safeParse(ResponseSchema, await response.json());
+
+      if (!parsed.success) throw protocolError(`${label} returned an unexpected response shape`);
+
+      const candidate = parsed.output.candidates?.[0];
+
+      if (candidate === undefined) throw protocolError(`${label} returned no candidates`);
+
+      return {
+        text: textOf(candidate),
+        finishReason: finishReason(candidate.finishReason ?? null),
+        usage: usageOf(parsed.output.usageMetadata),
+      };
+    },
+
+    async *stream(input: AdapterInput): AsyncGenerator<CanonicalStreamEvent, void, void> {
+      const response = await postJson({
+        url: chatUrl(input, true),
+        headers: headersOf(input.target.credential),
+        body: JSON.stringify(bodyFor(input)),
+        signal: input.signal,
+      });
+
+      await requireOk(response);
+
+      let reason: string | null = null;
+      let usage: CanonicalUsage | null = null;
+
+      for await (const data of sseData(requireBody(response), input.signal)) {
+        let parsed: v.InferOutput<typeof ResponseSchema>;
+
+        try {
+          const result = v.safeParse(ResponseSchema, JSON.parse(data));
+
+          if (!result.success) continue;
+
+          parsed = result.output;
+        } catch {
+          continue;
+        }
+
+        if (parsed.error !== undefined) {
+          throw protocolError(parsed.error.message ?? `${label} stream returned an error`);
+        }
+
+        if (parsed.usageMetadata !== undefined && parsed.usageMetadata !== null) {
+          usage = usageOf(parsed.usageMetadata);
+        }
+
+        const candidate = parsed.candidates?.[0];
+
+        if (candidate === undefined) continue;
+
+        const text = textOf(candidate);
+
+        if (text !== "") yield { type: "text", text };
+
+        if (candidate.finishReason !== undefined && candidate.finishReason !== null) {
+          reason = finishReason(candidate.finishReason);
+        }
+      }
+
+      if (usage !== null) yield { type: "usage", usage };
+
+      yield { type: "finish", reason };
+    },
+  };
+}
 
 function chatUrl(input: AdapterInput, stream: boolean): string {
   const method = stream ? "streamGenerateContent" : "generateContent";
@@ -194,10 +206,6 @@ function contentsOf(messages: CanonicalRequest["messages"]): Content[] {
   }
 
   return contents;
-}
-
-function headersFor(apiKey: string): Record<string, string> {
-  return apiKeyHeader("x-goog-api-key", apiKey);
 }
 
 function textOf(candidate: v.InferOutput<typeof CandidateSchema>): string {

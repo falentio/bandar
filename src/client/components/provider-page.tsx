@@ -22,6 +22,7 @@ import {
   GENERIC_PROVIDER_KINDS,
   PROVIDER_KIND_LABELS,
   type Provider,
+  type ProviderAuthMode,
   type ProviderKind,
   type ProviderModel,
   type ProviderModelRefresh,
@@ -59,7 +60,17 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   anthropic: "https://api.anthropic.com/v1",
   google: "https://generativelanguage.googleapis.com/v1beta",
   kilocode: BUILT_IN_PROVIDERS.kilocode.baseUrl,
+  tokenharbor: BUILT_IN_PROVIDERS.tokenharbor.baseUrl,
+  yeta: BUILT_IN_PROVIDERS.yeta.baseUrl,
+  river: BUILT_IN_PROVIDERS.river.baseUrl,
+  nous: BUILT_IN_PROVIDERS.nous.baseUrl,
+  hyper: BUILT_IN_PROVIDERS.hyper.baseUrl,
+  opencode: BUILT_IN_PROVIDERS.opencode.baseUrl,
 };
+
+function credentialsTabName(authModes: readonly ProviderAuthMode[]): string {
+  return authModes.includes("oauth") ? "Connection" : "Credentials";
+}
 
 export function ProviderPage({
   providerId,
@@ -177,7 +188,7 @@ export function ProviderPage({
               </TabsTrigger>
               <TabsTrigger value="credentials">
                 <KeyRoundIcon data-icon="inline-start" />
-                {provider.kind === "kilocode" ? "Connection" : "Credentials"}
+                {credentialsTabName(provider.authModes)}
                 {provider.credentials.length === 0 ? null : (
                   <span
                     className="size-1.5 rounded-full bg-emerald-500"
@@ -274,6 +285,7 @@ function SettingsCard({
   const settings = useProviderSettings(provider);
   const [saved, setSaved] = useState(false);
   const builtIn = provider.origin === "builtin";
+  const tabName = credentialsTabName(provider.authModes);
 
   const dirty =
     !builtIn &&
@@ -300,8 +312,8 @@ function SettingsCard({
         <CardTitle>Settings</CardTitle>
         <CardDescription>
           {builtIn
-            ? "Built-in providers are defined in code. Their kind, name, and URL are fixed; the credential is on the Connection tab."
-            : "Name, wire kind, and base URL. Changing the kind or URL affects every model on this provider. Credentials are on the Credentials tab."}
+            ? `Built-in providers are defined in code. Their kind, name, and URL are fixed; the credential is on the ${tabName} tab.`
+            : `Name, wire kind, and base URL. Changing the kind or URL affects every model on this provider. The credential is on the ${tabName} tab.`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -482,7 +494,8 @@ function ModelsCard({
   const [upstreamModel, setUpstreamModel] = useState("");
   const [alias, setAlias] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshed, setRefreshed] = useState<ProviderModelRefresh | "error" | null>(null);
+  const [refreshed, setRefreshed] = useState<ProviderModelRefresh | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const tags = useTags();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -513,7 +526,7 @@ function ModelsCard({
             to reach a model directly.
           </CardDescription>
         </div>
-        {provider.kind === "kilocode" ? (
+        {provider.hasCatalog ? (
           <Button
             type="button"
             variant="outline"
@@ -522,6 +535,7 @@ function ModelsCard({
             onClick={() => {
               setRefreshing(true);
               setRefreshed(null);
+              setRefreshError(null);
 
               void providerApi
                 .refreshModels(provider.id)
@@ -529,7 +543,11 @@ function ModelsCard({
                   setRefreshed(result);
                   onChanged();
                 })
-                .catch(() => setRefreshed("error"))
+                .catch((error: Error) => {
+                  setRefreshError(
+                    isError(error) ? describeError(error) : "The catalog could not be read.",
+                  );
+                })
                 .finally(() => setRefreshing(false));
             }}
           >
@@ -578,17 +596,17 @@ function ModelsCard({
         {providers.error === null ? null : (
           <p className="text-sm text-destructive">{providers.error}</p>
         )}
+        {refreshError === null ? null : <p className="text-xs text-destructive">{refreshError}</p>}
+
         {refreshed === null ? null : (
           <p className="text-xs text-muted-foreground">
-            {refreshed === "error"
-              ? "The catalog could not be read."
-              : refreshed.added === 0
-                ? `Nothing new to import${refreshed.skipped === 0 ? "." : ` (${refreshed.skipped} skipped).`}`
-                : `Imported ${refreshed.added} model${refreshed.added === 1 ? "" : "s"}${
-                    refreshed.skipped === 0
-                      ? "."
-                      : `; skipped ${refreshed.skipped} already present or whose alias is taken.`
-                  }`}
+            {refreshed.added === 0
+              ? `Nothing new to import${refreshed.skipped === 0 ? "." : ` (${refreshed.skipped} skipped).`}`
+              : `Imported ${refreshed.added} model${refreshed.added === 1 ? "" : "s"}${
+                  refreshed.skipped === 0
+                    ? "."
+                    : `; skipped ${refreshed.skipped} already present or whose alias is taken.`
+                }`}
           </p>
         )}
 

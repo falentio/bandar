@@ -31,6 +31,7 @@ export function CredentialsCard({
 }) {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const copy = cardCopy(provider);
 
   const current = provider.credentials.map((credential) => credential.id);
 
@@ -52,18 +53,12 @@ export function CredentialsCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
-          {provider.kind === "kilocode" ? "Kilo Code connection" : "Credentials"}
-        </CardTitle>
-        <CardDescription>
-          {provider.kind === "kilocode"
-            ? "Connect a Kilo Code account with a device code, or save an API key. Each connection joins the chain."
-            : "The gateway tries each credential in order. A rejected key falls back to the next one."}
-        </CardDescription>
+        <CardTitle>{copy.title}</CardTitle>
+        <CardDescription>{copy.description}</CardDescription>
         <CardAction>
           <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
             <PlusIcon data-icon="inline-start" />
-            Add credential
+            {provider.authModes.includes("api-key") ? "Add credential" : "Connect account"}
           </Button>
         </CardAction>
       </CardHeader>
@@ -72,13 +67,15 @@ export function CredentialsCard({
           <KeyRoundIcon className="size-4 shrink-0 text-muted-foreground" />
           <span className="text-muted-foreground">
             Credentials are sealed with AES-GCM and never returned by the API, so a saved value
-            cannot be shown again. To change a key, remove the credential and add a new one.
+            cannot be shown again. Remove it and add a new one to replace it.
           </span>
         </div>
 
         {provider.credentials.length === 0 ? (
           <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
-            No credential saved. Requests to this provider are sent without credentials.
+            {provider.authModes.includes("api-key")
+              ? "No credential saved. Requests to this provider are sent without credentials."
+              : "No account connected. Requests to this provider fail until you connect one."}
           </p>
         ) : (
           <ol className="divide-y rounded-lg border">
@@ -166,6 +163,27 @@ export function CredentialsCard({
       />
     </Card>
   );
+}
+
+type CardCopy = { readonly title: string; readonly description: string };
+
+function cardCopy(provider: Provider): CardCopy {
+  if (!provider.authModes.includes("oauth")) {
+    return {
+      title: "Credentials",
+      description:
+        "The gateway tries each credential in order. A rejected key falls back to the next one.",
+    };
+  }
+
+  const description = `Connect a ${provider.name} account with a device code`;
+
+  return {
+    title: `${provider.name} connection`,
+    description: provider.authModes.includes("api-key")
+      ? `${description}, or save an API key. A connection joins the chain or replaces an expiring one.`
+      : `${description}. A connection joins the chain or replaces an expiring one.`,
+  };
 }
 
 function nameOf(credential: ProviderCredential): string {

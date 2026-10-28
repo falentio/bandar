@@ -38,6 +38,7 @@ import {
   definitionFor,
   syncProviderModels,
   listProviders,
+  readFirstCredential,
   readProvider,
   removeProvider,
   removeProviderModel,
@@ -229,6 +230,7 @@ export function createApi(deps: ApiDeps) {
         userCode: login.userCode,
         verificationUrl: login.verificationUrl,
         expiresInSeconds: login.expiresInSeconds,
+        intervalSeconds: login.intervalSeconds,
       });
     })
     .post("/providers/:id/oauth/poll", async ({ params, request, set }) => {
@@ -300,6 +302,8 @@ export function createApi(deps: ApiDeps) {
       const input = parseInput(ProviderCredentialInputSchema, body as ParseableInput);
       const result = await addProviderCredential(deps.providers, caller.userId, id, input);
 
+      if (result.kind === "unsupported_mode") return unsupportedCredentialMode();
+
       if (result.kind !== "ok") return providerFailure(id);
 
       set.status = 201;
@@ -316,6 +320,8 @@ export function createApi(deps: ApiDeps) {
       const input = parseInput(ProviderCredentialBulkInputSchema, body as ParseableInput);
 
       const result = await addProviderCredentials(deps.providers, caller.userId, id, input.apiKeys);
+
+      if (result.kind === "unsupported_mode") return unsupportedCredentialMode();
 
       if (result.kind !== "ok") return providerFailure(id);
 
@@ -418,7 +424,12 @@ export function createApi(deps: ApiDeps) {
         return failure("unsupported", `${provider.kind} has no model catalog to refresh`);
       }
 
-      const models = await catalog(request.signal);
+      const models = await catalog({
+        baseUrl: provider.baseUrl,
+        credential: () => readFirstCredential(deps.providers, id),
+        signal: request.signal,
+      });
+
       const before = provider.models.length;
       const updated = await syncProviderModels(deps.providers, caller.userId, id, models);
 
@@ -631,6 +642,13 @@ function invalidCredentialOrder(): Response {
   return Response.json(failure("validation", "send every credential of this provider, in order"), {
     status: 422,
   });
+}
+
+function unsupportedCredentialMode(): Response {
+  return Response.json(
+    failure("unsupported_mode", "this provider connects with a device login; it takes no API key"),
+    { status: 400 },
+  );
 }
 
 function providerFailure(providerId: string): Response {

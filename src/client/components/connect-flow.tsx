@@ -5,7 +5,13 @@ import type { Provider, ProviderOAuthStart } from "../../shared/providers";
 import { providerApi } from "../api";
 import { describeError, isError } from "../errors";
 
-const POLL_INTERVAL_MS = 3000;
+function hostOf(verificationUrl: string): string {
+  try {
+    return new URL(verificationUrl).host;
+  } catch {
+    return verificationUrl;
+  }
+}
 
 type Phase =
   | { readonly kind: "idle" }
@@ -37,6 +43,7 @@ export function ConnectFlow({
     if (phase.kind !== "waiting") return;
 
     const run = attempt.current;
+    const login = phase.login;
 
     const timer = setInterval(() => {
       void providerApi
@@ -61,7 +68,7 @@ export function ConnectFlow({
           // The poll returns 200 while pending, so any failure ends this wait.
           setPhase({ kind: "failed", message });
         });
-    }, POLL_INTERVAL_MS);
+    }, login.intervalSeconds * 1000);
 
     return () => clearInterval(timer);
   }, [phase, provider.id, onConnected]);
@@ -102,10 +109,10 @@ export function ConnectFlow({
           disabled={phase.kind === "starting"}
           onClick={() => void start()}
         >
-          {phase.kind === "starting" ? "Starting…" : "Connect Kilo Code"}
+          {phase.kind === "starting" ? "Starting…" : `Connect ${provider.name}`}
         </Button>
         <p className="text-xs text-muted-foreground">
-          Opens kilocode.ai in a new tab. A device code is polled until you approve it.
+          Starts a device login. Approve the code on {provider.name}; this page waits for it.
         </p>
       </div>
     );
@@ -126,7 +133,7 @@ export function ConnectFlow({
     return (
       <div className="flex items-center gap-2 text-sm">
         <CheckIcon className="size-4 text-emerald-500" />
-        <span>Kilo Code is connected.</span>
+        <span>{provider.name} is connected.</span>
       </div>
     );
   }
@@ -138,7 +145,9 @@ export function ConnectFlow({
         <span>Waiting for approval</span>
       </div>
       <div className="grid gap-1">
-        <p className="text-xs text-muted-foreground">Enter this code at kilocode.ai:</p>
+        <p className="text-xs text-muted-foreground">
+          Enter this code at {hostOf(phase.login.verificationUrl)}:
+        </p>
         <code className="font-mono text-lg font-medium tracking-[0.2em]">
           {phase.login.userCode}
         </code>
@@ -147,7 +156,7 @@ export function ConnectFlow({
         <Button asChild size="sm" variant="outline">
           <a href={phase.login.verificationUrl} target="_blank" rel="noreferrer">
             <ExternalLinkIcon data-icon="inline-start" />
-            Open kilocode.ai
+            Open {hostOf(phase.login.verificationUrl)}
           </a>
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={cancel}>

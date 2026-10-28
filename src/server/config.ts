@@ -27,6 +27,8 @@ const DEFAULT_TRUSTED_ORIGINS = [
   `http://127.0.0.1:${DEFAULT_WEB_PORT}`,
 ].join(",");
 
+const ProviderUrlSchema = v.pipe(v.string(), v.trim(), v.url());
+
 // v.optional validates its default against the input type, so the port default is the string form.
 const ConfigSchema = v.object({
   BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1)), "0.0.0.0"),
@@ -49,6 +51,17 @@ const ConfigSchema = v.object({
     v.pipe(v.string(), v.trim(), v.minLength(1)),
     DEFAULT_TRUSTED_ORIGINS,
   ),
+  // Providers read these at request time, so the shape is checked here instead.
+  BANDAR_KILOCODE_API: v.optional(ProviderUrlSchema),
+  BANDAR_KILOCODE_MODELS_URL: v.optional(ProviderUrlSchema),
+  BANDAR_TOKENHARBOR_API: v.optional(ProviderUrlSchema),
+  BANDAR_YETA_API: v.optional(ProviderUrlSchema),
+  BANDAR_RIVER_API: v.optional(ProviderUrlSchema),
+  BANDAR_RIVER_PRICING_URL: v.optional(ProviderUrlSchema),
+  BANDAR_NOUS_API: v.optional(ProviderUrlSchema),
+  BANDAR_NOUS_PORTAL: v.optional(ProviderUrlSchema),
+  BANDAR_HYPER_API: v.optional(ProviderUrlSchema),
+  BANDAR_OPENCODE_API: v.optional(ProviderUrlSchema),
 });
 
 export function parseConfig(env: Record<string, string | undefined>): Config {

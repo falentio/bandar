@@ -100,11 +100,29 @@ const upstreamOrigin = `http://127.0.0.1:${upstream.port}`;
 const kilocode = startKilocode();
 const kilocodeOrigin = `http://127.0.0.1:${kilocode.port}`;
 
+type NousState = {
+  deviceStarts: number;
+  polls: number;
+  refreshToken: string;
+  presented: string[];
+};
+
+const nousState: NousState = { deviceStarts: 0, polls: 0, refreshToken: "rt-1", presented: [] };
+const opencodeState = { requests: 0 };
+const builtIns = startBuiltIns();
+const builtInsOrigin = `http://127.0.0.1:${builtIns.port}`;
+
 let failures = 0;
 let cookie = "";
 let openaiProvider: ProviderSlot = { provider: null, modelId: "" };
 let claudeProvider: ProviderSlot = { provider: null, modelId: "" };
 const kiloProvider: ProviderSlot = { provider: null, modelId: "" };
+const tokenharborProvider: ProviderSlot = { provider: null, modelId: "" };
+const yetaProvider: ProviderSlot = { provider: null, modelId: "" };
+const riverProvider: ProviderSlot = { provider: null, modelId: "" };
+const nousProvider: ProviderSlot = { provider: null, modelId: "" };
+const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
+const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let keyId = "";
 
@@ -156,21 +174,95 @@ try {
     cookie = sessionCookie(response);
   });
 
-  await check("GET /api/providers seeds the built-in Kilo Code provider", async () => {
+  await check("GET /api/providers seeds every built-in provider", async () => {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);
-    const builtIn = list.providers.find((provider) => provider.origin === "builtin");
+    const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
-    if (builtIn === undefined) throw new Error("the built-in Kilo Code provider is missing");
+    assert.deepEqual(
+      builtIn.map((provider) => provider.kind),
+      ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper", "opencode"],
+    );
 
-    assert.equal(builtIn.kind, "kilocode");
-    assert.equal(builtIn.name, "Kilo Code");
-    assert.equal(builtIn.slug, "kilo");
-    assert.equal(builtIn.baseUrl, `${kilocodeOrigin}/api/openrouter`);
-    assert.deepEqual(builtIn.authModes, ["api-key", "oauth"]);
-    assert.deepEqual(builtIn.credentials, []);
-    assert.deepEqual(builtIn.models, []);
+    const byKind = new Map(builtIn.map((provider) => [provider.kind, provider]));
+    const kilo = byKind.get("kilocode");
 
-    kiloProvider.provider = builtIn;
+    if (kilo === undefined) throw new Error("the built-in Kilo Code provider is missing");
+
+    assert.equal(kilo.name, "Kilo Code");
+    assert.equal(kilo.slug, "kilo");
+    assert.equal(kilo.baseUrl, `${kilocodeOrigin}/api/openrouter`);
+    assert.deepEqual(kilo.authModes, ["api-key", "oauth"]);
+    assert.equal(kilo.hasCatalog, true);
+    assert.deepEqual(kilo.credentials, []);
+    assert.deepEqual(kilo.models, []);
+
+    const harbor = byKind.get("tokenharbor");
+
+    if (harbor === undefined) throw new Error("the built-in Token Harbor provider is missing");
+
+    assert.equal(harbor.name, "Token Harbor");
+    assert.equal(harbor.slug, "tokenharbor");
+    assert.equal(harbor.baseUrl, `${builtInsOrigin}/tokenharbor/v1`);
+    assert.deepEqual(harbor.authModes, ["api-key"]);
+    assert.equal(harbor.hasCatalog, true);
+
+    const yeta = byKind.get("yeta");
+
+    if (yeta === undefined) throw new Error("the built-in Yeta provider is missing");
+
+    assert.equal(yeta.name, "Yeta");
+    assert.equal(yeta.slug, "yeta");
+    assert.equal(yeta.baseUrl, `${builtInsOrigin}/yeta/v1`);
+    assert.deepEqual(yeta.authModes, ["api-key"]);
+    assert.equal(yeta.hasCatalog, true);
+
+    const river = byKind.get("river");
+
+    if (river === undefined) throw new Error("the built-in River provider is missing");
+
+    assert.equal(river.name, "River");
+    assert.equal(river.slug, "river");
+    assert.equal(river.baseUrl, `${builtInsOrigin}/river/v1`);
+    assert.deepEqual(river.authModes, ["api-key"]);
+    assert.equal(river.hasCatalog, true);
+
+    const nous = byKind.get("nous");
+
+    if (nous === undefined) throw new Error("the built-in Nous Portal provider is missing");
+
+    assert.equal(nous.name, "Nous Portal");
+    assert.equal(nous.slug, "nous");
+    assert.equal(nous.baseUrl, `${builtInsOrigin}/nous/v1`);
+    assert.deepEqual(nous.authModes, ["oauth"]);
+    assert.equal(nous.hasCatalog, true);
+
+    const hyper = byKind.get("hyper");
+
+    if (hyper === undefined) throw new Error("the built-in Hyper provider is missing");
+
+    assert.equal(hyper.name, "Hyper");
+    assert.equal(hyper.slug, "hyper");
+    assert.equal(hyper.baseUrl, `${builtInsOrigin}/hyper/v1`);
+    assert.deepEqual(hyper.authModes, ["api-key"]);
+    assert.equal(hyper.hasCatalog, true);
+
+    const opencode = byKind.get("opencode");
+
+    if (opencode === undefined) throw new Error("the built-in OpenCode Go provider is missing");
+
+    assert.equal(opencode.name, "OpenCode Go");
+    assert.equal(opencode.slug, "opencode");
+    assert.equal(opencode.baseUrl, `${builtInsOrigin}/opencode/inference`);
+    assert.deepEqual(opencode.authModes, ["api-key"]);
+    assert.equal(opencode.hasCatalog, true);
+
+    kiloProvider.provider = kilo;
+    tokenharborProvider.provider = harbor;
+    yetaProvider.provider = yeta;
+    riverProvider.provider = river;
+    nousProvider.provider = nous;
+    hyperProvider.provider = hyper;
+    opencodeProvider.provider = opencode;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -250,13 +342,13 @@ try {
     );
   });
 
-  await check("GET /api/providers lists three custom providers and the built-in Kilo", async () => {
+  await check("GET /api/providers lists three custom providers and every built-in", async () => {
     const list = await getJson(providerPaths.list, ProviderListSchema, 200);
     const custom = list.providers.filter((provider) => provider.origin === "custom");
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 1);
+    assert.equal(builtIn.length, 7);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -609,6 +701,7 @@ try {
 
     assert.equal((await post(providerPaths.oauthStart(id), {})).status, 400);
     assert.equal((await post(providerPaths.refreshModels(id), {})).status, 400);
+    assert.equal(openaiProvider.provider?.hasCatalog, false);
   });
 
   await check("POST /api/providers/:id/models/refresh imports the catalog once", async () => {
@@ -695,6 +788,454 @@ try {
     assert.equal(body.choices[0]?.finish_reason, "stop");
     assert.equal(body.usage.prompt_tokens, 3);
     assert.equal(body.usage.completion_tokens, 4);
+  });
+
+  await check("a keyed catalog refuses to import without a key", async () => {
+    const id = tokenharborProvider.provider?.id ?? "";
+
+    const refused = await post(providerPaths.refreshModels(id), {});
+
+    assert.equal(refused.status, 400);
+    assert.equal((await errorBody(refused)).code, "upstream_invalid_request");
+  });
+
+  await check("Token Harbor imports its keyed catalog and answers chat", async () => {
+    const id = tokenharborProvider.provider?.id ?? "";
+
+    await postJson(providerPaths.credentials(id), { apiKey: "thk_test" }, ProviderSchema, 201);
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 2);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "thk-mini",
+      "thk-pro",
+    ]);
+    assert.ok(
+      detail.provider.models.every(
+        (model) => model.inputPricePerMtok === null && model.outputPricePerMtok === null,
+      ),
+      "Token Harbor publishes no prices",
+    );
+
+    const response = await chatRequest("thk-pro", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Token Harbor");
+    assert.equal(body.usage?.prompt_tokens, 5);
+    assert.equal(body.usage?.completion_tokens, 2);
+  });
+
+  await check("Yeta joins its pricing ratios and streams chat", async () => {
+    const id = yetaProvider.provider?.id ?? "";
+
+    await postJson(providerPaths.credentials(id), { apiKey: "yeta_test" }, ProviderSchema, 201);
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 2);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+    const large = detail.provider.models.find((model) => model.alias === "yeta-large");
+    const image = detail.provider.models.find((model) => model.alias === "yeta-image");
+
+    assert.equal(large?.inputPricePerMtok, 3);
+    assert.equal(large?.outputPricePerMtok, 12);
+    assert.equal(image?.inputPricePerMtok, null);
+    assert.equal(image?.outputPricePerMtok, null);
+
+    const response = await chatRequest("yeta-large", true);
+
+    assert.equal(response.status, 200);
+
+    const stream = await readStream(response);
+
+    assert.equal(stream.text, "Hello from Yeta");
+    assert.equal(stream.usage?.prompt_tokens, 7);
+    assert.equal(stream.usage?.completion_tokens, 3);
+    assert.equal(stream.done, true);
+  });
+
+  await check("River imports its public pricing list and answers chat", async () => {
+    const id = riverProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 2);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+    const flow = detail.provider.models.find((model) => model.alias === "river-flow");
+
+    assert.equal(flow?.inputPricePerMtok, 0.4);
+    assert.equal(flow?.outputPricePerMtok, 1.6);
+
+    await postJson(providerPaths.credentials(id), { apiKey: "rv_test" }, ProviderSchema, 201);
+
+    const response = await chatRequest("river-flow", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from River");
+    assert.equal(body.usage?.prompt_tokens, 4);
+    assert.equal(body.usage?.completion_tokens, 3);
+  });
+
+  await check("Hyper imports its public catalog before a key and answers chat", async () => {
+    const id = hyperProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 3);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.credentials, []);
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "hyper-noted",
+      "hyper-prism",
+      "hyper-unpriced",
+    ]);
+
+    const prism = detail.provider.models.find((model) => model.alias === "hyper-prism");
+    const noted = detail.provider.models.find((model) => model.alias === "hyper-noted");
+    const unpriced = detail.provider.models.find((model) => model.alias === "hyper-unpriced");
+
+    assert.equal(prism?.inputPricePerMtok, 2.5);
+    assert.equal(prism?.outputPricePerMtok, 6);
+    assert.equal(noted?.inputPricePerMtok, 0.834);
+    assert.equal(noted?.outputPricePerMtok, 2.501);
+    assert.equal(unpriced?.inputPricePerMtok, null);
+    assert.equal(unpriced?.outputPricePerMtok, null);
+
+    await postJson(providerPaths.credentials(id), { apiKey: "hyper_test" }, ProviderSchema, 201);
+
+    const response = await chatRequest("hyper-prism", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Hyper");
+    assert.equal(body.usage?.prompt_tokens, 3);
+    assert.equal(body.usage?.completion_tokens, 4);
+  });
+
+  await check("OpenCode Go imports its catalog before a key and drops the dark ids", async () => {
+    const id = opencodeProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 3);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.credentials, []);
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "claude-haiku-5-5",
+      "gemini-4-argon",
+      "glm-5.3",
+    ]);
+
+    const glm = detail.provider.models.find((model) => model.alias === "glm-5.3");
+    const gemini = detail.provider.models.find((model) => model.alias === "gemini-4-argon");
+
+    assert.equal(glm?.inputPricePerMtok, 1.4);
+    assert.equal(glm?.outputPricePerMtok, 4.4);
+    assert.equal(gemini?.inputPricePerMtok, null);
+    assert.equal(gemini?.outputPricePerMtok, null);
+  });
+
+  await check("OpenCode Go answers chat on each wire with one bearer", async () => {
+    const id = opencodeProvider.provider?.id ?? "";
+
+    await postJson(providerPaths.credentials(id), { apiKey: "opencode_test" }, ProviderSchema, 201);
+
+    const openai = await chatRequest("glm-5.3", false);
+
+    assert.equal(openai.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await openai.json()).choices[0]?.message.content,
+      "Hello from OpenCode OpenAI",
+    );
+
+    const anthropic = await chatRequest("claude-haiku-5-5", false);
+
+    assert.equal(anthropic.status, 200);
+
+    const anthropicBody = v.parse(CompletionSchema, await anthropic.json());
+
+    assert.equal(anthropicBody.choices[0]?.message.content, "Hello from OpenCode Anthropic");
+    assert.equal(anthropicBody.usage?.prompt_tokens, 5);
+    assert.equal(anthropicBody.usage?.completion_tokens, 3);
+
+    const google = await chatRequest("gemini-4-argon", false);
+
+    assert.equal(google.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await google.json()).choices[0]?.message.content,
+      "Hello from OpenCode Google",
+    );
+
+    const anthropicStream = await chatRequest("claude-haiku-5-5", true);
+
+    assert.equal(anthropicStream.status, 200);
+
+    const anthropicEvents = await readStream(anthropicStream);
+
+    assert.equal(anthropicEvents.text, "Hello from OpenCode Anthropic");
+    assert.equal(anthropicEvents.usage?.prompt_tokens, 5);
+    assert.equal(anthropicEvents.usage?.completion_tokens, 3);
+
+    const googleStream = await chatRequest("gemini-4-argon", true);
+
+    assert.equal(googleStream.status, 200);
+
+    const googleEvents = await readStream(googleStream);
+
+    assert.equal(googleEvents.text, "Hello from OpenCode Google");
+    assert.equal(googleEvents.usage?.prompt_tokens, 4);
+    assert.equal(googleEvents.usage?.completion_tokens, 2);
+  });
+
+  await check("a hand-added responses model is a 400 before any request", async () => {
+    const id = opencodeProvider.provider?.id ?? "";
+
+    await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "gpt-6-luna", alias: "luna-gap" },
+      ProviderSchema,
+      201,
+    );
+
+    const before = opencodeState.requests;
+    const response = await chatRequest("luna-gap", false);
+
+    assert.equal(response.status, 400);
+
+    const error = await openAiError(response);
+
+    assert.equal(error.code, "invalid_request");
+    assert.match(error.message, /gpt-6-luna/);
+    assert.match(error.message, /responses/);
+    assert.equal(opencodeState.requests, before);
+  });
+
+  await check("the Nous Portal device login returns a code and connects", async () => {
+    const id = nousProvider.provider?.id ?? "";
+
+    const start = await postJson(providerPaths.oauthStart(id), {}, ProviderOAuthStartSchema, 200);
+
+    assert.equal(start.userCode, "NOUS-CODE");
+    assert.equal(
+      start.verificationUrl,
+      "https://portal.nousresearch.com/manage-subscription?code=NOUS-CODE",
+    );
+    assert.equal(start.expiresInSeconds, 600);
+    assert.equal(start.intervalSeconds, 5);
+
+    const pending = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(pending.state, "pending");
+
+    const connected = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(connected.state, "connected");
+    assert.equal(connected.authMode, "oauth");
+  });
+
+  await check("a device-login provider rejects an API key", async () => {
+    const id = nousProvider.provider?.id ?? "";
+
+    const single = await post(providerPaths.credentials(id), { apiKey: "nous-key" });
+
+    assert.equal(single.status, 400);
+    assert.equal((await errorBody(single)).code, "unsupported_mode");
+
+    const bulk = await post(providerPaths.credentialsBulk(id), { apiKeys: ["nous-key"] });
+
+    assert.equal(bulk.status, 400);
+    assert.equal((await errorBody(bulk)).code, "unsupported_mode");
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(
+      detail.provider.credentials.map((credential) => credential.authMode),
+      ["oauth"],
+    );
+  });
+
+  await check("the Nous Portal imports its public catalog with per-token prices", async () => {
+    const id = nousProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 2);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+      "nous-omni",
+      "nous-text-large",
+    ]);
+
+    const large = detail.provider.models.find((model) => model.alias === "nous-text-large");
+    const omni = detail.provider.models.find((model) => model.alias === "nous-omni");
+
+    assert.equal(large?.inputPricePerMtok, 3);
+    assert.equal(large?.outputPricePerMtok, 15);
+    assert.equal(omni?.inputPricePerMtok, 1);
+    assert.equal(omni?.outputPricePerMtok, 2);
+  });
+
+  await check("the Nous Portal answers chat with its oauth bearer", async () => {
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Nous Portal");
+    assert.equal(body.usage?.prompt_tokens, 6);
+    assert.equal(body.usage?.completion_tokens, 5);
+  });
+
+  await check("two concurrent chats share one Nous renewal", async () => {
+    const before = nousState.presented.length;
+
+    const responses = await Promise.all([
+      chatRequest("nous-text-large", false),
+      chatRequest("nous-text-large", false),
+    ]);
+
+    assert.deepEqual(
+      responses.map((response) => response.status),
+      [200, 200],
+    );
+    assert.equal(nousState.presented.length, before + 1);
+  });
+
+  await check("a renewed Nous token is rotated and persisted", async () => {
+    const before = nousState.presented.length;
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 200);
+    assert.equal(nousState.presented.length, before + 1);
+    assert.equal(
+      new Set(nousState.presented).size,
+      nousState.presented.length,
+      "the gateway presented a refresh token the portal had already spent",
+    );
+  });
+
+  await check("a spent Nous refresh token is an auth failure", async () => {
+    const spent = await fetch(new URL("/portal/api/oauth/token", builtInsOrigin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-nous-refresh-token": "rt-1",
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: "hermes-cli",
+      }).toString(),
+    });
+
+    assert.equal(spent.status, 400);
+    assert.equal(
+      v.parse(v.object({ error: v.string() }), await spent.json()).error,
+      "invalid_grant",
+    );
+
+    nousState.refreshToken = "rt-elsewhere";
+
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 502);
+    assert.equal((await openAiError(response)).code, "auth");
+  });
+
+  await check("a Nous credential with no refresh token is an auth failure", async () => {
+    const id = nousProvider.provider?.id ?? "";
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    for (const credential of detail.provider.credentials) {
+      const removed = await fetch(new URL(providerPaths.credential(id, credential.id), origin), {
+        method: "DELETE",
+        headers: sessionHeaders(),
+      });
+
+      assert.equal(removed.status, 200);
+    }
+
+    await postJson(providerPaths.oauthStart(id), {}, ProviderOAuthStartSchema, 200);
+    const connected = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(connected.state, "connected");
+
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 502);
+    assert.equal((await openAiError(response)).code, "auth");
+  });
+
+  await check("a reconnect replaces the expiring Nous connection", async () => {
+    const id = nousProvider.provider?.id ?? "";
+    const before = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+    const credentialId = before.provider.credentials[0]?.id ?? "";
+
+    await postJson(providerPaths.oauthStart(id), {}, ProviderOAuthStartSchema, 200);
+    const connected = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(connected.state, "connected");
+
+    const after = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+
+    assert.equal(after.provider.credentials.length, 1);
+    assert.equal(after.provider.credentials[0]?.id, credentialId);
+
+    nousState.refreshToken = "rt-1";
+
+    const response = await chatRequest("nous-text-large", false);
+
+    assert.equal(response.status, 200);
   });
 
   await check("providers carry derived slugs and model refs", async () => {
@@ -1448,16 +1989,20 @@ try {
 
     const list = await getJson(providerPaths.list, ProviderListSchema, 200, second.origin);
 
-    assert.equal(
-      list.providers.filter((provider) => provider.origin === "builtin").length,
-      1,
-      "the built-in Kilo Code provider was seeded twice",
+    assert.deepEqual(
+      list.providers
+        .filter((provider) => provider.origin === "builtin")
+        .map((provider) => provider.kind)
+        .sort(),
+      ["hyper", "kilocode", "nous", "opencode", "river", "tokenharbor", "yeta"],
+      "a built-in provider was seeded twice",
     );
   });
 } finally {
   await second.stop();
   await upstream.stop(true);
   await kilocode.stop(true);
+  await builtIns.stop(true);
   rmSync(workDir, { recursive: true, force: true });
 }
 
@@ -1505,6 +2050,14 @@ async function boot(port = 0): Promise<Booted> {
       BANDAR_AUTH_SECRET: AUTH_SECRET,
       BANDAR_KILOCODE_API: kilocodeOrigin,
       BANDAR_KILOCODE_MODELS_URL: `${kilocodeOrigin}/api/gateway/models`,
+      BANDAR_TOKENHARBOR_API: `${builtInsOrigin}/tokenharbor`,
+      BANDAR_YETA_API: `${builtInsOrigin}/yeta`,
+      BANDAR_RIVER_API: `${builtInsOrigin}/river`,
+      BANDAR_RIVER_PRICING_URL: `${builtInsOrigin}/river/pricing`,
+      BANDAR_NOUS_API: `${builtInsOrigin}/nous`,
+      BANDAR_HYPER_API: `${builtInsOrigin}/hyper`,
+      BANDAR_OPENCODE_API: `${builtInsOrigin}/opencode`,
+      BANDAR_NOUS_PORTAL: `${builtInsOrigin}/portal`,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -1990,6 +2543,385 @@ function startKilocode() {
       }
 
       return jsonError(404, `no fake kilo route for ${url.pathname}`);
+    },
+  });
+}
+
+function startBuiltIns() {
+  return Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+      const authorization = request.headers.get("authorization") ?? "";
+
+      if (url.pathname.startsWith("/opencode/")) opencodeState.requests += 1;
+
+      if (url.pathname === "/tokenharbor/v1/models") {
+        if (authorization !== "Bearer thk_test") return jsonError(401, "bad token harbor key");
+
+        return Response.json({
+          object: "list",
+          data: [
+            { id: "thk-pro", object: "model" },
+            { id: "thk-mini", object: "model" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/tokenharbor/v1/chat/completions") {
+        if (authorization !== "Bearer thk_test") return jsonError(401, "bad token harbor key");
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from Token Harbor" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        });
+      }
+
+      if (url.pathname === "/yeta/v1/models") {
+        if (authorization !== "Bearer yeta_test") return jsonError(401, "bad yeta key");
+
+        return Response.json({
+          object: "list",
+          data: [
+            { id: "yeta-large", object: "model" },
+            { id: "yeta-image", object: "model" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/api/pricing") {
+        return Response.json({
+          success: true,
+          data: [
+            { model_name: "yeta-large", model_ratio: 1.5, completion_ratio: 4, quota_type: 0 },
+            { model_name: "yeta-image", model_ratio: 1, completion_ratio: 1, quota_type: 1 },
+            { model_name: "yeta-retired", model_ratio: 9, completion_ratio: 9, quota_type: 0 },
+          ],
+        });
+      }
+
+      if (url.pathname === "/yeta/v1/chat/completions") {
+        if (authorization !== "Bearer yeta_test") return jsonError(401, "bad yeta key");
+
+        const body = v.safeParse(
+          v.object({ stream: v.optional(v.boolean()) }),
+          await request.json(),
+        );
+
+        const stream = body.success ? (body.output.stream ?? false) : false;
+
+        if (!stream) {
+          return Response.json({
+            choices: [
+              {
+                message: { role: "assistant", content: "Hello from Yeta" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 7, completion_tokens: 3 },
+          });
+        }
+
+        return sse([
+          { choices: [{ delta: { role: "assistant", content: "Hello" } }] },
+          {
+            choices: [{ delta: { content: " from Yeta" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 7, completion_tokens: 3 },
+          },
+          "[DONE]",
+        ]);
+      }
+
+      if (url.pathname === "/river/pricing") {
+        return Response.json({
+          inference: [
+            { model: "river-flow", input: 0.4, cached_input: 0.1, output: 1.6 },
+            { model: "river-deep", input: 2, cached_input: 0.5, output: 8 },
+            { model: "river-flow", input: 0.4, cached_input: 0.1, output: 1.6 },
+          ],
+        });
+      }
+
+      if (url.pathname === "/river/v1/models") {
+        if (authorization !== "Bearer rv_test") return jsonError(401, "bad river key");
+
+        return Response.json({ object: "list", data: [{ id: "river-flow", object: "model" }] });
+      }
+
+      if (url.pathname === "/river/v1/chat/completions") {
+        if (authorization !== "Bearer rv_test") return jsonError(401, "bad river key");
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from River" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 4, completion_tokens: 3 },
+        });
+      }
+
+      if (url.pathname === "/hyper/v1/models") {
+        if (authorization !== "") return jsonError(401, "the hyper catalog is public");
+
+        return Response.json({
+          object: "list",
+          data: [
+            {
+              id: "hyper-prism",
+              display_name: "Prism",
+              pricing: { input: 2.5, output: 6, cache_create: 3, cache_hit: 0.5 },
+            },
+            { id: "hyper-noted", pricing: { input: "0.834", output: "2.501" } },
+            { id: "hyper-unpriced" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/hyper/v1/chat/completions") {
+        if (authorization !== "Bearer hyper_test") return jsonError(401, "bad hyper key");
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from Hyper" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 3, completion_tokens: 4 },
+        });
+      }
+
+      if (url.pathname === "/opencode/inference/go/v1/models") {
+        if (authorization !== "") return jsonError(401, "the opencode go catalog is public");
+
+        return Response.json({
+          object: "list",
+          data: [
+            { id: "glm-5.3" },
+            { id: "claude-haiku-5-5" },
+            { id: "gemini-4-argon" },
+            { id: "gpt-6-luna" },
+            { id: "omen-alpha" },
+            { id: "not-a-go-model" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/opencode/inference/go/openai/v1/chat/completions") {
+        if (authorization !== "Bearer opencode_test") return jsonError(401, "bad opencode key");
+
+        if (request.headers.has("x-api-key") || request.headers.has("x-goog-api-key")) {
+          return jsonError(401, "opencode go takes one bearer");
+        }
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from OpenCode OpenAI" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 8, completion_tokens: 2 },
+        });
+      }
+
+      if (url.pathname === "/opencode/inference/go/anthropic/v1/messages") {
+        if (authorization !== "Bearer opencode_test") return jsonError(401, "bad opencode key");
+
+        if (request.headers.get("anthropic-version") !== "2023-06-01") {
+          return jsonError(400, "opencode go messages needs the version header");
+        }
+
+        if (request.headers.has("x-api-key")) return jsonError(401, "opencode go takes one bearer");
+
+        const body = v.safeParse(
+          v.object({ stream: v.optional(v.boolean()) }),
+          await request.json(),
+        );
+
+        if (body.success && body.output.stream === true) {
+          return sse([
+            {
+              type: "message_start",
+              message: { usage: { input_tokens: 5, output_tokens: 0 } },
+            },
+            {
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: "Hello from OpenCode Anthropic" },
+            },
+            {
+              type: "message_delta",
+              delta: { stop_reason: "end_turn" },
+              usage: { output_tokens: 3 },
+            },
+            { type: "message_stop" },
+          ]);
+        }
+
+        return Response.json({
+          content: [{ type: "text", text: "Hello from OpenCode Anthropic" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 5, output_tokens: 3 },
+        });
+      }
+
+      if (url.pathname.includes("/opencode/inference/go/google/v1beta/models/")) {
+        if (authorization !== "Bearer opencode_test") return jsonError(401, "bad opencode key");
+
+        if (request.headers.has("x-goog-api-key")) {
+          return jsonError(401, "opencode go takes one bearer");
+        }
+
+        const stream = url.pathname.endsWith(":streamGenerateContent");
+
+        if (!stream && !url.pathname.endsWith(":generateContent")) {
+          return jsonError(404, `no fake opencode google route for ${url.pathname}`);
+        }
+
+        if (stream) {
+          return sse([
+            {
+              candidates: [{ content: { parts: [{ text: "Hello from OpenCode Google" }] } }],
+            },
+            {
+              candidates: [{ finishReason: "STOP" }],
+              usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2 },
+            },
+          ]);
+        }
+
+        return Response.json({
+          candidates: [
+            {
+              content: { parts: [{ text: "Hello from OpenCode Google" }] },
+              finishReason: "STOP",
+            },
+          ],
+          usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2 },
+        });
+      }
+
+      if (url.pathname === "/nous/v1/models") {
+        return Response.json({
+          data: [
+            {
+              id: "nous-text-large",
+              architecture: { output_modalities: ["text"] },
+              pricing: { prompt: "0.000003", completion: "0.000015" },
+            },
+            {
+              id: "nous-omni",
+              architecture: { output_modalities: ["text", "image"] },
+              pricing: { prompt: "0.000001", completion: "0.000002" },
+            },
+            {
+              id: "nous-image",
+              architecture: { output_modalities: ["image"] },
+              pricing: { prompt: "0.00001", completion: "0.00002" },
+            },
+            { id: "nous-unpriced" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/nous/v1/chat/completions") {
+        if (!authorization.startsWith("Bearer nous-access-")) {
+          return jsonError(401, "bad nous access token");
+        }
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from Nous Portal" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 6, completion_tokens: 5 },
+        });
+      }
+
+      if (url.pathname === "/portal/api/oauth/device/code" && request.method === "POST") {
+        const form = new URLSearchParams(await request.text());
+
+        if (form.get("client_id") !== "hermes-cli" || form.get("scope") !== "inference:invoke") {
+          return jsonError(400, "bad nous device code request");
+        }
+
+        nousState.deviceStarts += 1;
+
+        return Response.json({
+          device_code: `nous-device-${String(nousState.deviceStarts)}`,
+          user_code: "NOUS-CODE",
+          verification_uri: "https://portal.nousresearch.com/manage-subscription",
+          verification_uri_complete:
+            "https://portal.nousresearch.com/manage-subscription?code=NOUS-CODE",
+          expires_in: 600,
+          interval: 5,
+        });
+      }
+
+      if (url.pathname === "/portal/api/oauth/token" && request.method === "POST") {
+        const form = new URLSearchParams(await request.text());
+
+        if (form.get("client_id") !== "hermes-cli") return jsonError(400, "bad nous client");
+
+        if (form.get("grant_type") === "urn:ietf:params:oauth:grant-type:device_code") {
+          if (form.get("device_code") === "nous-device-2") {
+            return Response.json({
+              access_token: "nous-access-1",
+              token_type: "Bearer",
+              expires_in: 0,
+            });
+          }
+
+          nousState.polls += 1;
+
+          if (nousState.polls === 1) {
+            return Response.json({ error: "authorization_pending" }, { status: 400 });
+          }
+
+          return Response.json({
+            access_token: "nous-access-1",
+            refresh_token: "rt-1",
+            token_type: "Bearer",
+            expires_in: 0,
+          });
+        }
+
+        if (form.get("grant_type") === "refresh_token") {
+          const presented = request.headers.get("x-nous-refresh-token") ?? "";
+
+          nousState.presented.push(presented);
+
+          if (presented !== nousState.refreshToken) {
+            return Response.json({ error: "invalid_grant" }, { status: 400 });
+          }
+
+          // A slow rotation keeps a concurrent burst inside one renewal slot.
+          await Bun.sleep(400);
+
+          nousState.refreshToken = `rt-${String(nousState.presented.length + 1)}`;
+
+          return Response.json({
+            access_token: `nous-access-${String(nousState.presented.length + 1)}`,
+            refresh_token: nousState.refreshToken,
+            token_type: "Bearer",
+            expires_in: 0,
+          });
+        }
+
+        return jsonError(400, "unsupported nous grant");
+      }
+
+      return jsonError(404, `no fake built-in route for ${url.pathname}`);
     },
   });
 }

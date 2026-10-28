@@ -30,4 +30,18 @@ const LOGO_PATHS: Record<ProviderKind, string> = {
   // Kilo Code's mark is its hexagon badge; the wordmark stays out of a 24px grid.
   kilocode:
     "M12 1.6 21 7v10l-9 5.4L3 17V7l9-5.4Zm0 2.6L5.2 8.2v7.6L12 19.8l6.8-4V8.2L12 4.2Zm-1.1 3.4 5 4.4-5 4.4V7.6Z",
+  // Token Harbor's anchor: a ring, a shaft, a stock, and two flukes.
+  tokenharbor:
+    "M12 2.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Zm0 1.9a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4ZM11 8.8h2v11.6h-2zm-5 2.6h12v1.9H6zm-1.6 3.1 1.7-1 2.9 5-1.7 1zm13.2 0 1.7 1-2.9 4.9-1.7-1z",
+  // Yeta's mark is a Y chevron.
+  yeta: "M4 4h4.6l3.4 6 3.4-6H20l-6.2 10.4V20h-3.6v-5.6z",
+  // River's mark is two waves stacked on a current.
+  river:
+    "M2 6c1.8-2.4 3.6-2.4 5.4 0s3.6 2.4 5.4 0 3.6-2.4 5.4 0 2.6 2.2 3.8 1.8V10.5H2zM2 14c1.8-2.4 3.6-2.4 5.4 0s3.6 2.4 5.4 0 3.6-2.4 5.4 0 2.6 2.2 3.8 1.8V18.5H2z",
+  // Nous Portal's mark is an N.
+  nous: "M4 20V4h2.9l10.2 11.6V4H20v16h-2.9L6.9 8.4V20z",
+  // Hyper's mark is a lightning bolt.
+  hyper: "M13.5 2 4 13.6h5.8L10.5 22 20 10.4h-5.8z",
+  // OpenCode's mark is its square frame with a smaller square knocked out.
+  opencode: "M18 19.5H6V4.5h12v15Zm-3-12H9v9h6v-9Z",
 };

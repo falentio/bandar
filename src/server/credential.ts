@@ -6,10 +6,18 @@ export const CredentialSchema = v.variant("authMode", [
     authMode: v.literal("oauth"),
     accessToken: v.string(),
     organizationId: v.nullable(v.string()),
+    // A bundle written before renewal carried an expiry has neither field.
+    refreshToken: v.optional(v.nullable(v.string()), null),
+    expiresAt: v.optional(v.nullable(v.number()), null),
   }),
 ]);
 
 export type Credential = v.InferOutput<typeof CredentialSchema>;
+
+/** How long before expiry a connection counts as expiring: renewal is due, and a reconnect replaces it. */
+export const EXPIRING_CONNECTION_MS = 120_000;
+
+export type OAuthCredential = Extract<Credential, { authMode: "oauth" }>;
 
 export function parseCredential(json: string): Credential | null {
   const parsed = v.safeParse(v.pipe(v.string(), v.parseJson(), CredentialSchema), json);

@@ -20,7 +20,10 @@ SQLite.
 - Tags as ordered fallback chains, managed in the dashboard.
 - Several ordered credentials per provider, tried in priority order.
 - Three generic wires for custom providers: `openai`, `anthropic`, and `google`.
-- Built-in Kilo Code, present on every account, with a device-code login.
+- Seven built-in providers on every account: Kilo Code, Token Harbor, Yeta,
+  River, Nous Portal, Hyper, and OpenCode Go. Most speak the OpenAI wire; Kilo Code
+  and Nous Portal also sign in with a device code, and OpenCode Go picks a wire per
+  model across the chat, messages, and GenAI endpoints.
 - Custom providers added from the dashboard without changing code.
 - Provider and model-alias management in the dashboard or over `/api`.
 - Gateway keys from better-auth's API-key plugin, sent as
@@ -28,8 +31,8 @@ SQLite.
 - Per-request analytics in DuckDB with SQL migrations embedded in the binary.
 - Email/password accounts and per-user data isolation.
 
-Not in v1: tools, images, embeddings, and the responses API. Cost sync stops at
-the Kilo Code catalog. The adapter contract is text-only and says so.
+Not in v1: tools, images, embeddings, and the responses API. Prices come only
+from a catalog import. The adapter contract is text-only and says so.
 
 ## Quickstart
 
@@ -40,8 +43,13 @@ BANDAR_AUTH_URL=http://localhost:5173 bun run dev   # client :5173, API :3000
 
 Open <http://localhost:5173>, create an account, then:
 
-1. **Kilo Code** is already on the Providers page. Open it and approve the device
-   code on its **Connection** tab. Its **Import catalog** button adds models.
+1. **Kilo Code**, **Token Harbor**, **Yeta**, **River**, **Nous Portal**, **Hyper**,
+   and **OpenCode Go** are already on the Providers page. Add an API key on the
+   **Credentials** tab, or approve a device code on the **Connection** tab for Kilo
+   Code and Nous Portal. Then **Import catalog** on the **Models** tab adds that
+   provider's models, with prices when the provider publishes them. Hyper and
+   OpenCode Go publish their lists to anyone, so those imports need no key;
+   OpenCode Go prices its models from a built-in table.
 2. To add a custom upstream, click **Add custom provider**, pick one of the three generic
    wires, and paste its base URL and key. Then add models: upstream model
    `gpt-4o-mini` with alias `fast` makes `fast` the name clients send.
@@ -70,6 +78,7 @@ POST /v1/chat/completions [1]
 ├── resolve the reference into ordered attempts [1c] ✗ 404 model_not_found
 │   └── one attempt per model and credential: tag order, then credential order [1c1]
 ├── pick the adapter for the provider kind [1d]
+├── renew the attempt's OAuth credential when it is due [1d1]
 ├── call the upstream with the attempt's credential [1e] ✗ 502/429 and record the failure
 │   └── normalize wire events into canonical text, usage and finish events [1e1]
 ├── try the next attempt when the failure is retryable [1e2]
@@ -79,10 +88,14 @@ POST /v1/chat/completions [1]
 
 A credential is decrypted per attempt, immediately before an upstream call, so
 it is in memory only for the length of that call and a tag never opens keys for
-models it does not try. `GET /api/providers` returns each credential's id, label,
-auth mode, and priority, never the key or token. A device-code login keeps the
-device code on the server: the browser sees only the short user code it types at
-kilocode.ai.
+models it does not try. A due OAuth credential is renewed first: one renewal per
+credential row in a process, shared by every request that reaches it at once,
+written back with a compare-and-swap. A lost write adopts the stored bundle; a
+refusal with no newer bundle is reported as `auth` so the chain falls through to
+the next credential. `GET /api/providers` returns each
+credential's id, label, auth mode, and priority, never the key or token. A
+device-code login keeps the device code on the server: the browser sees only the
+short user code it types at the provider's portal.
 
 ## Model references
 
@@ -153,6 +166,15 @@ appends each in order, and, for a provider with a device login, an **OAuth** tab
   entry in the chain instead of replacing the first. A pasted Kilo Code API key is
   another credential beside a device login, and the chain falls from one to the
   other like any other key.
+- **Nous Portal** takes no API key. Its device login stores the inference token
+  with the refresh token and expiry the portal returned, and the gateway renews
+  that token 120 seconds before it expires. A renewal is shared by every request
+  holding the same credential row, so a burst of traffic rotates once. If a
+  renewal fails after another process wrote a fresh token, the request uses the
+  stored one. A rejected or impossible renewal is an `auth` failure and the chain
+  moves on; a credential saved before renewal existed has no refresh token and
+  expires for good. Reconnecting replaces an expiring connection; a second, live
+  connection joins the chain.
 
 ## Analytics
 
@@ -214,17 +236,19 @@ without its `builtIn` settings.
 1. Add the kind to `GENERIC_PROVIDER_KINDS` in `./src/shared/providers.ts` for a
    custom wire, or to `BUILT_IN_PROVIDER_KINDS` and `BUILT_IN_PROVIDERS` for a
    built-in.
-2. Create `./src/server/providers/<kind>/adapter.ts` implementing `ProviderAdapter`.
-3. Create `./src/server/providers/<kind>/index.ts` with the definition, annotated
+2. Create `./src/server/providers/<kind>/index.ts` with the definition, annotated
    `GenericProviderDefinition<"<kind>">` or
-   `BuiltInProviderDefinition<"<kind>">`. Add an `oauth` connector or a `catalog`
-   reader when the provider has one.
-4. Register the definition in `./src/server/providers/registry.ts`.
-5. Add the logo to `./src/client/components/provider-logo.tsx` and the label to
-   the provider pages. The client's `Record<ProviderKind, ...>` tables fail until
-   the new kind has both.
-6. Add a fake upstream branch and one streaming plus one non-streaming smoke
-   check in `./scripts/smoke.ts`.
+   `BuiltInProviderDefinition<"<kind>">`. An OpenAI-compatible kind builds its
+   adapter with `bearerAdapter("<kind>")`; a wire that needs its own headers
+   builds one with `chatAdapter({ kind, label, headers })`, as Kilo Code does. Add
+   an `oauth` connector, a `catalog` reader, or a `renew` renewer when the
+   provider has one.
+3. Register the definition in `./src/server/providers/registry.ts`.
+4. Add the logo to `./src/client/components/provider-logo.tsx` and the label to
+   `./src/shared/providers.ts`. The client's `Record<ProviderKind, ...>` tables
+   fail until the new kind has both, and so does its base-URL placeholder.
+5. Add a fake upstream route and the checks that prove the catalog, the chat
+   call, and any login or renewal in `./scripts/smoke.ts`.
 
 The full contract, wire mapping, and streaming rules are in
 [`docs/adapters.md`](./docs/adapters.md). Adapters never return wire types to the
@@ -246,6 +270,14 @@ throw `UpstreamError` with a kind the gateway maps to an HTTP status.
 | `BANDAR_DUCKDB_LIB`          | unset                                         | Override the `libduckdb` shared library path, for a manual install.                        |
 | `BANDAR_KILOCODE_API`        | `https://api.kilo.ai`                         | Kilo Code origin for device login and the seeded gateway URL. Point it at a fake in tests. |
 | `BANDAR_KILOCODE_MODELS_URL` | `https://api.kilo.ai/api/gateway/models`      | Kilo Code model catalog. Point it at a fake in tests.                                      |
+| `BANDAR_TOKENHARBOR_API`     | `https://tokenharbor.ai`                      | Token Harbor origin; the seeded base URL is this plus `/v1`.                               |
+| `BANDAR_YETA_API`            | `https://platform.yeta.ai`                    | Yeta origin for chat, its model list, and `/api/pricing`.                                  |
+| `BANDAR_RIVER_API`           | `https://api.river.ai`                        | River origin; the seeded base URL is this plus `/v1`.                                      |
+| `BANDAR_RIVER_PRICING_URL`   | `https://console.river.ai/api/public/pricing` | River's public pricing JSON, which is also its model list.                                 |
+| `BANDAR_NOUS_API`            | `https://inference-api.nousresearch.com`      | Nous inference origin; the seeded base URL is this plus `/v1`.                             |
+| `BANDAR_NOUS_PORTAL`         | `https://portal.nousresearch.com`             | Nous Portal origin for the device login and token renewal.                                 |
+| `BANDAR_HYPER_API`           | `https://hyper.charm.land`                    | Hyper origin; the seeded base URL is this plus `/v1`.                                      |
+| `BANDAR_OPENCODE_API`        | `https://opencode.ai`                         | OpenCode Go origin; the seeded base URL is this plus `/inference`.                         |
 
 Invalid values fail at startup before the port opens.
 
@@ -316,17 +348,20 @@ semicolons out of string literals in a migration.
 | `bun run check`          | Format, lint, and type-check.                                                    |
 | `bun run check:fix`      | The same with fixes.                                                             |
 | `bun run test`           | Vitest: migration ledgers, analytics queries, metric math.                       |
-| `bun run smoke`          | Boot `dist/bandar` and run 53 end-to-end checks against fake upstreams.          |
+| `bun run smoke`          | Boot `dist/bandar` and run 70 end-to-end checks against fake upstreams.          |
 | `bun run verify`         | `check`, `test`, `build`, `smoke`.                                               |
 | `bun run db:generate`    | Drizzle Kit migration from the SQLite schema.                                    |
 | `bun run db:auth-schema` | Regenerate `src/server/db/auth-schema.ts`.                                       |
 | `bun run duck:fetch`     | Copy the platform DuckDB library into `vendor/duckdb/`.                          |
 
-The smoke run mints a user, creates one provider per kind against local fake
-upstreams, approves a fake Kilo Code device login, imports a catalog with an
-alias collision, calls the gateway streaming and non-streaming, walks a tag with
-a failing first model, checks the recorded references, rejects reserved slugs,
-revokes the key, restarts the binary, and proves the analytics rows survived.
+The smoke run mints a user, creates one provider per generic wire against local
+fake upstreams, checks the seven seeded built-ins, imports every catalog (one with
+an alias collision, one joined to a pricing table, three public), approves fake Kilo
+Code and Nous Portal device logins, renews a Nous token under two concurrent
+chats, calls the gateway streaming and non-streaming, calls one OpenCode Go model
+on each of its three mounts, walks a tag with a failing first model, checks the
+recorded references, rejects reserved slugs, revokes the key, restarts the binary,
+and proves the analytics rows survived.
 
 ## Layout
 
@@ -354,11 +389,21 @@ bandar/
 │   ├── gateway.ts                  # Elysia /v1 routes and caller auth
 │   ├── api.ts                      # management routes, session/key gate
 │   ├── analytics.ts                # DuckDB reads and window math
-│   ├── providers.ts                # provider/model repo, catalog import, slug backfill
+│   ├── providers/
+│   │   ├── index.ts                # provider/model repo, seeding, catalog import
+│   │   ├── registry.ts             # definition record and built-in seed list
+│   │   ├── types.ts                # adapter, catalog, OAuth, renewal contracts
+│   │   ├── catalog.ts              # model ids, entries, price helpers
+│   │   ├── http.ts                 # URL join, POST helpers, SSE parsing, errors
+│   │   ├── env.ts                  # per-provider origin overrides
+│   │   ├── refresh.ts              # renew a due OAuth credential, once per row
+│   │   ├── openai/compatible.ts    # the OpenAI-compatible chat adapter
+│   │   ├── anthropic/, google/
+│   │   ├── kilocode/, tokenharbor/, yeta/, river/, nous/
+│   │   └── *.test.ts
 │   ├── credentials.ts              # ordered provider credentials: add, move, remove
 │   ├── tags.ts                     # tag list and membership writes
 │   ├── credential.ts               # api-key / oauth credential union
-│   ├── oauth.ts                    # device-code connectors per OAuth kind
 │   ├── seal.ts                     # AES-GCM credential sealing
 │   ├── router/
 │   │   ├── types.ts                # canonical request/result/stream contract
@@ -366,14 +411,7 @@ bandar/
 │   │   ├── record.ts               # one request event -> DuckDB
 │   │   ├── resolve.ts              # alias, tag, and provider-ref resolution
 │   │   ├── chat.ts                 # resolve, walk candidates, stream, record
-│   │   ├── wire.ts                 # OpenAI response and error envelopes
-│   │   └── adapters/
-│   │       ├── index.ts            # satisfies Record<ProviderKind, Adapter>
-│   │       ├── http.ts             # URL join, SSE parsing, upstream errors
-│   │       ├── openai.ts
-│   │       ├── anthropic.ts
-│   │       ├── google.ts
-│   │       └── kilocode.ts
+│   │   └── wire.ts                 # OpenAI response and error envelopes
 │   ├── duck/
 │   │   ├── ffi.ts                  # dlopen + symbol table
 │   │   ├── client.ts               # prepared queries, typed binds
@@ -396,7 +434,7 @@ bandar/
 │       ├── credentials-card.tsx    # ordered credential list for one provider, with the add dialog
 │       ├── credential-dialog.tsx   # add credential: single, bulk, and OAuth tabs
 │       ├── tags-panel.tsx          # tag chains: create, reorder, remove
-│       ├── connect-flow.tsx        # Kilo Code device-code approval
+│       ├── connect-flow.tsx        # device-code approval for an OAuth provider
 │       ├── token-chart.tsx         # shared daily token bars
 │       ├── provider-logo.tsx       # mark per provider kind
 │       ├── requests-panel.tsx      # recent attempts
@@ -422,9 +460,9 @@ bandar/
 | `DELETE /api/providers/:id/credentials/:credentialId` | Session or `x-api-key` | Remove a credential and compact the order.              |
 | `GET /api/providers/:id?days=30`                      | Session or `x-api-key` | One provider plus its window usage.                     |
 | `POST /api/providers/:id/models`                      | Session or `x-api-key` | Add one model alias; returns the provider.              |
-| `POST /api/providers/:id/models/refresh`              | Session or `x-api-key` | Import new models from the Kilo Code catalog.           |
+| `POST /api/providers/:id/models/refresh`              | Session or `x-api-key` | Import new models from the provider's catalog.          |
 | `DELETE /api/providers/:id/models/:modelId`           | Session or `x-api-key` | Remove a model alias; returns the provider.             |
-| `POST /api/providers/:id/oauth/start`                 | Session or `x-api-key` | Start a Kilo Code device login; returns a user code.    |
+| `POST /api/providers/:id/oauth/start`                 | Session or `x-api-key` | Start a device login; returns a user code.              |
 | `POST /api/providers/:id/oauth/poll`                  | Session or `x-api-key` | Poll the pending login; stores the token when approved. |
 | `GET/POST /api/tags`                                  | Session or `x-api-key` | List tags with their models, or create a tag.           |
 | `PUT /api/tags/:id/models`                            | Session or `x-api-key` | Replace a tag's model list and order; returns the list. |
@@ -437,32 +475,32 @@ bandar/
 Each provider has its own page at `/providers/<id>` with four tabs:
 **Overview** (usage for 7, 30, or 90 days plus recent requests), **Settings**
 (name, slug, kind, base URL), **Models** (aliases, refs, tag chips, removal, and
-for Kilo Code a catalog import), and **Credentials** or **Connection** (the
-ordered credential list: add, move, and remove a key, connect a Kilo Code
-account, remove a custom provider). The tab lives in the URL as `?tab=`, so a reload or a shared link
-opens the same tab. Custom providers are created empty and grow models one at a
-time; Kilo Code is seeded empty for every account. Built-in settings come from
-code and are read-only, and a built-in cannot be removed. `PUT /api/providers/:id`
-replaces name, slug, kind, and base URL for a custom provider. Credentials change
-only through the credential routes. Changing a custom slug stops refs
-built from the old slug from resolving.
+a catalog import when the provider has one), and **Credentials** or
+**Connection** (the ordered credential list: add, move, and remove a key, connect
+an OAuth account, remove a custom provider). The tab lives in the URL as `?tab=`,
+so a reload or a shared link opens the same tab. Custom providers are created
+empty and grow models one at a time; the seven built-ins are seeded empty for
+every account. Built-in settings come from code and are read-only, and a built-in
+cannot be removed. `PUT /api/providers/:id` replaces name, slug, kind, and base
+URL for a custom provider. Credentials change only through the credential routes.
+Changing a custom slug stops refs built from the old slug from resolving.
 
 The **Tags** page creates a tag from a slug and edits its chain: reorder a model
 with the arrow buttons, remove it, or pick another from the add list. Every edit
 writes the whole list.
 
 Model prices are accepted by the model endpoints (`inputPricePerMtok`,
-`outputPricePerMtok`) and filled by the Kilo Code catalog import; they are not in
-the form yet.
+`outputPricePerMtok`) and filled by a catalog import; they are not in the form
+yet.
 
 ## Security notes
 
-- Provider credentials, including Kilo Code OAuth tokens, are sealed with AES-GCM
-  under a key derived from `BANDAR_AUTH_SECRET`. Changing the secret makes stored
-  credentials unreadable; the gateway returns an upstream error until they are
-  re-entered.
-- Credentials never appear in API responses, logs, or analytics events. The Kilo
-  Code device code stays on the server; only the short user code is returned.
+- Provider credentials, including OAuth tokens and refresh tokens, are sealed
+  with AES-GCM under a key derived from `BANDAR_AUTH_SECRET`. Changing the secret
+  makes stored credentials unreadable; the gateway returns an upstream error
+  until they are re-entered.
+- Credentials never appear in API responses, logs, or analytics events. The
+  device code stays on the server; only the short user code is returned.
 - A bad gateway key is final: it is a 401 and the session cookie is not consulted
   on `/v1`.
 - One user cannot resolve another user's references, providers, events, or keys.
@@ -482,10 +520,28 @@ the form yet.
   model walks its provider's credentials in order. An alias still maps to one
   model. There is no health check and no cool-down: a rate-limited key is tried
   again the next time it reaches the front of the chain.
-- **No OAuth refresh.** A Kilo Code device token is stored as issued. Reconnect
-  when it expires.
-- **No pricing form.** Set prices through the API or import the Kilo Code
-  catalog; the overview computes cost only for priced models.
+- **OAuth refresh stops at Nous Portal.** Kilo Code stores its device token as
+  issued; reconnect when it expires. Nous Portal rotates its token on the request
+  path, from one process only. If the process dies after the portal rotates the
+  token and before the row is written, the stored refresh token is spent; reconnect.
+- **Yeta prices are the default group's.** The import uses the default group's
+  ratios; `group_ratio` for another group is not applied.
+- **OpenCode Go prices are the base tier.** The table stores the base context
+  tier's USD per million tokens and DeepSeek's peak rate, so a long-context tier or
+  an off-peak DeepSeek call costs less than the recorded number. Gemini's price is
+  not published, so it imports unpriced.
+- **Thirteen OpenCode Go ids cannot be called.** Five answer only on the Responses
+  wire, which bandar does not speak, and the docs name no wire for eight more.
+  Neither group imports; typing one in fails with a 400 that names the gap.
+- **Built-ins can share an upstream model id.** Aliases are unique across providers,
+  so importing a catalog skips an id another provider already imported. Add the
+  second copy with a distinct alias, or remove the first.
+- **A catalog re-import does not reprice.** It adds new upstream models and leaves
+  prices on existing models alone.
+- **A built-in can carry a suffixed slug.** If a custom provider already owns the
+  reserved slug, the built-in keeps `<slug>-2` after the custom row is deleted.
+- **No pricing form.** Set prices through the API or import a provider catalog;
+  the overview computes cost only for priced models.
 
 ## Lint policy
 

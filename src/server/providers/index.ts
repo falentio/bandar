@@ -1,12 +1,13 @@
 import { and, asc, eq } from "drizzle-orm";
-import type {
-  Provider,
-  ProviderCredential,
-  ProviderCreateInput,
-  ProviderInput,
-  ProviderKind,
-  ProviderList,
-  ProviderModelInput,
+import {
+  BUILT_IN_PROVIDER_KINDS,
+  type Provider,
+  type ProviderCredential,
+  type ProviderCreateInput,
+  type ProviderInput,
+  type ProviderKind,
+  type ProviderList,
+  type ProviderModelInput,
 } from "../../shared/providers";
 import { availableSlug, providerRefOf, slugify, TAG_REF_PREFIX } from "../../shared/slugs";
 import { parseCredential, type Credential } from "../credential";
@@ -14,12 +15,17 @@ import type { Db } from "../db/client";
 import { providerCredentials, providerModels, providers } from "../db/schema";
 import type { Sealer } from "../seal";
 import { renumberTagPriorities } from "../tags";
-import { builtInProviders, definitionFor, reservedProviderSlugs } from "./registry";
+import { definitionFor, reservedProviderSlugs } from "./registry";
+import { ensureBuiltInProviders } from "./seeding";
 import type { ModelCatalogEntry } from "./types";
 
 export { definitionFor };
 
 export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
+
+const BUILT_IN_RANK = new Map<string, number>(
+  BUILT_IN_PROVIDER_KINDS.map((kind, index) => [kind, index] as const),
+);
 
 export class ProviderRuleError extends Error {
   readonly code: "built_in" | "validation" | "conflict";
@@ -39,7 +45,7 @@ type ProviderPatch = {
 };
 
 export async function listProviders(deps: ProviderDeps, userId: string): Promise<ProviderList> {
-  await ensureBuiltInProviders(deps, userId);
+  await ensureBuiltInProviders(deps.db, userId);
 
   const providerRows = await deps.db
     .select()
@@ -109,6 +115,13 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
 
     if (leftRank !== rightRank) return leftRank - rightRank;
 
+    if (left.origin === "builtin" && right.origin === "builtin") {
+      const leftOrder = BUILT_IN_RANK.get(left.kind) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = BUILT_IN_RANK.get(right.kind) ?? Number.MAX_SAFE_INTEGER;
+
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    }
+
     return left.createdAt.getTime() - right.createdAt.getTime();
   });
 
@@ -121,6 +134,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       origin: row.origin,
       baseUrl: row.baseUrl,
       authModes: [...definitionFor(row.kind).authModes],
+      hasCatalog: definitionFor(row.kind).catalog !== undefined,
       credentials: credentials.get(row.id) ?? [],
       models: grouped.get(row.id) ?? [],
       createdAt: row.createdAt.toISOString(),
@@ -141,7 +155,7 @@ export async function createProvider(
   userId: string,
   input: ProviderCreateInput,
 ): Promise<Provider> {
-  await ensureBuiltInProviders(deps, userId);
+  await ensureBuiltInProviders(deps.db, userId);
 
   const id = crypto.randomUUID();
   const now = new Date();
@@ -357,6 +371,23 @@ export function sealApiKey(deps: ProviderDeps, apiKey: string): Promise<string> 
   return deps.sealer.seal(JSON.stringify({ authMode: "api-key", apiKey } satisfies Credential));
 }
 
+/** The credential the chain tries first, or null when the provider has none. */
+export async function readFirstCredential(
+  deps: ProviderDeps,
+  providerId: string,
+): Promise<Credential | null> {
+  const row = await deps.db
+    .select({ credential: providerCredentials.credential })
+    .from(providerCredentials)
+    .where(eq(providerCredentials.providerId, providerId))
+    .orderBy(asc(providerCredentials.priority))
+    .limit(1);
+
+  const sealed = row[0]?.credential;
+
+  return sealed === undefined ? null : readCredential(deps, sealed);
+}
+
 export async function readCredential(deps: ProviderDeps, sealed: string): Promise<Credential> {
   if (sealed === "") return { authMode: "api-key", apiKey: "" };
 
@@ -366,56 +397,6 @@ export async function readCredential(deps: ProviderDeps, sealed: string): Promis
 
   // A key saved before credentials carried an auth mode is a bare key.
   return credential ?? { authMode: "api-key", apiKey: plaintext };
-}
-
-async function ensureBuiltInProviders(deps: ProviderDeps, userId: string): Promise<void> {
-  const rows = await deps.db
-    .select({
-      kind: providers.kind,
-      name: providers.name,
-      origin: providers.origin,
-      slug: providers.slug,
-    })
-    .from(providers)
-    .where(eq(providers.userId, userId));
-
-  const present = new Set(rows.filter((row) => row.origin === "builtin").map((row) => row.kind));
-  const names = new Set(rows.map((row) => row.name));
-  const now = new Date();
-
-  for (const definition of builtInProviders) {
-    if (present.has(definition.kind)) continue;
-
-    const name = availableName(definition.builtIn.name, names);
-    const slug = definition.builtIn.slug;
-
-    names.add(name);
-
-    deps.db
-      .insert(providers)
-      .values({
-        id: crypto.randomUUID(),
-        userId,
-        name,
-        slug,
-        kind: definition.kind,
-        baseUrl: definition.builtIn.baseUrl(),
-        origin: "builtin",
-        createdAt: now,
-      })
-      .onConflictDoNothing()
-      .run();
-  }
-}
-
-function availableName(base: string, taken: ReadonlySet<string>): string {
-  if (!taken.has(base)) return base;
-
-  let suffix = 2;
-
-  while (taken.has(`${base} ${suffix}`)) suffix += 1;
-
-  return `${base} ${suffix}`;
 }
 
 async function takenSlugs(deps: ProviderDeps, userId: string): Promise<Set<string>> {
@@ -431,68 +412,6 @@ async function takenSlugs(deps: ProviderDeps, userId: string): Promise<Set<strin
   }
 
   return taken;
-}
-
-export async function assignProviderSlugs(db: Db): Promise<number> {
-  const rows = await db
-    .select({
-      id: providers.id,
-      userId: providers.userId,
-      name: providers.name,
-      kind: providers.kind,
-      origin: providers.origin,
-      slug: providers.slug,
-      createdAt: providers.createdAt,
-    })
-    .from(providers);
-
-  const byUser = new Map<string, typeof rows>();
-
-  for (const row of rows) {
-    byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
-  }
-
-  let assigned = 0;
-
-  for (const userRows of byUser.values()) {
-    const taken = new Set(reservedProviderSlugs);
-
-    for (const row of userRows) {
-      if (row.slug !== "") taken.add(row.slug);
-    }
-
-    const pending = userRows
-      .filter((row) => row.slug === "")
-      .sort((left, right) => {
-        const leftRank = left.origin === "builtin" ? 0 : 1;
-        const rightRank = right.origin === "builtin" ? 0 : 1;
-
-        if (leftRank !== rightRank) return leftRank - rightRank;
-
-        const created = left.createdAt.getTime() - right.createdAt.getTime();
-
-        return created !== 0 ? created : left.id.localeCompare(right.id);
-      });
-
-    if (pending.length === 0) continue;
-
-    db.transaction((tx) => {
-      for (const row of pending) {
-        const builtIn = builtInSlugOf(row.kind);
-        const slug = builtIn ?? availableSlug(slugify(row.name), taken);
-
-        tx.update(providers).set({ slug }).where(eq(providers.id, row.id)).run();
-        taken.add(slug);
-        assigned += 1;
-      }
-    });
-  }
-
-  return assigned;
-}
-
-function builtInSlugOf(kind: ProviderKind): string | null {
-  return definitionFor(kind).builtIn?.slug ?? null;
 }
 
 async function findProvider(

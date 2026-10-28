@@ -10,7 +10,7 @@ import { applyDuckMigrations } from "./duck/migrate";
 import { duckMigrations } from "./generated/duck-migrations";
 import { clientFiles } from "./generated/client-assets";
 import { migrations } from "./generated/migrations";
-import { assignProviderSlugs } from "./providers";
+import { assignProviderSlugs } from "./providers/seeding";
 import { createSealer } from "./seal";
 
 export async function main(env: Record<string, string | undefined>): Promise<void> {

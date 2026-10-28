@@ -1,5 +1,6 @@
 import type { DuckDb } from "../duck/client";
-import { definitionFor, readCredential, type ProviderDeps } from "../providers";
+import { definitionFor, type ProviderDeps } from "../providers";
+import { freshCredential } from "../providers/refresh";
 import { recordRequest, type RequestEventInput, type RequestOutcome } from "./record";
 import { resolvePlan, type ResolvedAttempt, type ResolvedPlan } from "./resolve";
 import {
@@ -344,7 +345,7 @@ async function targetOf(
     providerId: attempt.providerId,
     kind: attempt.kind,
     baseUrl: attempt.baseUrl,
-    credential: await readCredential(providers, attempt.sealedKey),
+    credential: await freshCredential(providers, attempt),
     upstreamModel: attempt.upstreamModel,
   };
 }

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
-import { BUILT_IN_PROVIDER_KINDS, PROVIDER_KINDS } from "../../shared/providers";
+import {
+  BUILT_IN_PROVIDER_KINDS,
+  PROVIDER_KINDS,
+  PROVIDER_KIND_LABELS,
+} from "../../shared/providers";
 import { TAG_SLUG } from "../../shared/slugs";
 import { builtInProviders, definitionFor, reservedProviderSlugs } from "./registry";
 
@@ -23,6 +27,20 @@ describe("provider registry", () => {
       expect(new Set(definition.authModes).size).toBe(definition.authModes.length);
       expect(definition.authModes.length).toBeGreaterThan(0);
       expect(definition.authModes.includes("oauth")).toBe(definition.oauth !== undefined);
+    }
+  });
+
+  test("built-in names and slugs are distinct", () => {
+    const names = builtInProviders.map((definition) => definition.builtIn.name);
+    const slugs = builtInProviders.map((definition) => definition.builtIn.slug);
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(new Set(slugs).size).toBe(slugs.length);
+  });
+
+  test("a built-in's label is the name it seeds", () => {
+    for (const definition of builtInProviders) {
+      expect(PROVIDER_KIND_LABELS[definition.kind]).toBe(definition.builtIn.name);
     }
   });
 

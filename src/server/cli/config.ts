@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { loadConfigReport, type ConfigReport, type ConfigSource } from "../config";
+import { ConfigError, loadConfigReport, type ConfigReport, type ConfigSource } from "../config";
 import type { Commands, Env } from "./command";
 
 const PREFIX = "bandar config: ";
@@ -26,13 +26,20 @@ async function config(env: Env): Promise<number> {
 
     return 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    // A ConfigError carries one entry per bad setting and a message that lists them on separate
+    // lines; the command prints one line, so each entry is flattened and the list is joined again.
+    const message =
+      error instanceof ConfigError
+        ? `${error.summary}: ${error.issues.map((issue) => oneLine(issue)).join("; ")}`
+        : oneLine(error instanceof Error ? error.message : String(error));
 
-    console.error(`${PREFIX}${message.replace(/\s+/gu, " ").trim()}`);
+    console.error(`${PREFIX}${message}`);
 
     return 1;
   }
 }
+
+const oneLine = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
 export function renderReport(report: ConfigReport): readonly string[] {
   const rows: readonly (readonly [string, string])[] = [

@@ -42,11 +42,13 @@ export type ConfigReport = {
 
 export class ConfigError extends Error {
   readonly issues: readonly string[];
+  readonly summary: string;
 
   constructor(issues: readonly string[], summary = "invalid environment") {
     super(`${summary}:\n${issues.map((issue) => `  ${issue}`).join("\n")}`);
     this.name = "ConfigError";
     this.issues = issues;
+    this.summary = summary;
   }
 }
 

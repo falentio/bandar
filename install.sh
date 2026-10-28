@@ -105,8 +105,7 @@ per_user_dir() {
   fi
 }
 
-# The directory a manifest names, resolved through any symlink so it compares to a path the
-# installer already canonicalized.
+# Canonicalize a directory, so two spellings of one path compare equal.
 absolute_dir() {
   if [ -n "$1" ] && [ -d "$1" ]; then
     (cd "$1" && pwd -P)
@@ -313,7 +312,7 @@ if [ ! -d "$install_dir" ] || [ ! -w "$install_dir" ]; then
   exit 1
 fi
 
-install_dir=$(cd "$install_dir" && pwd -P)
+install_dir=$(absolute_dir "$install_dir")
 
 # A recorded path is only taken over when it is still this one binary in a directory the user
 # can replace. The per-user fallback is the sanctioned home for a new install, so a manifest that

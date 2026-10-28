@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_API_PORT, DEFAULT_WEB_PORT } from "../shared/topology";
+import { readSettings, settingsPath, type Settings } from "./settings";
 
 export type Config = {
   readonly host: string;
@@ -18,8 +19,8 @@ export type Config = {
 export class ConfigError extends Error {
   readonly issues: readonly string[];
 
-  constructor(issues: readonly string[]) {
-    super(`invalid environment:\n${issues.map((issue) => `  ${issue}`).join("\n")}`);
+  constructor(issues: readonly string[], summary = "invalid environment") {
+    super(`${summary}:\n${issues.map((issue) => `  ${issue}`).join("\n")}`);
     this.name = "ConfigError";
     this.issues = issues;
   }
@@ -36,13 +37,20 @@ const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "bandar");
 
 const DEFAULT_HOME_DIR = join(homedir(), ".bandar");
 
+const DEFAULT_HOST = "0.0.0.0";
+
 const DATABASE_FILE = "bandar.db";
 
 const DUCKDB_FILE = "bandar.duckdb";
 
-// v.optional validates its default against the input type, so the port default is the string form.
+const UNSET_SECRET_WARNING =
+  "bandar: BANDAR_AUTH_SECRET is unset; a random secret was generated for this boot, " +
+  "so every session ends when the process stops. Set it to keep sessions across restarts.";
+
+// The host and the port carry no default here: a value missing from the environment comes from the
+// settings file, and only then from the built-in default in parseConfig.
 const ConfigSchema = v.object({
-  BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1)), "0.0.0.0"),
+  BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   BANDAR_PORT: v.optional(
     v.pipe(
       v.string(),
@@ -52,9 +60,7 @@ const ConfigSchema = v.object({
       v.minValue(0),
       v.maxValue(65535),
     ),
-    String(DEFAULT_API_PORT),
   ),
-  BANDAR_HOME: v.pipe(v.string(), v.trim(), v.check(isAbsolute, "must be an absolute path")),
   BANDAR_CONFIG_DIR: v.optional(
     v.pipe(v.string(), v.trim(), v.check(isAbsolute, "must be an absolute path")),
     DEFAULT_CONFIG_DIR,
@@ -78,21 +84,36 @@ const ConfigSchema = v.object({
   BANDAR_OPENCODE_API: v.optional(ProviderUrlSchema),
 });
 
-export function parseConfig(env: Record<string, string | undefined>): Config {
-  // A blank value means "unset" for every variable but the two directories: install.sh writes its
-  // manifest under the config directory it was given, and a blank home would move the databases to
-  // the working directory, so a blank one has to fail, not fall back.
+/**
+ * The home directory decides where the settings file lives, so it is resolved before that file is
+ * read, and parseConfig takes the result instead of validating BANDAR_HOME a second time.
+ */
+export function resolveHome(env: Record<string, string | undefined>): string {
+  const home = (env.BANDAR_HOME ?? DEFAULT_HOME_DIR).trim();
+
+  if (!isAbsolute(home)) throw new ConfigError(["BANDAR_HOME: must be an absolute path"]);
+
+  return home;
+}
+
+/**
+ * Fills the config from the environment first, then the settings file, then the built-in default.
+ * It stays silent: backup, update, and install-service parse the environment without starting a
+ * session, so the warning about a generated secret belongs to loadConfig.
+ */
+export function parseConfig(
+  env: Record<string, string | undefined>,
+  settings: Settings = {},
+): Config {
+  const home = resolveHome(env);
+
+  // A blank value means "unset" for every variable but BANDAR_CONFIG_DIR: install.sh writes its
+  // manifest under the config directory it was given, so a blank one has to fail, not fall back.
   const given = Object.fromEntries(
     Object.entries(env).filter(
-      ([name, value]) =>
-        value !== undefined &&
-        (value !== "" || name === "BANDAR_CONFIG_DIR" || name === "BANDAR_HOME"),
+      ([name, value]) => value !== undefined && (value !== "" || name === "BANDAR_CONFIG_DIR"),
     ),
   );
-
-  // Filled in here rather than as a schema default: v.optional checks its default against the
-  // input type, so a default that went through trim and check would fail on the leading space.
-  given.BANDAR_HOME ??= DEFAULT_HOME_DIR;
 
   const parsed = v.safeParse(ConfigSchema, given);
 
@@ -107,23 +128,39 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
   }
 
   const values = parsed.output;
-
-  if (values.BANDAR_AUTH_SECRET === undefined)
-    console.warn(
-      "bandar: BANDAR_AUTH_SECRET is unset; a random secret was generated for this boot, " +
-        "so every session ends when the process stops. Set it to keep sessions across restarts.",
-    );
+  const port = values.BANDAR_PORT ?? settings.server?.port ?? DEFAULT_API_PORT;
 
   return {
-    host: values.BANDAR_HOST,
-    port: values.BANDAR_PORT,
-    databasePath: join(values.BANDAR_HOME, DATABASE_FILE),
-    duckdbPath: join(values.BANDAR_HOME, DUCKDB_FILE),
+    host: values.BANDAR_HOST ?? settings.server?.host ?? DEFAULT_HOST,
+    port,
+    databasePath: join(home, DATABASE_FILE),
+    duckdbPath: join(home, DUCKDB_FILE),
     configDir: values.BANDAR_CONFIG_DIR,
-    authUrl: values.BANDAR_AUTH_URL ?? `http://localhost:${values.BANDAR_PORT}`,
+    authUrl: values.BANDAR_AUTH_URL ?? `http://localhost:${port}`,
     authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
     trustedOrigins: values.BANDAR_TRUSTED_ORIGINS.split(",")
       .map((origin) => origin.trim())
       .filter((origin) => origin !== ""),
   };
+}
+
+/**
+ * Reads the settings file and the environment into one config. A file that cannot be read or
+ * parsed fails the boot, because a typo there would otherwise start the server on a default.
+ */
+export function loadConfig(
+  env: Record<string, string | undefined>,
+  read: (path: string) => string,
+): Config {
+  const home = resolveHome(env);
+  const report = readSettings(home, read);
+
+  if (report.kind === "invalid")
+    throw new ConfigError([`${settingsPath(home)}: ${report.reason}`], "invalid configuration");
+
+  const config = parseConfig(env, report.kind === "ok" ? report.settings : {});
+
+  if ((env.BANDAR_AUTH_SECRET ?? "") === "") console.warn(UNSET_SECRET_WARNING);
+
+  return config;
 }

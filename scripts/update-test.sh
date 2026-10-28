@@ -220,6 +220,17 @@ stage_release() {
     "$version" "$asset" "$API" "$asset" "$asset" "$API" "$asset" >"$work/site/latest.json"
 }
 
+stage_foreign_release() {
+  local version="$1" asset="bandar-$1-linux-x64"
+
+  rm -rf "$work/site"
+  mkdir -p "$work/site"
+  printf 'foreign payload' >"$work/site/$asset"
+  printf '%s  %s\n' "$(sha256_of "$work/site/$asset")" "$asset" >"$work/site/$asset.sha256"
+  printf '{"tag_name":"v%s","assets":[{"name":"%s","url":"http://foreign.test/%s"},{"name":"%s.sha256","url":"http://foreign.test/%s.sha256"}]}\n' \
+    "$version" "$asset" "$asset" "$asset" "$asset" >"$work/site/latest.json"
+}
+
 write_manifest() {
   local directory="$1" source="$2"
 
@@ -296,6 +307,24 @@ expect_same "$CASE_DIR/bin/bandar" "$work/logs/expected-old" "mismatch: the bina
 expect_no_temp "$CASE_DIR/bin" mismatch
 
 echo
+echo "case: foreign asset host"
+case_dir foreign install-script
+stage_foreign_release 0.5.0
+: >"$work/logs/requests.log"
+run foreign env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_UPDATE_URL=$API" \
+  "BANDAR_GITHUB_TOKEN=$STUB_TOKEN" bun src/server/main.ts update
+expect_exit foreign 1
+expect_stderr foreign "not an allowed asset host"
+expect_same "$CASE_DIR/bin/bandar" "$work/logs/expected-old" "foreign: the binary keeps its bytes"
+requests="$(wc -l <"$work/logs/requests.log")"
+
+if [ "$requests" -eq 1 ]; then
+  ok "foreign: the token went to no other host"
+else
+  fail foreign "the stub saw $requests requests, wanted only the release feed"
+fi
+
+echo
 echo "case: unknown install source"
 case_dir unknown
 stage_release 0.2.0 'new binary payload'
@@ -342,7 +371,7 @@ echo "case: --check without a token"
 run notokencheck env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_UPDATE_URL=$API" \
   bun src/server/main.ts update --check
 expect_exit notokencheck 1
-expect_stderr notokencheck "a GitHub token is required: set BANDAR_GITHUB_TOKEN"
+expect_stderr notokencheck "bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN"
 expect_stdout notokencheck "latest unknown"
 
 echo
@@ -352,7 +381,7 @@ run notoken env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_UPDATE_URL=$API" \
   bun src/server/main.ts update
 expect_exit notoken 1
 expect_stderr_lines notoken 1
-expect_stderr notoken "a GitHub token is required: set BANDAR_GITHUB_TOKEN"
+expect_stderr notoken "bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN"
 
 echo
 echo "case: --archive offline"

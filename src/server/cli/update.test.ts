@@ -15,6 +15,7 @@ import { Commands } from "./command";
 import { detectInstall } from "./install-source";
 import {
   apiBase,
+  assetHostAllowed,
   compareVersions,
   githubToken,
   latestReleaseUrl,
@@ -116,8 +117,8 @@ const releaseOf = (options: ServeOptions, platform: string): string => {
   return JSON.stringify({
     tag_name: `v${options.version}`,
     assets: options.assets ?? [
-      { name: names.asset, url: `https://assets.test/${names.asset}` },
-      { name: names.checksum, url: `https://assets.test/${names.checksum}` },
+      { name: names.asset, url: `https://api.test/assets/${names.asset}` },
+      { name: names.checksum, url: `https://api.test/assets/${names.checksum}` },
     ],
   });
 };
@@ -178,11 +179,11 @@ const serving = (options: ServeOptions, platform = "linux"): HttpSend => {
       return { status: options.status ?? 200, body: encode(releaseOf(options, platform)) };
     }
 
-    if (names !== null && url === `https://assets.test/${names.asset}`) {
+    if (names !== null && url === `https://api.test/assets/${names.asset}`) {
       return { status: 200, body: options.bytes };
     }
 
-    if (names !== null && url === `https://assets.test/${names.checksum}`) {
+    if (names !== null && url === `https://api.test/assets/${names.checksum}`) {
       const digest = options.checksum ?? sha256(options.bytes);
 
       return { status: 200, body: encode(`${digest}  ${names.asset}\n`) };
@@ -339,6 +340,17 @@ describe("versions and assets", () => {
     );
   });
 
+  test("an asset url must stay on a trusted host or the configured base", () => {
+    expect(assetHostAllowed("https://api.github.com/x", "https://api.github.com")).toBe(true);
+    expect(assetHostAllowed("https://github.com/x", "https://api.github.com")).toBe(true);
+    expect(assetHostAllowed("https://api.test/assets/x", "https://api.test")).toBe(true);
+    expect(assetHostAllowed("https://evil.test/x", "https://api.test")).toBe(false);
+    expect(assetHostAllowed("https://api.github.com.evil.test/x", "https://api.github.com")).toBe(
+      false,
+    );
+    expect(assetHostAllowed("not a url", "https://api.github.com")).toBe(false);
+  });
+
   test("a checksum line is its first token, lowercased", () => {
     expect(parseChecksum(`${"A".repeat(64)}  bandar-0.1.0-linux-x64\n`)).toBe("a".repeat(64));
     expect(parseChecksum("not a digest")).toBeNull();
@@ -372,7 +384,7 @@ describe("update --check", () => {
     expect(recorded.lines).toEqual(["installed 0.1.0", "latest 0.1.0", "up-to-date"]);
   });
 
-  test("an unreachable feed reports unknown and exits 0", async () => {
+  test("an unreachable feed reports unknown and exits 1", async () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
@@ -383,8 +395,41 @@ describe("update --check", () => {
       },
     });
 
-    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(await runUpdate(recorded.run)).toBe(1);
     expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
+    expect(recorded.errors).toEqual([
+      "bandar: could not read the release feed: connect ECONNREFUSED",
+    ]);
+  });
+
+  test("a feed that answers HTTP 500 exits 1", async () => {
+    const fixture = fixtureOf(null);
+
+    const recorded = runOf(fixture, {
+      env: API_ENV,
+      argv: ["--check"],
+      send: async () => ({ status: 500, body: new Uint8Array() }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
+    expect(recorded.errors).toEqual([
+      "bandar: could not read the release feed: the release feed answered HTTP 500",
+    ]);
+  });
+
+  test("a malformed release body exits 1", async () => {
+    const fixture = fixtureOf(null);
+
+    const recorded = runOf(fixture, {
+      env: API_ENV,
+      argv: ["--check"],
+      send: async () => ({ status: 200, body: encode('{"tag_name":"v0.2.0"}') }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
+    expect(recorded.errors[0]).toContain("could not read the release feed");
   });
 
   test("a repository with no release reports unknown and exits 0", async () => {
@@ -416,7 +461,9 @@ describe("update --check", () => {
 
     expect(await runUpdate(recorded.run)).toBe(1);
     expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
-    expect(recorded.errors).toEqual(["a GitHub token is required: set BANDAR_GITHUB_TOKEN"]);
+    expect(recorded.errors).toEqual([
+      "bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN",
+    ]);
     expect(recorded.requests).toEqual([]);
   });
 });
@@ -495,6 +542,48 @@ describe("bandar update", () => {
     expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
   });
 
+  test("a failed rename on Windows names the locked executable", async () => {
+    const fixture = fixtureOf("install-script");
+    const target = join(fixture.directory, "bin", "bandar.d");
+
+    mkdirSync(target);
+    writeFileSync(
+      join(fixture.configDir, "install.json"),
+      JSON.stringify({ source: "install-script", version: "0.1.0", path: target }),
+    );
+
+    const recorded = runOf(fixture, {
+      env: API_ENV,
+      platform: "win32",
+      send: serving({ version: "0.2.0", bytes: encode("new") }, "win32"),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.errors[0]).toContain("Windows locks a running executable");
+    expect(recorded.errors[0]).toContain("run the installer again");
+    expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
+  });
+
+  test("a failed rename elsewhere reports the failure", async () => {
+    const fixture = fixtureOf("install-script");
+    const target = join(fixture.directory, "bin", "bandar.d");
+
+    mkdirSync(target);
+    writeFileSync(
+      join(fixture.configDir, "install.json"),
+      JSON.stringify({ source: "install-script", version: "0.1.0", path: target }),
+    );
+
+    const recorded = runOf(fixture, {
+      env: API_ENV,
+      send: serving({ version: "0.2.0", bytes: encode("new") }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.errors[0]).toContain("could not replace");
+    expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
+  });
+
   test("the same version is a no-op with no download", async () => {
     const fixture = fixtureOf("install-script");
 
@@ -541,7 +630,9 @@ describe("bandar update", () => {
     });
 
     expect(await runUpdate(recorded.run)).toBe(1);
-    expect(recorded.errors).toEqual(["a GitHub token is required: set BANDAR_GITHUB_TOKEN"]);
+    expect(recorded.errors).toEqual([
+      "bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN",
+    ]);
     expect(recorded.requests).toEqual([]);
     expect(decode(readFileSync(fixture.target))).toBe("old binary");
   });
@@ -595,7 +686,7 @@ describe("bandar update", () => {
       send: serving({
         version: "0.2.0",
         bytes: encode("new"),
-        assets: [{ name: "bandar-0.2.0-darwin-x64", url: "https://assets.test/other" }],
+        assets: [{ name: "bandar-0.2.0-darwin-x64", url: "https://api.test/assets/other" }],
       }),
     });
 
@@ -619,6 +710,41 @@ describe("bandar update", () => {
       "application/octet-stream",
     ]);
   });
+});
+
+test("a foreign asset host is refused before any request", async () => {
+  const fixture = fixtureOf("install-script");
+  const names = releaseNames("0.2.0", "linux", "x64");
+
+  if (names === null) throw new Error("the fixture platform has no asset");
+
+  const recorded = runOf(fixture, {
+    env: API_ENV,
+    send: async (url) => {
+      if (url === latestReleaseUrl("https://api.test"))
+        return {
+          status: 200,
+          body: encode(
+            JSON.stringify({
+              tag_name: "v0.2.0",
+              assets: [
+                { name: names.asset, url: "https://evil.test/bandar" },
+                { name: names.checksum, url: "https://evil.test/bandar.sha256" },
+              ],
+            }),
+          ),
+        };
+
+      return { status: 200, body: encode("unreachable") };
+    },
+  });
+
+  expect(await runUpdate(recorded.run)).toBe(1);
+  expect(recorded.errors[0]).toContain("evil.test is not an allowed asset host");
+  expect(recorded.requests.map((request) => request.url)).toEqual([
+    latestReleaseUrl("https://api.test"),
+  ]);
+  expect(decode(readFileSync(fixture.target))).toBe("old binary");
 });
 
 describe("bandar update --archive", () => {

@@ -19,7 +19,8 @@ const COMMAND = "update";
 const REPOSITORY = "falentio/bandar";
 const DEFAULT_API_BASE = "https://api.github.com";
 const INSTALLER = "install.sh from https://github.com/falentio/bandar";
-const TOKEN_REQUIRED = "a GitHub token is required: set BANDAR_GITHUB_TOKEN";
+const TOKEN_REQUIRED = "bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN";
+const TRUSTED_ASSET_HOSTS = ["api.github.com", "github.com"];
 const TOKEN_VARIABLES = ["BANDAR_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
 const CHECKSUM_PREFIX = /^([0-9a-fA-F]{64})(?:\s|$)/u;
 const VERSION_TEXT = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
@@ -262,12 +263,20 @@ async function reportVersions(run: UpdateRun): Promise<number> {
 
   const lookup = await lookupLatest(run.send, token, apiBase(run.env));
 
-  if (lookup.kind !== "release") {
+  if (lookup.kind === "absent") {
     // A private repository answers 404 for its own missing release, which is a normal state.
     run.stdout("latest unknown");
     run.stdout("unknown");
 
     return 0;
+  }
+
+  if (lookup.kind === "failed") {
+    run.stdout("latest unknown");
+    run.stdout("unknown");
+    run.stderr(`bandar: could not read the release feed: ${lookup.reason}`);
+
+    return 1;
   }
 
   run.stdout(`latest ${lookup.release.version}`);
@@ -365,7 +374,8 @@ async function prepareFromRelease(
   token: string,
   target: string,
 ): Promise<Prepared> {
-  const lookup = await lookupLatest(run.send, token, apiBase(run.env));
+  const base = apiBase(run.env);
+  const lookup = await lookupLatest(run.send, token, base);
 
   if (lookup.kind === "absent")
     return { kind: "failed", reason: `${REPOSITORY} has no published release yet` };
@@ -413,12 +423,12 @@ async function prepareFromRelease(
     };
   }
 
-  const binary = await download(run.send, token, asset.url);
+  const binary = await download(run.send, token, asset.url, base);
 
   if (binary.kind === "failed")
     return { kind: "failed", reason: `could not download ${names.asset}: ${binary.reason}` };
 
-  const checksumText = await download(run.send, token, checksum.url);
+  const checksumText = await download(run.send, token, checksum.url, base);
 
   if (checksumText.kind === "failed")
     return {
@@ -484,10 +494,30 @@ function replaceBinary(run: UpdateRun, target: string, bytes: Uint8Array): strin
   } catch (error) {
     rmSync(temp, { force: true });
 
+    if (run.platform === "win32")
+      return `Windows locks a running executable, so bandar cannot replace ${target} from inside itself; close bandar, then run the installer again or replace ${target} with the release download`;
+
     return `could not replace ${target}: ${error instanceof Error ? error.message : "the write failed"}`;
   }
 
   return null;
+}
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+export function assetHostAllowed(url: string, base: string): boolean {
+  const host = hostOf(url);
+
+  if (host === null) return false;
+
+  // A feed may rename an asset, but it does not get to name a host that would receive the token.
+  return TRUSTED_ASSET_HOSTS.includes(host) || host === hostOf(base);
 }
 
 async function lookupLatest(send: HttpSend, token: string, base: string): Promise<ReleaseLookup> {
@@ -534,7 +564,18 @@ function decodeRelease(text: string): ReleaseLookup {
   return { kind: "release", release: { version, assets: parsed.output.assets } };
 }
 
-async function download(send: HttpSend, token: string, url: string): Promise<Download> {
+async function download(
+  send: HttpSend,
+  token: string,
+  url: string,
+  base: string,
+): Promise<Download> {
+  if (!assetHostAllowed(url, base))
+    return {
+      kind: "failed",
+      reason: `${hostOf(url) ?? "an unparsable url"} is not an allowed asset host, so bandar will not send its token there`,
+    };
+
   try {
     // The asset URL answers JSON unless the request asks for the octet stream.
     const response = await send(url, {

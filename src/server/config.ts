@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import * as v from "valibot";
 import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
-import { HttpUrlSchema, readSettings, type Settings } from "./settings";
+import { HttpUrlSchema, OriginSchema, readSettings, type Settings } from "./settings";
 
 export type Config = {
   readonly host: string;
@@ -65,6 +65,8 @@ export function detectRunMode(): RunMode {
 }
 
 const DEFAULT_HOST = "0.0.0.0";
+
+const TRUSTED_ORIGINS_ENV = "BANDAR_TRUSTED_ORIGINS";
 
 const DATABASE_FILE = "bandar.db";
 
@@ -161,7 +163,7 @@ function buildConfig(
   const environmentOrigins =
     values.BANDAR_TRUSTED_ORIGINS === undefined
       ? undefined
-      : splitOrigins(values.BANDAR_TRUSTED_ORIGINS);
+      : parseOrigins(values.BANDAR_TRUSTED_ORIGINS);
 
   return {
     config: {
@@ -192,11 +194,35 @@ function sourceOf<T>(environment: T | undefined, file: T | undefined): ConfigSou
   return file === undefined ? "default" : "config";
 }
 
-function splitOrigins(value: string): readonly string[] {
-  return value
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter((origin) => origin !== "");
+/**
+ * Splits the environment list into the form the settings file stores: one normalized origin per
+ * entry. An entry that is not an origin fails the boot, because a trailing slash would otherwise
+ * reach the browser check and lock every origin out.
+ */
+function parseOrigins(value: string): readonly string[] {
+  const origins: string[] = [];
+  const issues: string[] = [];
+
+  for (const part of value.split(",")) {
+    const entry = part.trim();
+
+    if (entry === "") continue;
+
+    const parsed = v.safeParse(OriginSchema, entry);
+
+    if (parsed.success) origins.push(parsed.output);
+    else
+      issues.push(
+        `${TRUSTED_ORIGINS_ENV}: ${entry}: ${parsed.issues[0]?.message ?? "invalid origin"}`,
+      );
+  }
+
+  if (issues.length > 0) throw new ConfigError(issues);
+
+  if (origins.length === 0)
+    throw new ConfigError([`${TRUSTED_ORIGINS_ENV}: needs at least one origin`]);
+
+  return origins;
 }
 
 /**

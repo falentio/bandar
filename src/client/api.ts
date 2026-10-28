@@ -17,6 +17,7 @@ import {
   type AnalyticsFilters,
   type RequestList,
 } from "../shared/analytics";
+import { CooldownListSchema, cooldownPaths, type CooldownList } from "../shared/cooldowns";
 import {
   AuthErrorSchema,
   AuthResultSchema,
@@ -154,6 +155,11 @@ export const analyticsApi = {
         : `${analyticsPaths.requests}?limit=${limit}&providerId=${encodeURIComponent(providerId)}`,
       RequestListSchema,
     ),
+};
+
+export const cooldownApi = {
+  list: (limit = 100): Promise<CooldownList> =>
+    request(`${cooldownPaths.list}?limit=${limit}`, CooldownListSchema),
 };
 
 export const apiKeyApi = {

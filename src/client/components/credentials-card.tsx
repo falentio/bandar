@@ -12,6 +12,7 @@ import {
 import type { Provider, ProviderAuthMode, ProviderCredential } from "../../shared/providers";
 import { useProviders } from "../use-providers";
 import { AddCredentialDialog } from "./credential-dialog";
+import { HealthBadge } from "./health-badge";
 
 const AUTH_MODE_LABELS: Record<ProviderAuthMode, string> = {
   "api-key": "API key",
@@ -89,6 +90,10 @@ export function CredentialsCard({
                   <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
                     {AUTH_MODE_LABELS[credential.authMode]}
                   </span>
+                  <HealthBadge
+                    failures={credential.failures}
+                    flaggedUntil={credential.flaggedUntil}
+                  />
                   <span className="ms-auto flex items-center gap-1">
                     <Button
                       variant="ghost"

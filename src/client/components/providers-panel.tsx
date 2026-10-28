@@ -21,6 +21,7 @@ import {
   type Provider,
 } from "../../shared/providers";
 import { useProviders, type Providers } from "../use-providers";
+import { HealthBadge } from "./health-badge";
 import { ProviderLogo } from "./provider-logo";
 
 const PLACEHOLDERS: Record<GenericProviderKind, string> = {
@@ -160,6 +161,7 @@ function ProviderRow({ provider }: { provider: Provider }) {
                 {provider.origin === "builtin" ? "not connected" : "no key"}
               </span>
             ) : null}
+            <HealthBadge failures={provider.failures} flaggedUntil={provider.flaggedUntil} />
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>{PROVIDER_KIND_LABELS[provider.kind]}</span>

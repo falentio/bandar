@@ -255,10 +255,20 @@ Adapters throw one type:
 new UpstreamError(message, kind, status);
 ```
 
-`kind` is one of `auth`, `rate_limit`, `invalid_request`, `unavailable`,
-`protocol`, or `network`. `status` is the upstream HTTP status when there was
-one. The gateway maps `rate_limit` to 429, `invalid_request` to 400, and the rest
-to 502, then records the event with the error kind.
+`kind` is one of `auth`, `rate_limit`, `invalid_request`, `not_found`,
+`unavailable`, `protocol`, `network`, or `unknown`. `status` is the upstream HTTP
+status when there was one. The gateway maps `rate_limit` to 429,
+`invalid_request` to 400, `not_found` to 404, and the rest to 502, then records
+the event with the error kind. `kindForStatus` answers `unknown` for a status it
+does not classify, so an account-level status the gateway has no rule for does
+not convict a subject.
+
+Each failure that points at a subject also flags it: a credential for `auth` and
+`rate_limit`, the provider for `unavailable` and `network`, the model for
+`protocol` and `not_found`. `unknown` points at nobody, so the chain falls
+through it without recording a flag. The gateway records the flag in SQLite and skips an attempt whose
+subject is cooling down, so the next request does not repeat the same failure
+until the cooldown ends.
 
 Helpers in `src/server/providers/http.ts`:
 

@@ -13,7 +13,13 @@ export type ResolvedAttempt = {
   readonly kind: ProviderKind;
   readonly baseUrl: string;
   readonly credentialId: string | null;
+  readonly credentialLabel: string;
   readonly sealedKey: string;
+  readonly modelId: string;
+  readonly providerName: string;
+  readonly providerFlaggedUntil: Date | null;
+  readonly modelFlaggedUntil: Date | null;
+  readonly credentialFlaggedUntil: Date | null;
 };
 
 export type ResolvedPlan = {
@@ -33,7 +39,13 @@ type AttemptRow = {
   readonly kind: ProviderKind;
   readonly baseUrl: string;
   readonly credentialId: string | null;
+  readonly credentialLabel: string | null;
   readonly sealedKey: string | null;
+  readonly modelId: string;
+  readonly providerName: string;
+  readonly providerFlaggedUntil: Date | null;
+  readonly modelFlaggedUntil: Date | null;
+  readonly credentialFlaggedUntil: Date | null;
 };
 
 const attemptColumns = {
@@ -45,12 +57,22 @@ const attemptColumns = {
   kind: providers.kind,
   baseUrl: providers.baseUrl,
   credentialId: providerCredentials.id,
+  credentialLabel: providerCredentials.label,
   sealedKey: providerCredentials.credential,
+  modelId: providerModels.id,
+  providerName: providers.name,
+  providerFlaggedUntil: providers.flaggedUntil,
+  modelFlaggedUntil: providerModels.flaggedUntil,
+  credentialFlaggedUntil: providerCredentials.flaggedUntil,
 };
 
 /** A provider with no credential row still answers, with an empty key. */
 function attemptsOf(rows: readonly AttemptRow[]): readonly ResolvedAttempt[] {
-  return rows.map((row) => ({ ...row, sealedKey: row.sealedKey ?? "" }));
+  return rows.map((row) => ({
+    ...row,
+    credentialLabel: row.credentialLabel ?? "",
+    sealedKey: row.sealedKey ?? "",
+  }));
 }
 
 export async function resolvePlan(

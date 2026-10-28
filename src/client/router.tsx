@@ -12,6 +12,7 @@ import * as v from "valibot";
 import { ApiKeysPanel } from "./components/api-keys-panel";
 import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
+import { ErrorsPanel } from "./components/errors-panel";
 import { OverviewPanel } from "./components/overview-panel";
 import { isProviderTab, ProviderPage } from "./components/provider-page";
 import { ProvidersPanel } from "./components/providers-panel";
@@ -22,7 +23,7 @@ import { isViewPath } from "./views";
 
 const loginSearch = v.object({
   redirect: v.optional(
-    v.picklist(["/overview", "/providers", "/tags", "/requests", "/api-keys"]),
+    v.picklist(["/overview", "/providers", "/tags", "/requests", "/errors", "/api-keys"]),
     "/overview",
   ),
 });
@@ -96,6 +97,12 @@ const requestsRoute = createRoute({
   component: RequestsPanel,
 });
 
+const errorsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/errors",
+  component: ErrorsPanel,
+});
+
 const tagsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/tags",
@@ -117,6 +124,7 @@ const routeTree = rootRoute.addChildren([
     providerRoute,
     tagsRoute,
     requestsRoute,
+    errorsRoute,
     apiKeysRoute,
   ]),
 ]);

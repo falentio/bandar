@@ -1,4 +1,12 @@
 import type { DuckDb } from "../duck/client";
+import {
+  isCoolingDown,
+  recordFailure,
+  recordSuccess,
+  subjectFor,
+  subjectKey,
+  type Subject,
+} from "../health";
 import { definitionFor, type ProviderDeps } from "../providers";
 import { freshCredential } from "../providers/refresh";
 import { recordRequest, type RequestEventInput, type RequestOutcome } from "./record";
@@ -50,12 +58,21 @@ type Outcome = {
   durationMs: number;
 };
 
+type AttemptPlan = {
+  readonly attempts: readonly ResolvedAttempt[];
+  suppressed(attempt: ResolvedAttempt): boolean;
+  failed(attempt: ResolvedAttempt, kind: UpstreamErrorKind, now: Date): void;
+  succeeded(attempt: ResolvedAttempt): void;
+};
+
 const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
   "auth",
   "rate_limit",
+  "not_found",
   "unavailable",
   "protocol",
   "network",
+  "unknown",
 ]);
 
 export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Response> {
@@ -71,24 +88,29 @@ export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Respons
   const id = `chatcmpl-${crypto.randomUUID()}`;
   const created = Math.floor(startedAt.getTime() / 1000);
   const start = performance.now();
+  const attempts = attemptPlan(deps.providers, plan, input.userId, startedAt);
 
-  if (!input.stream) return complete(deps, input, plan, id, created);
+  if (!input.stream) return complete(deps, input, plan, attempts, id, created);
 
-  return streamResponse(deps, { input, plan, id, created, start });
+  return streamResponse(deps, { input, plan, attempts, id, created, start });
 }
 
 async function complete(
   deps: ChatDeps,
   input: ChatInput,
   plan: ResolvedPlan,
+  attempts: AttemptPlan,
   id: string,
   created: number,
 ): Promise<Response> {
-  for (const [index, attempt] of plan.attempts.entries()) {
+  let lastFailure: UpstreamError | null = null;
+
+  for (const attempt of attempts.attempts) {
+    if (attempts.suppressed(attempt)) continue;
+
     const startedAt = new Date();
     const started = performance.now();
     const base = eventBase(input, plan.ref, attempt, startedAt);
-    const last = index === plan.attempts.length - 1;
 
     try {
       const target = await targetOf(deps.providers, attempt);
@@ -98,6 +120,8 @@ async function complete(
         request: input.request,
         signal: input.signal,
       });
+
+      attempts.succeeded(attempt);
 
       const response = completionResponse({ id, created, model: plan.ref, result });
 
@@ -116,7 +140,7 @@ async function complete(
       const failed =
         error instanceof Error
           ? failureOf(error)
-          : new UpstreamError("unexpected upstream failure", "network");
+          : new UpstreamError("unexpected upstream failure", "unknown");
 
       const aborted = input.signal.aborted;
 
@@ -130,15 +154,27 @@ async function complete(
         durationMs: performance.now() - started,
       });
 
-      if (aborted || last || !RETRYABLE.has(failed.kind)) {
-        return openAiError(
-          aborted ? 400 : statusFor(failed),
-          aborted ? "request aborted" : failed.message,
-          aborted ? "aborted" : failed.kind,
-          "upstream_error",
-        );
+      if (aborted) {
+        return openAiError(400, "request aborted", "aborted", "upstream_error");
       }
+
+      attempts.failed(attempt, failed.kind, new Date());
+
+      if (!RETRYABLE.has(failed.kind)) {
+        return openAiError(statusFor(failed), failed.message, failed.kind, "upstream_error");
+      }
+
+      lastFailure = failed;
     }
+  }
+
+  if (lastFailure !== null) {
+    return openAiError(
+      statusFor(lastFailure),
+      lastFailure.message,
+      lastFailure.kind,
+      "upstream_error",
+    );
   }
 
   return openAiError(502, "no upstream answered", "unavailable", "upstream_error");
@@ -147,13 +183,14 @@ async function complete(
 type StreamInput = {
   readonly input: ChatInput;
   readonly plan: ResolvedPlan;
+  readonly attempts: AttemptPlan;
   readonly id: string;
   readonly created: number;
   readonly start: number;
 };
 
 function streamResponse(deps: ChatDeps, context: StreamInput): Response {
-  const { input, plan } = context;
+  const { input, plan, attempts } = context;
   const abort = new AbortController();
   const onAbort = () => abort.abort();
   const detach = () => input.signal.removeEventListener("abort", onAbort);
@@ -183,11 +220,14 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         close();
       };
 
-      for (const [index, attempt] of plan.attempts.entries()) {
+      let lastFailure: UpstreamError | null = null;
+
+      for (const attempt of attempts.attempts) {
+        if (attempts.suppressed(attempt)) continue;
+
         const startedAt = new Date();
         const started = performance.now();
         const base = eventBase(input, plan.ref, attempt, startedAt);
-        const last = index === plan.attempts.length - 1;
 
         let chunksSent = 0;
         let roleSent = false;
@@ -276,6 +316,8 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
           send("data: [DONE]\n\n");
           close();
 
+          attempts.succeeded(attempt);
+
           recordSafe(deps, base, {
             status: "success",
             httpStatus: 200,
@@ -291,7 +333,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
           const failed =
             error instanceof Error
               ? failureOf(error)
-              : new UpstreamError("unexpected upstream failure", "network");
+              : new UpstreamError("unexpected upstream failure", "unknown");
 
           const aborted = abort.signal.aborted;
 
@@ -311,12 +353,22 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             return;
           }
 
-          if (chunksSent > 0 || last || !RETRYABLE.has(failed.kind)) {
+          attempts.failed(attempt, failed.kind, new Date());
+
+          if (chunksSent > 0 || !RETRYABLE.has(failed.kind)) {
             fail(failed.message, failed.kind);
 
             return;
           }
+
+          lastFailure = failed;
         }
+      }
+
+      if (lastFailure !== null) {
+        fail(lastFailure.message, lastFailure.kind);
+
+        return;
       }
 
       fail("no upstream answered", "unavailable");
@@ -335,6 +387,109 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
       connection: "keep-alive",
     },
   });
+}
+
+function attemptPlan(
+  providers: ProviderDeps,
+  plan: ResolvedPlan,
+  userId: string,
+  startedAt: Date,
+): AttemptPlan {
+  const attempts = plan.attempts;
+  const now = startedAt.getTime();
+  const cooling = new Set<string>();
+  let probe = true;
+
+  for (const attempt of attempts) {
+    let skippable = false;
+
+    for (const subject of subjectsOf(attempt)) {
+      if (isCoolingDown(flaggedUntilOf(attempt, subject), now)) {
+        cooling.add(subjectKey(subject));
+        skippable = true;
+      }
+    }
+
+    if (!skippable) probe = false;
+  }
+
+  return {
+    attempts,
+    suppressed: (attempt) =>
+      !probe && subjectsOf(attempt).some((subject) => cooling.has(subjectKey(subject))),
+    failed: (attempt, kind, at) => {
+      const subject = subjectFor(kind, {
+        providerId: attempt.providerId,
+        modelId: attempt.modelId,
+        credentialId: attempt.credentialId,
+      });
+
+      if (subject === null) return;
+
+      try {
+        recordFailure(providers.db, {
+          subject,
+          context: {
+            userId,
+            reference: plan.ref,
+            errorKind: kind,
+            providerId: attempt.providerId,
+            providerName: attempt.providerName,
+            modelId: attempt.modelId,
+            modelAlias: attempt.alias,
+            credentialId: attempt.credentialId,
+            credentialName: attempt.credentialId === null ? null : attempt.credentialLabel,
+          },
+          now: at,
+        });
+      } catch (error) {
+        console.error("gateway: could not record upstream failure", error);
+      }
+
+      cooling.add(subjectKey(subject));
+    },
+    succeeded: (attempt) => {
+      try {
+        recordSuccess(providers.db, subjectsOf(attempt));
+      } catch (error) {
+        console.error("gateway: could not clear upstream health", error);
+      }
+    },
+  };
+}
+
+function subjectsOf(attempt: ResolvedAttempt): readonly Subject[] {
+  const subjects: Subject[] = [
+    { kind: "provider", id: attempt.providerId },
+    { kind: "model", id: attempt.modelId },
+  ];
+
+  if (attempt.credentialId !== null)
+    subjects.push({ kind: "credential", id: attempt.credentialId });
+
+  return subjects;
+}
+
+function flaggedUntilOf(attempt: ResolvedAttempt, subject: Subject): Date | null {
+  switch (subject.kind) {
+    case "provider": {
+      return attempt.providerFlaggedUntil;
+    }
+
+    case "model": {
+      return attempt.modelFlaggedUntil;
+    }
+
+    case "credential": {
+      return attempt.credentialFlaggedUntil;
+    }
+
+    default: {
+      const _exhaustive: never = subject;
+
+      return _exhaustive;
+    }
+  }
 }
 
 async function targetOf(
@@ -393,7 +548,7 @@ function recordSafe(deps: ChatDeps, base: EventBase, outcome: Outcome): void {
 function failureOf(error: Error | UpstreamError): UpstreamError {
   if (error instanceof UpstreamError) return error;
 
-  return new UpstreamError(error.message, "network");
+  return new UpstreamError(error.message, "unknown");
 }
 
 function statusFor(error: UpstreamError): number {
@@ -402,10 +557,13 @@ function statusFor(error: UpstreamError): number {
       return 429;
     case "invalid_request":
       return 400;
+    case "not_found":
+      return 404;
     case "auth":
     case "unavailable":
     case "protocol":
     case "network":
+    case "unknown":
       return 502;
     default: {
       const _exhaustive: never = error.kind;

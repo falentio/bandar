@@ -164,7 +164,9 @@ in range, and a file that is not JSON all fail the boot, and the message names t
 and the field. A typo never falls back to a default.
 
 An environment variable wins over the file, and the file wins over the default. A blank
-environment variable counts as unset.
+environment variable counts as unset. The dev proxy in `vite.config.ts` takes the API port
+from `BANDAR_PORT` rather than the file, so set that variable too when you change
+`server.port` and run `bun run dev`.
 
 `bandar` reads the file on every start, so a restart applies an edit. A service unit
 outranks the file only when `bandar install-service` was given `--port`. Read

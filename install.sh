@@ -96,6 +96,25 @@ manifest_path_field() {
   sed -n 's/.*"path":"\(.*\)"}\([[:space:]]*\n\?\)*$/\1/p' "$1" 2>/dev/null | tail -n 1
 }
 
+# The directory a new install falls back to when /usr/local/bin is out of reach.
+per_user_dir() {
+  if [ -n "${XDG_BIN_HOME:-}" ]; then
+    printf '%s' "$XDG_BIN_HOME"
+  elif [ -n "${HOME:-}" ]; then
+    printf '%s' "${HOME}/.local/bin"
+  fi
+}
+
+# The directory a manifest names, resolved through any symlink so it compares to a path the
+# installer already canonicalized.
+absolute_dir() {
+  if [ -n "$1" ] && [ -d "$1" ]; then
+    (cd "$1" && pwd -P)
+  else
+    printf '%s' "$1"
+  fi
+}
+
 # The directory the user's shell reads at startup, in the order the shell reads them.
 shell_profile() {
   case ${SHELL##*/} in
@@ -237,8 +256,9 @@ else
 fi
 
 # "bandar update" replaces whatever path this config directory's manifest already names, so a
-# recording of this same binary is followed before the default is chosen. Every other recording is
-# refused below rather than shadowed, and BANDAR_INSTALL_DIR is the deliberate way to move one.
+# recording that names this binary in the per-user fallback is followed before the default is
+# chosen. Every other recording is refused below rather than shadowed, and BANDAR_INSTALL_DIR is the
+# deliberate way to move one.
 configured=
 
 if [ -n "${BANDAR_INSTALL_DIR+given}" ]; then
@@ -250,18 +270,28 @@ if [ -z "$configured" ]; then
   recorded=$(manifest_path_field "$config_dir/install.json" || true)
 fi
 
+if [ -n "$recorded" ]; then
+  recorded=$(absolute_dir "${recorded%/*}")/${recorded##*/}
+fi
+
 install_dir=${configured:-}
+
+if [ -z "$install_dir" ] && [ -n "$recorded" ]; then
+  fallback=$(absolute_dir "$(per_user_dir)")
+
+  if [ -n "$fallback" ] && [ "$recorded" = "$fallback/$binary" ]; then
+    install_dir=$fallback
+  fi
+fi
 
 if [ -z "$install_dir" ]; then
   install_dir=/usr/local/bin
 
   if [ ! -d "$install_dir" ] || [ ! -w "$install_dir" ]; then
-    install_dir=${XDG_BIN_HOME:-}
+    install_dir=$(per_user_dir)
+
     if [ -z "$install_dir" ]; then
-      if [ -z "${HOME:-}" ]; then
-        die "cannot write to /usr/local/bin and HOME is unset; set BANDAR_INSTALL_DIR"
-      fi
-      install_dir=$HOME/.local/bin
+      die "cannot write to /usr/local/bin and HOME is unset; set BANDAR_INSTALL_DIR"
     fi
   fi
 fi

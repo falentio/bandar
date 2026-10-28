@@ -17,13 +17,23 @@ import { detectInstall } from "./install-source";
 
 const COMMAND = "update";
 const REPOSITORY = "falentio/bandar";
-const DEFAULT_API_BASE = "https://api.github.com";
+const PUBLIC_WEB = `https://github.com/${REPOSITORY}`;
 const INSTALLER = "install.sh from https://github.com/falentio/bandar";
-const TOKEN_REQUIRED = "bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN";
-const TRUSTED_ASSET_HOSTS = ["api.github.com", "github.com"];
+
+const TOKEN_REQUIRED =
+  "BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN";
+
+const TRUSTED_ASSET_HOSTS = [
+  "api.github.com",
+  "github.com",
+  "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
+];
+
 const TOKEN_VARIABLES = ["BANDAR_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
 const CHECKSUM_PREFIX = /^([0-9a-fA-F]{64})(?:\s|$)/u;
 const VERSION_TEXT = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
+const TAG_PATH = /\/releases\/tag\/([^/]+)\/?$/u;
 
 const RELEASE_OS = new Map([
   ["linux", "linux"],
@@ -47,19 +57,17 @@ const ReleaseSchema = v.object({
 
 type ReleaseAsset = v.InferOutput<typeof ReleaseAssetSchema>;
 
-type Release = {
-  readonly version: string;
-  readonly assets: readonly ReleaseAsset[];
-};
-
 export type HttpResponse = {
   readonly status: number;
   readonly body: Uint8Array;
+  /** The Location header, which only a caller that asked not to follow redirects can read. */
+  readonly location?: string | null;
 };
 
 export type HttpSend = (
   url: string,
   headers: Readonly<Record<string, string>>,
+  redirect?: "follow" | "manual",
 ) => Promise<HttpResponse>;
 
 export type UpdateFlags = {
@@ -95,13 +103,19 @@ type ParsedVersion = {
   readonly prerelease: string | null;
 };
 
-type ReleaseLookup =
-  | { readonly kind: "release"; readonly release: Release }
-  | { readonly kind: "absent" }
-  | { readonly kind: "failed"; readonly reason: string };
-
 type Download =
   | { readonly kind: "bytes"; readonly bytes: Uint8Array }
+  | { readonly kind: "failed"; readonly reason: string };
+
+/** One published release, and the only two things an installer needs from it. */
+type LatestRelease = {
+  readonly version: string;
+  readonly fetchAsset: (name: string) => Promise<Download>;
+};
+
+type LatestLookup =
+  | { readonly kind: "latest"; readonly release: LatestRelease }
+  | { readonly kind: "absent" }
   | { readonly kind: "failed"; readonly reason: string };
 
 type Prepared =
@@ -157,15 +171,61 @@ export function githubToken(env: Env): string | null {
   return null;
 }
 
-export function apiBase(env: Env): string {
-  const override = env.BANDAR_UPDATE_URL?.trim();
+/** The GitHub web origin the anonymous download reads. A mirror can stand in for it offline. */
+export function releaseWebUrl(env: Env): string {
+  const override = env.BANDAR_RELEASE_WEB_URL?.trim();
 
-  // The override exists so a stub server can stand in for GitHub on an offline host and in tests.
-  return override !== undefined && override !== "" ? override : DEFAULT_API_BASE;
+  return override !== undefined && override !== "" ? override : PUBLIC_WEB;
 }
 
-export function latestReleaseUrl(base: string): string {
-  return `${base.replace(/\/+$/u, "")}/repos/${REPOSITORY}/releases/latest`;
+/**
+ * The latest-release API feed of a private fork. Setting it is what opts into the token flow; a
+ * public download never reads it, so a public install never needs a credential.
+ */
+export function releaseApiUrl(env: Env): string | null {
+  const override = env.BANDAR_RELEASE_API_URL?.trim();
+
+  return override !== undefined && override !== "" ? override : null;
+}
+
+export function latestTagUrl(web: string): string {
+  return `${trimTrailingSlashes(web)}/releases/latest`;
+}
+
+export function releaseAssetUrl(web: string, version: string, name: string): string {
+  return `${trimTrailingSlashes(web)}/releases/download/v${version}/${name}`;
+}
+
+/** The version in a `/releases/tag/v<version>` redirect, which is how the latest tag is read. */
+export function versionFromTagLocation(
+  location: string | null | undefined,
+  requested: string,
+): string | null {
+  if (location === null || location === undefined || location.trim() === "") return null;
+
+  let url: URL;
+
+  try {
+    url = new URL(location.trim(), requested);
+  } catch {
+    return null;
+  }
+
+  const raw = TAG_PATH.exec(url.pathname)?.[1];
+
+  if (raw === undefined) return null;
+
+  let tag: string;
+
+  try {
+    tag = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+
+  const version = tag.replace(/^v/u, "");
+
+  return VERSION_TEXT.test(version) ? version : null;
 }
 
 export function releaseNames(version: string, platform: string, arch: string): ReleaseNames | null {
@@ -249,22 +309,12 @@ export function register(commands: Commands): void {
 }
 
 async function reportVersions(run: UpdateRun): Promise<number> {
-  const token = githubToken(run.env);
-
   run.stdout(`installed ${run.installed}`);
 
-  if (token === null) {
-    run.stdout("latest unknown");
-    run.stdout("unknown");
-    run.stderr(TOKEN_REQUIRED);
-
-    return 1;
-  }
-
-  const lookup = await lookupLatest(run.send, token, apiBase(run.env));
+  const lookup = await lookupLatest(run);
 
   if (lookup.kind === "absent") {
-    // A private repository answers 404 for its own missing release, which is a normal state.
+    // A repository with no published release is a normal state, not a failure to read the feed.
     run.stdout("latest unknown");
     run.stdout("unknown");
 
@@ -274,7 +324,7 @@ async function reportVersions(run: UpdateRun): Promise<number> {
   if (lookup.kind === "failed") {
     run.stdout("latest unknown");
     run.stdout("unknown");
-    run.stderr(`bandar: could not read the release feed: ${lookup.reason}`);
+    run.stderr(`bandar: ${lookup.reason}`);
 
     return 1;
   }
@@ -318,21 +368,8 @@ async function update(run: UpdateRun, archive: string | null): Promise<number> {
     return 1;
   }
 
-  let prepared: Prepared;
-
-  if (archive === null) {
-    const token = githubToken(run.env);
-
-    if (token === null) {
-      run.stderr(TOKEN_REQUIRED);
-
-      return 1;
-    }
-
-    prepared = await prepareFromRelease(run, token, target);
-  } else {
-    prepared = prepareFromArchive(archive, target);
-  }
+  const prepared =
+    archive === null ? await prepareFromRelease(run, target) : prepareFromArchive(archive, target);
 
   if (prepared.kind === "stopped") {
     run.stdout(prepared.message);
@@ -369,21 +406,22 @@ async function update(run: UpdateRun, archive: string | null): Promise<number> {
   return 0;
 }
 
-async function prepareFromRelease(
-  run: UpdateRun,
-  token: string,
-  target: string,
-): Promise<Prepared> {
-  const base = apiBase(run.env);
-  const lookup = await lookupLatest(run.send, token, base);
+async function prepareFromRelease(run: UpdateRun, target: string): Promise<Prepared> {
+  const lookup = await lookupLatest(run);
 
   if (lookup.kind === "absent")
     return { kind: "failed", reason: `${REPOSITORY} has no published release yet` };
 
-  if (lookup.kind === "failed")
-    return { kind: "failed", reason: `could not read the latest release: ${lookup.reason}` };
+  if (lookup.kind === "failed") return { kind: "failed", reason: lookup.reason };
 
-  const release = lookup.release;
+  return installLatest(run, lookup.release, target);
+}
+
+async function installLatest(
+  run: UpdateRun,
+  release: LatestRelease,
+  target: string,
+): Promise<Prepared> {
   const relation = compareVersions(run.installed, release.version);
 
   if (relation === "same") {
@@ -413,30 +451,17 @@ async function prepareFromRelease(
     };
   }
 
-  const asset = release.assets.find((candidate) => candidate.name === names.asset);
-  const checksum = release.assets.find((candidate) => candidate.name === names.checksum);
-
-  if (asset === undefined || checksum === undefined) {
-    return {
-      kind: "failed",
-      reason: `release ${release.version} has no ${names.asset} with its ${names.checksum}`,
-    };
-  }
-
-  const binary = await download(run.send, token, asset.url, base);
+  const binary = await release.fetchAsset(names.asset);
 
   if (binary.kind === "failed")
     return { kind: "failed", reason: `could not download ${names.asset}: ${binary.reason}` };
 
-  const checksumText = await download(run.send, token, checksum.url, base);
+  const checksum = await release.fetchAsset(names.checksum);
 
-  if (checksumText.kind === "failed")
-    return {
-      kind: "failed",
-      reason: `could not download ${names.checksum}: ${checksumText.reason}`,
-    };
+  if (checksum.kind === "failed")
+    return { kind: "failed", reason: `could not download ${names.checksum}: ${checksum.reason}` };
 
-  const expected = parseChecksum(new TextDecoder().decode(checksumText.bytes));
+  const expected = parseChecksum(new TextDecoder().decode(checksum.bytes));
 
   if (expected === null)
     return { kind: "failed", reason: `${names.checksum} does not hold a sha256 digest` };
@@ -447,6 +472,182 @@ async function prepareFromRelease(
     expected,
     message: `bandar ${release.version} installed at ${target}`,
   };
+}
+
+/** Reads the latest version without a credential, or through the API feed when one is configured. */
+async function lookupLatest(run: UpdateRun): Promise<LatestLookup> {
+  const api = releaseApiUrl(run.env);
+
+  if (api !== null) {
+    const token = githubToken(run.env);
+
+    if (token === null) return { kind: "failed", reason: TOKEN_REQUIRED };
+
+    return lookupApiLatest(run.send, token, api);
+  }
+
+  return lookupPublicLatest(run.send, releaseWebUrl(run.env));
+}
+
+async function lookupPublicLatest(send: HttpSend, web: string): Promise<LatestLookup> {
+  const url = latestTagUrl(web);
+  let response: HttpResponse;
+
+  try {
+    // The tag is in the Location header of a 302, so this is a page request: no API, no hourly
+    // rate limit, no credential. Following it would download the release page itself for nothing.
+    response = await send(url, { "User-Agent": "bandar-update" }, "manual");
+  } catch (error) {
+    return {
+      kind: "failed",
+      reason: `could not read the release feed: ${error instanceof Error ? error.message : "the request failed"}`,
+    };
+  }
+
+  if (response.status === 404) return { kind: "absent" };
+
+  if (response.status < 300 || response.status >= 400)
+    return {
+      kind: "failed",
+      reason: `the release page answered HTTP ${String(response.status)}, not a redirect to the latest tag`,
+    };
+
+  const version = versionFromTagLocation(response.location, url);
+
+  if (version === null)
+    return {
+      kind: "failed",
+      reason: `the release page redirected to ${response.location ?? "no Location header"}, which is not a version tag`,
+    };
+
+  return {
+    kind: "latest",
+    release: { version, fetchAsset: (name) => downloadPublic(send, web, version, name) },
+  };
+}
+
+async function lookupApiLatest(send: HttpSend, token: string, feed: string): Promise<LatestLookup> {
+  let response: HttpResponse;
+
+  try {
+    response = await send(feed, {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "bandar-update",
+    });
+  } catch (error) {
+    return {
+      kind: "failed",
+      reason: `could not read the release feed: ${error instanceof Error ? error.message : "the request failed"}`,
+    };
+  }
+
+  if (response.status === 404) return { kind: "absent" };
+
+  if (response.status !== 200)
+    return { kind: "failed", reason: `the release feed answered HTTP ${String(response.status)}` };
+
+  const decoded = decodeRelease(new TextDecoder().decode(response.body));
+
+  if (decoded.kind === "failed") return decoded;
+
+  const { version, assets } = decoded;
+
+  return {
+    kind: "latest",
+    release: {
+      version,
+      fetchAsset: (name) => downloadApi(send, token, assets, version, name, feed),
+    },
+  };
+}
+
+type DecodedRelease =
+  | { readonly kind: "ok"; readonly version: string; readonly assets: readonly ReleaseAsset[] }
+  | { readonly kind: "failed"; readonly reason: string };
+
+function decodeRelease(text: string): DecodedRelease {
+  const parsed = v.safeParse(v.pipe(v.string(), v.parseJson(), ReleaseSchema), text);
+
+  if (!parsed.success) {
+    const issue = parsed.issues[0];
+
+    return {
+      kind: "failed",
+      reason: `the release feed sent an unexpected body (${issue?.message ?? "no detail"})`,
+    };
+  }
+
+  const version = parsed.output.tag_name.replace(/^v/u, "");
+
+  if (!VERSION_TEXT.test(version))
+    return { kind: "failed", reason: `the release tag ${parsed.output.tag_name} is not a version` };
+
+  return { kind: "ok", version, assets: parsed.output.assets };
+}
+
+async function downloadPublic(
+  send: HttpSend,
+  web: string,
+  version: string,
+  name: string,
+): Promise<Download> {
+  try {
+    // github.com answers the asset with a redirect to release-assets.githubusercontent.com, which
+    // fetch follows; the bytes land here with no credential anywhere in the request.
+    const response = await send(releaseAssetUrl(web, version, name), {
+      "User-Agent": "bandar-update",
+    });
+
+    if (response.status !== 200)
+      return { kind: "failed", reason: `HTTP ${String(response.status)}` };
+
+    return { kind: "bytes", bytes: response.body };
+  } catch (error) {
+    return {
+      kind: "failed",
+      reason: error instanceof Error ? error.message : "the request failed",
+    };
+  }
+}
+
+async function downloadApi(
+  send: HttpSend,
+  token: string,
+  assets: readonly ReleaseAsset[],
+  version: string,
+  name: string,
+  feed: string,
+): Promise<Download> {
+  const asset = assets.find((candidate) => candidate.name === name);
+
+  if (asset === undefined)
+    return { kind: "failed", reason: `release ${version} publishes no ${name} asset` };
+
+  if (!assetHostAllowed(asset.url, feed))
+    return {
+      kind: "failed",
+      reason: `${hostOf(asset.url) ?? "an unparsable url"} is not an allowed asset host, so bandar will not send its token there`,
+    };
+
+  try {
+    // The API asset url answers JSON unless the request asks for the octet stream.
+    const response = await send(asset.url, {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/octet-stream",
+      "User-Agent": "bandar-update",
+    });
+
+    if (response.status !== 200)
+      return { kind: "failed", reason: `HTTP ${String(response.status)}` };
+
+    return { kind: "bytes", bytes: response.body };
+  } catch (error) {
+    return {
+      kind: "failed",
+      reason: error instanceof Error ? error.message : "the request failed",
+    };
+  }
 }
 
 function prepareFromArchive(archive: string, target: string): Prepared {
@@ -520,89 +721,22 @@ export function assetHostAllowed(url: string, base: string): boolean {
   return TRUSTED_ASSET_HOSTS.includes(host) || host === hostOf(base);
 }
 
-async function lookupLatest(send: HttpSend, token: string, base: string): Promise<ReleaseLookup> {
-  let response: HttpResponse;
-
-  try {
-    response = await send(latestReleaseUrl(base), {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "bandar-update",
-    });
-  } catch (error) {
-    return {
-      kind: "failed",
-      reason: error instanceof Error ? error.message : "the release feed could not be reached",
-    };
-  }
-
-  if (response.status === 404) return { kind: "absent" };
-
-  if (response.status !== 200)
-    return { kind: "failed", reason: `the release feed answered HTTP ${String(response.status)}` };
-
-  return decodeRelease(new TextDecoder().decode(response.body));
-}
-
-function decodeRelease(text: string): ReleaseLookup {
-  const parsed = v.safeParse(v.pipe(v.string(), v.parseJson(), ReleaseSchema), text);
-
-  if (!parsed.success) {
-    const issue = parsed.issues[0];
-
-    return {
-      kind: "failed",
-      reason: `the release feed sent an unexpected body (${issue?.message ?? "no detail"})`,
-    };
-  }
-
-  const version = parsed.output.tag_name.replace(/^v/u, "");
-
-  if (!VERSION_TEXT.test(version))
-    return { kind: "failed", reason: `the release tag ${parsed.output.tag_name} is not a version` };
-
-  return { kind: "release", release: { version, assets: parsed.output.assets } };
-}
-
-async function download(
-  send: HttpSend,
-  token: string,
-  url: string,
-  base: string,
-): Promise<Download> {
-  if (!assetHostAllowed(url, base))
-    return {
-      kind: "failed",
-      reason: `${hostOf(url) ?? "an unparsable url"} is not an allowed asset host, so bandar will not send its token there`,
-    };
-
-  try {
-    // The asset URL answers JSON unless the request asks for the octet stream.
-    const response = await send(url, {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/octet-stream",
-      "User-Agent": "bandar-update",
-    });
-
-    if (response.status !== 200)
-      return { kind: "failed", reason: `HTTP ${String(response.status)}` };
-
-    return { kind: "bytes", bytes: response.body };
-  } catch (error) {
-    return {
-      kind: "failed",
-      reason: error instanceof Error ? error.message : "the download failed",
-    };
-  }
-}
-
 async function sendRequest(
   url: string,
   headers: Readonly<Record<string, string>>,
+  redirect: "follow" | "manual" = "follow",
 ): Promise<HttpResponse> {
-  const response = await fetch(url, { headers, redirect: "follow" });
+  const response = await fetch(url, { headers, redirect });
 
-  return { status: response.status, body: new Uint8Array(await response.arrayBuffer()) };
+  return {
+    status: response.status,
+    body: new Uint8Array(await response.arrayBuffer()),
+    location: response.headers.get("location"),
+  };
+}
+
+function trimTrailingSlashes(url: string): string {
+  return url.replace(/\/+$/u, "");
 }
 
 function canWriteDirectory(directory: string): boolean {

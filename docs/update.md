@@ -1,7 +1,9 @@
 # Updating bandar
 
 `bandar update` replaces the running binary with the latest GitHub release. The repository is
-private, so the command reads the release feed through the GitHub API with a token.
+public, so the command reads the latest tag from a GitHub page redirect and downloads the assets
+anonymously; no token is involved. A private fork opts into the API route, and only that route
+reads a token.
 
 ## Commands
 
@@ -11,19 +13,44 @@ private, so the command reads the release feed through the GitHub API with a tok
 | `bandar update --check`          | Print the installed version, the latest version, and one of `up-to-date`, `update-available`, `unknown`. Writes nothing. |
 | `bandar update --archive <path>` | Install from a local file, with the same verify and rename path. The file `<path>.sha256` must sit next to it.           |
 
-## Token
+## How the latest version is resolved
 
-The command reads a token from `BANDAR_GITHUB_TOKEN`, then `GH_TOKEN`, then `GITHUB_TOKEN`. The
-token travels in an `Authorization` header and nowhere else: not in a URL, a log line, or the
-argument list. The header goes only to a host the command already trusts: `api.github.com`,
-`github.com`, or the host of `BANDAR_UPDATE_URL`. An asset url that names any other host is
-refused, unread, so a release feed cannot redirect the token.
+`bandar update` requests `https://github.com/falentio/bandar/releases/latest` without following
+the redirect, and reads the version out of the `Location` header, such as
+`.../releases/tag/v0.1.0`. That is a page request, not an API call, so it needs no credential and
+does not spend the 60-per-hour API rate limit.
 
-Without a token the command cannot tell a private repository's 404 from a missing release, so it
-prints `bandar: a GitHub token is required: set BANDAR_GITHUB_TOKEN` and exits 1. With a token, a
-404 means the repository has no published release yet, which `--check` reports as `unknown` with
-exit 0. Any other failure to read the feed, such as a 500 or a malformed body, also reports
-`unknown` and exits 1, so the state never hides an error.
+It then downloads
+
+```text
+https://github.com/falentio/bandar/releases/download/v<version>/<asset>
+https://github.com/falentio/bandar/releases/download/v<version>/<asset>.sha256
+```
+
+with no `Authorization` header. GitHub redirects the asset to
+`release-assets.githubusercontent.com`; the command follows that redirect. A 404 on the release
+page means the repository has no published release, which `--check` reports as `unknown` with
+exit 0.
+
+## A private fork, with a token
+
+Set `BANDAR_RELEASE_API_URL` to the latest-release JSON of the fork, and set a token; the API
+route replaces the anonymous one:
+
+```sh
+BANDAR_RELEASE_API_URL=https://api.github.com/repos/you/bandar/releases/latest \
+BANDAR_GITHUB_TOKEN="$TOKEN" bandar update
+```
+
+Setting the API URL without a token exits 1 with
+`bandar: BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN`
+and sends no request.
+
+The token is read from `BANDAR_GITHUB_TOKEN`, then `GH_TOKEN`, then `GITHUB_TOKEN`. It travels
+in an `Authorization` header and nowhere else: not in a URL, a log line, or the argument list.
+The header goes only to a host the command already trusts: `api.github.com`, `github.com`, the
+public asset hosts, or the host of `BANDAR_RELEASE_API_URL`. An asset url that names any other
+host is refused, unread, so a release feed cannot redirect the token.
 
 ## Install source
 
@@ -57,7 +84,7 @@ byte-identical, exits 1, and leaves no temporary file behind.
 Windows locks a running executable, so `bandar update` cannot replace its own image. The rename
 fails, the command removes its temporary file, exits 1, and says so:
 
-```
+```text
 bandar: Windows locks a running executable, so bandar cannot replace C:\bandar\bandar.exe from inside itself; close bandar, then run the installer again or replace C:\bandar\bandar.exe with the release download
 ```
 
@@ -70,7 +97,7 @@ way; nothing is written either time.
 A target directory the current user cannot write prints the command to run with the privilege it
 needs, and exits 1 without writing:
 
-```
+```text
 bandar: cannot write /usr/local/bin; run "sudo bandar update" to replace /usr/local/bin/bandar
 ```
 
@@ -78,7 +105,7 @@ bandar: cannot write /usr/local/bin; run "sudo bandar update" to replace /usr/lo
 
 The release workflow publishes, per platform:
 
-```
+```text
 bandar-<version>-<os>-<arch>[.exe]
 bandar-<version>-<os>-<arch>[.exe].sha256
 ```
@@ -88,23 +115,26 @@ line, `<hex>  <filename>`. Other platforms are refused by name.
 
 ## Environment
 
-| Variable                                          | Effect                                                                                       |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `BANDAR_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | Token for the release feed, in that order.                                                   |
-| `BANDAR_UPDATE_URL`                               | Replaces `https://api.github.com` as the API base, for an offline stub or a registry mirror. |
-| `BANDAR_CONFIG_DIR`                               | Directory holding `install.json`. Must be absolute.                                          |
+| Variable                                          | Effect                                                                                                                                         |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BANDAR_RELEASE_WEB_URL`                          | Replaces `https://github.com/falentio/bandar` as the origin for the release page and the downloads, for a mirror or an offline stub. No token. |
+| `BANDAR_RELEASE_API_URL`                          | Latest-release JSON of a private fork. Setting it selects the API route, which needs a token.                                                  |
+| `BANDAR_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | Token for that fork, in that order. Never read by the public route.                                                                            |
+| `BANDAR_CONFIG_DIR`                               | Directory holding `install.json`. Must be absolute.                                                                                            |
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                                                                                     |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Up to date, updated, or a `--check` report of `up-to-date`, `update-available`, or `unknown` for a repository with no published release.                                                                    |
-| 1    | No token, no published release to install, unknown install source, unwritable target, foreign asset host, failed download, checksum mismatch, a feed that cannot be read, or a rename the platform refuses. |
-| 2    | Unknown option.                                                                                                                                                                                             |
+| Code | Meaning                                                                                                                                                                                                                                 |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Up to date, updated, or a `--check` report of `up-to-date`, `update-available`, or `unknown` for a repository with no published release.                                                                                                |
+| 1    | A private-fork API URL with no token, no published release to install, unknown install source, unwritable target, foreign asset host, failed download, checksum mismatch, a feed that cannot be read, or a rename the platform refuses. |
+| 2    | Unknown option.                                                                                                                                                                                                                         |
 
 ## Tests
 
 `scripts/update-test.sh` runs the command against a loopback stub release feed in a temporary
-directory. It covers the happy path, a checksum mismatch, a foreign asset host, an unknown install source, a
-same-version no-op, `--check`, `--archive`, a missing token, and an unwritable target. It never reaches the
-network. `src/server/cli/update.test.ts` covers the same behavior without a filesystem where it can.
+directory. It covers the anonymous happy path, the private-fork override, an API URL without a
+token, a checksum mismatch, a foreign asset host, an unknown install source, a same-version no-op,
+`--check` with and without a published release, `--archive`, and an unwritable target. It never
+reaches the network. `src/server/cli/update.test.ts` covers the same behavior without a filesystem
+where it can.

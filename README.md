@@ -38,6 +38,14 @@ from a catalog import. The adapter contract is text-only and says so.
 
 ## Quickstart
 
+Install the released binary, anonymously:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | sh
+```
+
+Or run it from a source checkout:
+
 ```sh
 bun install          # fetches the DuckDB library and generates embedded modules
 BANDAR_AUTH_URL=http://localhost:5173 bun run dev   # client :5173, API :3000

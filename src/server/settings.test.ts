@@ -61,7 +61,9 @@ describe("settings", () => {
   });
 
   test("an unknown key is invalid at either level", () => {
-    expect(reasonOf(readSettings(home, readerOf('{"nope":true}')))).toContain("nope");
+    expect(reasonOf(readSettings(home, readerOf('{"nope":true}')))).toMatch(
+      /^nope: Invalid key\b/u,
+    );
     expect(
       reasonOf(readSettings(home, readerOf('{"server":{"host":"127.0.0.1","proxied":true}}'))),
     ).toContain("server.proxied");

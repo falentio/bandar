@@ -156,42 +156,62 @@ function buildConfig(
 
   const values = parsed.output;
   const server = settings.server;
-  const host = values.BANDAR_HOST ?? server?.host ?? DEFAULT_HOST;
-  const port = values.BANDAR_PORT ?? server?.port ?? DEFAULT_API_PORT;
-  const authUrl = values.BANDAR_AUTH_URL ?? server?.authUrl ?? `http://localhost:${port}`;
 
   const environmentOrigins =
     values.BANDAR_TRUSTED_ORIGINS === undefined
       ? undefined
       : parseOrigins(values.BANDAR_TRUSTED_ORIGINS);
 
+  const host = resolve(values.BANDAR_HOST, server?.host, DEFAULT_HOST);
+  const port = resolve(values.BANDAR_PORT, server?.port, DEFAULT_API_PORT);
+
+  const authUrl = resolve(
+    values.BANDAR_AUTH_URL,
+    server?.authUrl,
+    `http://localhost:${port.value}`,
+  );
+
+  const trustedOrigins = resolve(
+    environmentOrigins,
+    server?.trustedOrigins,
+    defaultTrustedOrigins(authUrl.value, host.value, port.value, mode),
+  );
+
   return {
     config: {
-      host,
-      port,
+      host: host.value,
+      port: port.value,
       databasePath: join(home, DATABASE_FILE),
       duckdbPath: join(home, DUCKDB_FILE),
       configDir: values.BANDAR_CONFIG_DIR,
-      authUrl,
+      authUrl: authUrl.value,
       authSecret: values.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
-      trustedOrigins:
-        environmentOrigins ??
-        server?.trustedOrigins ??
-        defaultTrustedOrigins(authUrl, host, port, mode),
+      trustedOrigins: trustedOrigins.value,
     },
     sources: {
-      host: sourceOf(values.BANDAR_HOST, server?.host),
-      port: sourceOf(values.BANDAR_PORT, server?.port),
-      authUrl: sourceOf(values.BANDAR_AUTH_URL, server?.authUrl),
-      trustedOrigins: sourceOf(environmentOrigins, server?.trustedOrigins),
+      host: host.source,
+      port: port.source,
+      authUrl: authUrl.source,
+      trustedOrigins: trustedOrigins.source,
     },
   };
 }
 
-function sourceOf<T>(environment: T | undefined, file: T | undefined): ConfigSource {
-  if (environment !== undefined) return "environment";
+type Resolved<T> = {
+  readonly value: T;
+  readonly source: ConfigSource;
+};
 
-  return file === undefined ? "default" : "config";
+/**
+ * The one place the three tiers are ordered: the environment, then the settings file, then the
+ * built-in default. Each tier returns its own label beside the value it supplied.
+ */
+function resolve<T>(environment: T | undefined, file: T | undefined, fallback: T): Resolved<T> {
+  if (environment !== undefined) return { value: environment, source: "environment" };
+
+  if (file !== undefined) return { value: file, source: "config" };
+
+  return { value: fallback, source: "default" };
 }
 
 /**

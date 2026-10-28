@@ -162,6 +162,26 @@ describe("the config command", () => {
     });
   });
 
+  test("several environment issues print on one line, separated", async () => {
+    const { code, stderr } = await run(["config"], {
+      BANDAR_PORT: "99999",
+      BANDAR_AUTH_URL: "not-a-url",
+      BANDAR_KILOCODE_API: "bad",
+    });
+
+    expect(code).toBe(1);
+    expect(stderr).toHaveLength(1);
+
+    const [line] = stderr;
+
+    expect(line).toContain("invalid environment: ");
+    expect(line).toContain("BANDAR_PORT: ");
+    expect(line).toContain("; BANDAR_AUTH_URL: ");
+    expect(line).toContain("; BANDAR_KILOCODE_API: ");
+    expect(line).not.toContain("\n");
+    expect(line).not.toContain("99999 BANDAR_AUTH_URL");
+  });
+
   test("an invalid file exits 1, naming the path and the field", async () => {
     write({ port: 70000 });
 

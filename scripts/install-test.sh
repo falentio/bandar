@@ -262,6 +262,7 @@ printf '%s\n' "$VERSION" >"$STUB/latest"
 
 RUN_STATUS=0
 RUN_OUTPUT=
+FLAGS=
 
 # The anonymous path: no token, and the web override points every request at the stub.
 run_install() {
@@ -274,7 +275,7 @@ run_install() {
     TMPDIR="$case_dir/tmp" BANDAR_INSTALL_DIR="$case_dir/bin" \
     BANDAR_CONFIG_DIR="$case_dir/config" \
     BANDAR_RELEASE_WEB_URL="$base" \
-    "$@" sh "$INSTALLER" 2>&1) || RUN_STATUS=$?
+    "$@" sh "$INSTALLER" $FLAGS 2>&1) || RUN_STATUS=$?
 }
 
 run_piped() {
@@ -290,6 +291,19 @@ run_piped() {
     BANDAR_CONFIG_DIR="$case_dir/config" \
     BANDAR_RELEASE_WEB_URL="$base" \
     "$@" sh 2>&1) || RUN_STATUS=$?
+}
+
+# The unconfigured path: no BANDAR_INSTALL_DIR, so the script picks the directory itself.
+run_default() {
+  case_dir=$1
+  shift
+
+  RUN_STATUS=0
+  RUN_OUTPUT=$(env -u BANDAR_INSTALL_DIR BANDAR_VERSION= BANDAR_SCOPE= BANDAR_SERVICE_TIMEOUT= \
+    BANDAR_GITHUB_TOKEN= GH_TOKEN= GITHUB_TOKEN= BANDAR_RELEASE_API_URL= \
+    TMPDIR="$case_dir/tmp" BANDAR_CONFIG_DIR="$case_dir/config" \
+    BANDAR_RELEASE_WEB_URL="$base" \
+    "$@" sh "$INSTALLER" $FLAGS 2>&1) || RUN_STATUS=$?
 }
 
 # The private-fork path: the API feed is selected, so a token is required and sent.
@@ -669,7 +683,8 @@ if [ "$(id -u)" -eq 0 ]; then
 else
   run_install "$case_dir" BANDAR_INSTALL_DIR="$case_dir/bin"
   expect_status "readonly target: exits 1" 1
-  expect_contains "readonly target: prints the sudo command" "rerun with sudo:"
+  expect_contains "readonly target: offers sudo and an owned directory" \
+    "rerun with sudo, or install into a directory you own:"
   expect_contains "readonly target: names the install dir" "sudo BANDAR_INSTALL_DIR=\"$case_dir/bin\""
   expect_missing "readonly target: installs nothing" "$case_dir/bin/$binary"
 fi
@@ -812,6 +827,144 @@ for tag_version in 1.2.3 1.2.3-rc.1 1.2.3+build.5; do
     "$tag_version" "$case_dir/bin/$binary"
 done
 printf '%s\n' "$VERSION" >"$STUB/latest"
+
+printf '\ncase: the default directory without root\n'
+case_dir=$WORK/default-dir
+mkdir -p "$case_dir/config" "$case_dir/tmp" "$case_dir/home"
+if [ "$(id -u)" -eq 0 ] || [ -w /usr/local/bin ]; then
+  printf 'skip default dir: /usr/local/bin is writable here, so the fallback never runs\n'
+else
+  run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/sh
+  expect_status "default dir: exits 0 without root" 0
+  expect_installed "default dir: installs into ~/.local/bin" "$case_dir/home/.local/bin/$binary"
+  expect_manifest "default dir: records the per-user path" "$case_dir/config/install.json" \
+    "$VERSION" "$case_dir/home/.local/bin/$binary"
+  expect_contains "default dir: says the directory is not on PATH" "is not on PATH"
+  expect_contains "default dir: prints the one line that fixes it" \
+    'export PATH="'$case_dir'/home/.local/bin:$PATH"'
+  if [ "$(cat "$case_dir/home/.local/bin/$binary" 2>/dev/null | head -c 2)" = "#!" ]; then
+    pass "default dir: stores the released bytes"
+  else
+    fail "default dir: stores the released bytes" "unexpected binary contents"
+  fi
+fi
+
+printf '\ncase: XDG_BIN_HOME names the fallback directory\n'
+case_dir=$WORK/xdg-bin
+mkdir -p "$case_dir/config" "$case_dir/tmp" "$case_dir/home"
+if [ "$(id -u)" -eq 0 ] || [ -w /usr/local/bin ]; then
+  printf 'skip xdg bin: /usr/local/bin is writable here, so the fallback never runs\n'
+else
+  run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/sh XDG_BIN_HOME="$case_dir/home/custom-bin"
+  expect_status "xdg bin: exits 0" 0
+  expect_installed "xdg bin: installs into XDG_BIN_HOME" "$case_dir/home/custom-bin/$binary"
+  expect_manifest "xdg bin: records the XDG path" "$case_dir/config/install.json" \
+    "$VERSION" "$case_dir/home/custom-bin/$binary"
+fi
+
+printf '\ncase: an existing install keeps its directory\n'
+case_dir=$WORK/recorded
+mkdir -p "$case_dir/config" "$case_dir/tmp" "$case_dir/home/.local/bin"
+printf '{"source":"install-script","version":"0.0.1","path":"%s"}\n' \
+  "$case_dir/home/.local/bin/$binary" >"$case_dir/config/install.json"
+run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/sh
+expect_status "recorded: exits 0" 0
+expect_installed "recorded: replaces the binary the manifest names" "$case_dir/home/.local/bin/$binary"
+expect_manifest "recorded: keeps the recorded path" "$case_dir/config/install.json" \
+  "$VERSION" "$case_dir/home/.local/bin/$binary"
+
+printf '\ncase: a manifest that names a directory outside the default\n'
+case_dir=$WORK/recorded-elsewhere
+mkdir -p "$case_dir/old/bin" "$case_dir/config" "$case_dir/tmp" "$case_dir/home"
+printf '{"source":"install-script","version":"0.0.1","path":"%s"}\n' \
+  "$case_dir/old/bin/$binary" >"$case_dir/config/install.json"
+cp "$case_dir/config/install.json" "$WORK/recorded-elsewhere.expected"
+run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/sh
+expect_status "recorded elsewhere: exits 1" 1
+expect_contains "recorded elsewhere: names the path the manifest holds" "$case_dir/old/bin/$binary"
+expect_contains "recorded elsewhere: names the override that replaces it" \
+  "BANDAR_INSTALL_DIR=$case_dir/old/bin"
+expect_missing "recorded elsewhere: installs nothing in the default directory" \
+  "$case_dir/home/.local/bin/$binary"
+if cmp -s "$case_dir/config/install.json" "$WORK/recorded-elsewhere.expected"; then
+  pass "recorded elsewhere: leaves the manifest byte for byte"
+else
+  fail "recorded elsewhere: leaves the manifest byte for byte" "$(cat "$case_dir/config/install.json")"
+fi
+
+printf '\ncase: PATH is updated in the shell profile\n'
+case_dir=$WORK/path-append
+mkdir -p "$case_dir/config" "$case_dir/tmp" "$case_dir/home"
+if [ "$(id -u)" -eq 0 ] || [ -w /usr/local/bin ]; then
+  printf 'skip path append: /usr/local/bin is writable here, so the fallback never runs\n'
+else
+  printf '# my zshrc\n' >"$case_dir/home/.zshrc"
+  run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/zsh
+  expect_status "path append: exits 0" 0
+  expect_contains "path append: reports the profile it wrote" "added $case_dir/home/.local/bin to PATH in $case_dir/home/.zshrc"
+  expect_contains "path append: tells the user to reload" 'run "exec \$SHELL"'
+  if grep -Fqx "export PATH=\"$case_dir/home/.local/bin:\$PATH\"" "$case_dir/home/.zshrc"; then
+    pass "path append: writes the export line"
+  else
+    fail "path append: writes the export line" "$(cat "$case_dir/home/.zshrc")"
+  fi
+  if grep -Fqx "# bandar: $case_dir/home/.local/bin on PATH" "$case_dir/home/.zshrc"; then
+    pass "path append: writes the marker comment"
+  else
+    fail "path append: writes the marker comment" "$(cat "$case_dir/home/.zshrc")"
+  fi
+  run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/zsh
+  expect_status "path append: a second run exits 0" 0
+  expect_contains "path append: a second run says the export is already there" "is already exported from"
+  if [ "$(grep -Fc "export PATH=\"$case_dir/home/.local/bin:\$PATH\"" "$case_dir/home/.zshrc")" -eq 1 ]; then
+    pass "path append: is idempotent"
+  else
+    fail "path append: is idempotent" "$(cat "$case_dir/home/.zshrc")"
+  fi
+
+  printf '\ncase: --no-modify-path leaves the profile alone\n'
+  case_dir=$WORK/path-skip
+  mkdir -p "$case_dir/config" "$case_dir/tmp" "$case_dir/home"
+  printf '# my zshrc\n' >"$case_dir/home/.zshrc"
+  cp "$case_dir/home/.zshrc" "$WORK/path-skip.expected"
+  FLAGS=--no-modify-path
+  run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/zsh
+  FLAGS=
+  expect_status "no-modify-path: exits 0" 0
+  expect_installed "no-modify-path: still installs the binary" "$case_dir/home/.local/bin/$binary"
+  if cmp -s "$case_dir/home/.zshrc" "$WORK/path-skip.expected"; then
+    pass "no-modify-path: leaves the profile byte for byte"
+  else
+    fail "no-modify-path: leaves the profile byte for byte" "$(cat "$case_dir/home/.zshrc")"
+  fi
+  expect_absent "no-modify-path: prints nothing about PATH" "not on PATH"
+
+  printf '\ncase: --no-modify-path survives the sudo hint\n'
+  case_dir=$WORK/path-hint
+  mkdir -p "$case_dir/bin" "$case_dir/config" "$case_dir/tmp" "$case_dir/home"
+  chmod 500 "$case_dir/bin"
+  FLAGS=--no-modify-path
+  run_install "$case_dir" BANDAR_INSTALL_DIR="$case_dir/bin"
+  FLAGS=
+  expect_status "no-modify-path hint: exits 1 on an unwritable target" 1
+  expect_contains "no-modify-path hint: carries the flag into the sudo command" "--no-modify-path"
+  chmod 700 "$case_dir/bin"
+fi
+
+printf '\ncase: a profile the installer cannot write\n'
+case_dir=$WORK/path-unwritable
+mkdir -p "$case_dir/config" "$case_dir/tmp" "$case_dir/home"
+if [ "$(id -u)" -eq 0 ] || [ -w /usr/local/bin ]; then
+  printf 'skip unwritable profile: /usr/local/bin is writable here, so the fallback never runs\n'
+else
+  printf '# my zshrc\n' >"$case_dir/home/.zshrc"
+  chmod 500 "$case_dir/home/.zshrc"
+  run_default "$case_dir" HOME="$case_dir/home" SHELL=/bin/zsh
+  expect_status "unwritable profile: still exits 0" 0
+  expect_installed "unwritable profile: still installs the binary" "$case_dir/home/.local/bin/$binary"
+  expect_contains "unwritable profile: prints the line to add by hand" "add this line to your shell profile yourself"
+  chmod 700 "$case_dir/home/.zshrc"
+fi
 
 printf '\n%s checks, %s failed\n' "$checks" "$failures"
 

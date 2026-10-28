@@ -13,9 +13,28 @@ one through `BANDAR_RELEASE_API_URL`.
 curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | sh
 ```
 
-The default target is `/usr/local/bin`, which usually needs root. To install into your own
-directory, export it first, because a variable on the right of the pipe is the one that reaches
-`sh`:
+No sudo is needed. The target directory is chosen in this order:
+
+1. `BANDAR_INSTALL_DIR`, when it is set.
+2. The directory `install.json` already records, when that record is still this binary in the
+   directory chosen below. An upgrade replaces the binary `bandar update` already knows about
+   instead of starting a second copy.
+3. `/usr/local/bin`, when it exists and is writable.
+4. `$XDG_BIN_HOME`, when it is set.
+5. `$HOME/.local/bin`, created when missing.
+
+So a normal user lands in `~/.local/bin` and never needs root. When that directory is not on
+`PATH`, the installer says so and adds one `export` line to the shell profile it finds for
+`$SHELL` (`~/.zshrc` for zsh, `~/.bashrc` for bash, `~/.config/fish/config.fish` for fish).
+Pass `--no-modify-path` to leave every profile alone and get the line printed for you to place
+yourself:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | sh -s -- --no-modify-path
+```
+
+To choose the directory yourself, export it on the right of the pipe, because that is the side that
+reaches `sh`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh \
@@ -26,6 +45,7 @@ From a checkout, run the script directly:
 
 ```sh
 ./install.sh
+./install.sh --no-modify-path
 ```
 
 ## How the installer reaches the release
@@ -105,25 +125,26 @@ one `bandar update` can never replace. When the manifest cannot be written, the 
 and leaves no new binary. When the binary cannot be moved into place, the installer restores the
 previous manifest and exits 1.
 
-Nothing is written outside those two directories, and the installer never calls sudo.
+Nothing is written outside those two directories, and the installer never calls sudo. The one
+exception is the `PATH` line described above, which `--no-modify-path` turns off.
 
 `BANDAR_CONFIG_DIR` must be an absolute path, the same rule the server applies at boot. A
 relative or blank value exits 1 before anything is downloaded.
 
 ## Environment variables
 
-| Variable                 | Default                              | Meaning                                                                                                       |
-| ------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `BANDAR_VERSION`         | the latest release                   | Version to install. A leading `v` is allowed.                                                                 |
-| `BANDAR_INSTALL_DIR`     | `/usr/local/bin`                     | Directory that receives the binary. Created when missing.                                                     |
-| `BANDAR_SCOPE`           | unset                                | `user` or `system`. After the install, run `bandar install-service --scope <scope>`.                          |
-| `BANDAR_CONFIG_DIR`      | `~/.config/bandar`                   | Directory that receives `install.json`. Must be absolute.                                                     |
-| `BANDAR_SERVICE_TIMEOUT` | `30`                                 | Seconds the service step may run before the installer gives up and exits 0.                                   |
-| `BANDAR_RELEASE_WEB_URL` | `https://github.com/falentio/bandar` | Origin that serves the release page and the downloads, for a mirror or a test server. Needs no token.         |
-| `BANDAR_RELEASE_API_URL` | unset                                | Latest-release JSON of a private fork. Setting it selects the API route, which needs a token.                 |
-| `BANDAR_GITHUB_TOKEN`    | unset                                | Token for the fork selected by `BANDAR_RELEASE_API_URL`, highest precedence. A public install never reads it. |
-| `GH_TOKEN`               | unset                                | Same token, read when `BANDAR_GITHUB_TOKEN` is unset.                                                         |
-| `GITHUB_TOKEN`           | unset                                | Same token, read when neither of the others is set.                                                           |
+| Variable                 | Default                                           | Meaning                                                                                                       |
+| ------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `BANDAR_VERSION`         | the latest release                                | Version to install. A leading `v` is allowed.                                                                 |
+| `BANDAR_INSTALL_DIR`     | see [the target directory](#the-target-directory) | Directory that receives the binary. Created when missing.                                                     |
+| `BANDAR_SCOPE`           | unset                                             | `user` or `system`. After the install, run `bandar install-service --scope <scope>`.                          |
+| `BANDAR_CONFIG_DIR`      | `~/.config/bandar`                                | Directory that receives `install.json`. Must be absolute.                                                     |
+| `BANDAR_SERVICE_TIMEOUT` | `30`                                              | Seconds the service step may run before the installer gives up and exits 0.                                   |
+| `BANDAR_RELEASE_WEB_URL` | `https://github.com/falentio/bandar`              | Origin that serves the release page and the downloads, for a mirror or a test server. Needs no token.         |
+| `BANDAR_RELEASE_API_URL` | unset                                             | Latest-release JSON of a private fork. Setting it selects the API route, which needs a token.                 |
+| `BANDAR_GITHUB_TOKEN`    | unset                                             | Token for the fork selected by `BANDAR_RELEASE_API_URL`, highest precedence. A public install never reads it. |
+| `GH_TOKEN`               | unset                                             | Same token, read when `BANDAR_GITHUB_TOKEN` is unset.                                                         |
+| `GITHUB_TOKEN`           | unset                                             | Same token, read when neither of the others is set.                                                           |
 
 The platform pair comes from `uname`. Any pair other than Linux or Windows on x64 or arm64 exits 1
 with one line before anything is downloaded.
@@ -144,17 +165,60 @@ sha256sum -c "bandar-$version-linux-x64.sha256"
 On macOS, where `sha256sum` is absent, use `shasum -a 256 -c`. The installer accepts either tool
 and refuses to install when it finds neither.
 
-## When `/usr/local/bin` is not writable
+## The target directory
 
-The installer prints the command to rerun and exits 1 without writing the binary:
+A normal user never needs sudo. The first directory that applies wins:
+
+1. `BANDAR_INSTALL_DIR`, when it is set, even when it is not writable: the installer then exits 1
+   rather than quietly installing somewhere else.
+2. The directory `install.json` already records, when it is still on `PATH` or is the chosen
+   fallback. A rerun replaces the binary the manifest names instead of leaving a stale copy behind
+   that `bandar update` can no longer reach.
+3. `/usr/local/bin`, when it exists and is writable.
+4. `$XDG_BIN_HOME`, when it is set.
+5. `$HOME/.local/bin`, created when missing.
+
+A manifest that points at a third directory, one neither `BANDAR_INSTALL_DIR` nor the fallback
+names, exits 1 with the path and the `BANDAR_INSTALL_DIR` that replaces it. A silent second install
+would leave two binaries, and only the recorded one self-updates. Remove `install.json` to start a
+fresh install in the default directory.
+
+When the chosen directory is still not writable, the installer exits 1 without writing anything and
+names both ways out:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh \
-  | sudo BANDAR_INSTALL_DIR="/usr/local/bin" BANDAR_CONFIG_DIR="$HOME/.config/bandar" sh
+sudo BANDAR_INSTALL_DIR="/usr/local/bin" BANDAR_CONFIG_DIR="$HOME/.config/bandar" sh
 ```
 
 Pass `BANDAR_CONFIG_DIR` through `sudo` as well. `sudo` sets `HOME` to root's, so a default
-config path would otherwise record the install for root instead of for you.
+config path would otherwise record the install for root instead of for you. A system install stays
+root-owned, so `bandar update` still has to be run under `sudo` afterwards. The per-user default
+avoids that entirely.
+
+## PATH
+
+A per-user install lands outside the default `PATH` on most systems. After installing, the
+installer checks whether `$PATH` already contains the directory. When it does not, it finds the
+startup file for `$SHELL` and appends one line, guarded by a marker comment so a second run does
+not add it twice:
+
+```sh
+# bandar: /home/you/.local/bin on PATH
+export PATH="/home/you/.local/bin:$PATH"
+```
+
+It handles `zsh`, `bash`, and `fish`, and creates the main startup file when none exists yet, as
+on a fresh macOS account. `XDG_CONFIG_HOME` is respected. Any other shell, or a profile the
+installer cannot write, gets the line printed instead, and the install still exits 0.
+
+`--no-modify-path` skips the profile edit entirely and only ever prints the line:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | sh -s -- --no-modify-path
+```
+
+A shell started before the edit keeps the old `PATH`; `exec $SHELL` or a new terminal picks the
+new one up.
 
 ## Register the service
 

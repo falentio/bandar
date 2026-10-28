@@ -19,7 +19,8 @@ Install a released bandar binary. The repository is public, so no token is neede
 
 Environment:
   BANDAR_VERSION           Version to install, such as 0.1.0. Default: the latest release.
-  BANDAR_INSTALL_DIR       Directory that receives the binary. Default: /usr/local/bin
+  BANDAR_INSTALL_DIR       Directory that receives the binary. Default: /usr/local/bin when it is
+                           writable, else $XDG_BIN_HOME, else ~/.local/bin.
   BANDAR_SCOPE             user or system: also register the service. Default: unset, no service step.
   BANDAR_CONFIG_DIR        Directory that receives install.json. Default: ~/.config/bandar.
                            Must be an absolute path.
@@ -36,14 +37,21 @@ Docs: docs/install.md
 EOF
 }
 
-case ${1:-} in
-  -h | --help)
-    usage
-    exit 0
-    ;;
-  '') ;;
-  *) die "install.sh takes no arguments, got '$1'; see --help" ;;
-esac
+modify_path=1
+
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --no-modify-path)
+      modify_path=0
+      shift
+      ;;
+    *) die "install.sh takes no arguments, got '$1'; see --help" ;;
+  esac
+done
 
 raw_os=$(uname -s)
 raw_arch=$(uname -m)
@@ -70,12 +78,144 @@ case $arch in
   *) die "no release for $os-$arch: bandar ships x64 and arm64 binaries" ;;
 esac
 
+binary=bandar
+if [ "$os" = windows ]; then
+  binary=bandar.exe
+fi
+
 scope=${BANDAR_SCOPE:-}
 
 case $scope in
   '' | user | system) ;;
   *) die "BANDAR_SCOPE must be user or system, got '$scope'" ;;
 esac
+
+# install.sh is the only writer of install.json, so the shape is known here: the source and version
+# never hold a raw quote, and the path is the last field. The last three characters are always "}.
+manifest_path_field() {
+  sed -n 's/.*"path":"\(.*\)"}\([[:space:]]*\n\?\)*$/\1/p' "$1" 2>/dev/null | tail -n 1
+}
+
+# The directory the user's shell reads at startup, in the order the shell reads them.
+shell_profile() {
+  case ${SHELL##*/} in
+    zsh)
+      printf '%s\n' "${ZDOTDIR:-${HOME:-}}/.zshrc"
+      printf '%s\n' "${XDG_CONFIG_HOME:-${HOME:-}/.config}/zsh/.zshrc"
+      ;;
+    bash)
+      printf '%s\n' "${HOME:-}/.bashrc"
+      printf '%s\n' "${XDG_CONFIG_HOME:-${HOME:-}/.config}/bash/.bashrc"
+      ;;
+    fish)
+      printf '%s\n' "${XDG_CONFIG_HOME:-${HOME:-}/.config}/fish/config.fish"
+      ;;
+    *) ;;
+  esac
+}
+
+# Appends the export once, then says so. Prints a line to stdout and exits 0 either way, because a
+# PATH the installer cannot set is the user's call to make, not a failed install.
+add_to_path() {
+  shell_config=$1
+  export_line="export PATH=\"$install_dir:\$PATH\""
+  marker="# bandar: $install_dir on PATH"
+
+  if grep -Fqx "$export_line" "$shell_config" 2>/dev/null; then
+    printf 'bandar: %s is already exported from %s\n' "$install_dir" "$shell_config"
+
+    return 0
+  fi
+
+  if ! printf '\n%s\n%s\n' "$marker" "$export_line" >>"$shell_config" 2>/dev/null; then
+    printf 'bandar: cannot write %s; add this line to your shell profile yourself:\n  %s\n' \
+      "$shell_config" "$export_line"
+
+    return 0
+  fi
+
+  printf 'bandar: added %s to PATH in %s\n' "$install_dir" "$shell_config"
+  printf 'bandar: run "exec \$SHELL" or open a new terminal to use the new PATH\n'
+}
+
+# The whole point of the per-user default is a directory the user can replace later, so an
+# installed-but-off-PATH binary is reported with the one line that fixes it.
+report_path() {
+  if [ "$modify_path" -eq 0 ]; then
+    return 0
+  fi
+
+  case :${PATH:-}: in
+    *":$install_dir:"*) return 0 ;;
+  esac
+
+  for candidate in $(shell_profile); do
+    if [ -f "$candidate" ]; then
+      add_to_path "$candidate"
+
+      return 0
+    fi
+  done
+
+  if [ -n "${SHELL##*/}" ] && [ "${SHELL##*/}" != sh ] && [ -n "${HOME:-}" ]; then
+    case ${SHELL##*/} in
+      zsh | bash | fish)
+        main_config=$(shell_profile | head -n 1)
+        if mkdir -p "${main_config%/*}" 2>/dev/null && : >>"$main_config" 2>/dev/null; then
+          add_to_path "$main_config"
+
+          return 0
+        fi
+        ;;
+    esac
+  fi
+
+  printf 'bandar: %s is not on PATH; add it with:\n  export PATH="%s:$PATH"\n' \
+    "$install_dir" "$install_dir"
+}
+
+run_in_place() {
+  [ -f "$0" ] || return 1
+
+  case $0 in
+    sh | bash | dash | ash | ksh | zsh) return 1 ;;
+  esac
+
+  return 0
+}
+
+sudo_hint() {
+  hint="sudo BANDAR_INSTALL_DIR=\"$install_dir\" BANDAR_CONFIG_DIR=\"$config_dir\""
+
+  if [ -n "${BANDAR_VERSION:-}" ]; then
+    hint="$hint BANDAR_VERSION=\"$BANDAR_VERSION\""
+  fi
+
+  if [ -n "$scope" ]; then
+    hint="$hint BANDAR_SCOPE=\"$scope\""
+  fi
+
+  if [ -n "$api" ]; then
+    hint="$hint BANDAR_RELEASE_API_URL=\"$api\" BANDAR_GITHUB_TOKEN=\"...\""
+  fi
+
+  if [ "$modify_path" -eq 0 ]; then
+    hint="$hint --no-modify-path"
+  fi
+
+  if run_in_place; then
+    printf '%s sh "%s"' "$hint" "$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+  else
+    printf 'curl -fsSL %s | %s sh' "$RAW_INSTALLER" "$hint"
+  fi
+}
+
+# A token is only ever read for the private fork that BANDAR_RELEASE_API_URL names.
+token=${BANDAR_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}
+api=${BANDAR_RELEASE_API_URL:-}
+web=${BANDAR_RELEASE_WEB_URL:-https://github.com/$REPO}
+web=${web%/}
+latest_release_page=$web/releases/latest
 
 # The same rule the server applies at boot: a config directory has to be absolute, because the
 # manifest it holds is what "bandar update" resolves the installed binary through.
@@ -96,7 +236,61 @@ else
   config_dir=$HOME/.config/bandar
 fi
 
-install_dir=${BANDAR_INSTALL_DIR:-/usr/local/bin}
+# "bandar update" replaces whatever path this config directory's manifest already names, so a
+# recording of this same binary is followed before the default is chosen. Every other recording is
+# refused below rather than shadowed, and BANDAR_INSTALL_DIR is the deliberate way to move one.
+configured=
+
+if [ -n "${BANDAR_INSTALL_DIR+given}" ]; then
+  configured=${BANDAR_INSTALL_DIR}
+fi
+
+recorded=
+if [ -z "$configured" ]; then
+  recorded=$(manifest_path_field "$config_dir/install.json" || true)
+fi
+
+install_dir=${configured:-}
+
+if [ -z "$install_dir" ]; then
+  install_dir=/usr/local/bin
+
+  if [ ! -d "$install_dir" ] || [ ! -w "$install_dir" ]; then
+    install_dir=${XDG_BIN_HOME:-}
+    if [ -z "$install_dir" ]; then
+      if [ -z "${HOME:-}" ]; then
+        die "cannot write to /usr/local/bin and HOME is unset; set BANDAR_INSTALL_DIR"
+      fi
+      install_dir=$HOME/.local/bin
+    fi
+  fi
+fi
+
+if [ -z "$install_dir" ]; then
+  die "BANDAR_INSTALL_DIR is set but blank; unset it or name a directory"
+fi
+
+if [ ! -d "$install_dir" ]; then
+  mkdir -p "$install_dir" 2>/dev/null || true
+fi
+
+if [ ! -d "$install_dir" ] || [ ! -w "$install_dir" ]; then
+  if [ "$(id -u)" -eq 0 ]; then
+    die "cannot write to $install_dir"
+  fi
+  printf 'bandar: %s is not writable\n' "$install_dir" >&2
+  printf 'rerun with sudo, or install into a directory you own:\n  %s\n' "$(sudo_hint)" >&2
+  exit 1
+fi
+
+install_dir=$(cd "$install_dir" && pwd -P)
+
+# A recorded path is only taken over when it is still this one binary in a directory the user
+# can replace. The per-user fallback is the sanctioned home for a new install, so a manifest that
+# names anything else is left where it is rather than shadowed by a second binary here.
+if [ -z "$configured" ] && [ -n "$recorded" ] && [ "$recorded" != "$install_dir/$binary" ]; then
+  die "install.json already points at $recorded; set BANDAR_INSTALL_DIR=${recorded%/*} to replace it, or remove $config_dir/install.json to start a fresh install"
+fi
 
 if command -v sha256sum >/dev/null 2>&1; then
   hasher=sha256sum
@@ -147,63 +341,9 @@ run_with_timeout() {
   return "$timeout_status"
 }
 
-run_in_place() {
-  [ -f "$0" ] || return 1
-
-  case $0 in
-    sh | bash | dash | ash | ksh | zsh) return 1 ;;
-  esac
-
-  return 0
-}
-
-sudo_hint() {
-  hint="sudo BANDAR_INSTALL_DIR=\"$install_dir\" BANDAR_CONFIG_DIR=\"$config_dir\""
-
-  if [ -n "${BANDAR_VERSION:-}" ]; then
-    hint="$hint BANDAR_VERSION=\"$BANDAR_VERSION\""
-  fi
-
-  if [ -n "$scope" ]; then
-    hint="$hint BANDAR_SCOPE=\"$scope\""
-  fi
-
-  if [ -n "$api" ]; then
-    hint="$hint BANDAR_RELEASE_API_URL=\"$api\" BANDAR_GITHUB_TOKEN=\"...\""
-  fi
-
-  if run_in_place; then
-    printf '%s sh "%s"' "$hint" "$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
-  else
-    printf 'curl -fsSL %s | %s sh' "$RAW_INSTALLER" "$hint"
-  fi
-}
-
-# A token is only ever read for the private fork that BANDAR_RELEASE_API_URL names.
-token=${BANDAR_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}
-api=${BANDAR_RELEASE_API_URL:-}
-web=${BANDAR_RELEASE_WEB_URL:-https://github.com/$REPO}
-web=${web%/}
-latest_release_page=$web/releases/latest
-
 if [ -n "$api" ] && [ -z "$token" ]; then
   die "BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN"
 fi
-
-if [ ! -d "$install_dir" ]; then
-  mkdir -p "$install_dir" 2>/dev/null || true
-fi
-
-if [ ! -d "$install_dir" ] || [ ! -w "$install_dir" ]; then
-  if [ "$(id -u)" -eq 0 ]; then
-    die "cannot write to $install_dir"
-  fi
-  printf 'bandar: %s is not writable\n' "$install_dir" >&2
-  printf 'rerun with sudo:\n  %s\n' "$(sudo_hint)" >&2
-  exit 1
-fi
-
-install_dir=$(cd "$install_dir" && pwd -P)
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/bandar-install.XXXXXX") || die "cannot create a temp directory"
 
@@ -510,6 +650,7 @@ mv -f "$staged" "$target" || {
 
 if [ -z "$scope" ]; then
   printf 'bandar: installed %s to %s\n' "$version" "$target"
+  report_path
   exit 0
 fi
 
@@ -520,9 +661,11 @@ esac
 
 if run_with_timeout "$service_timeout" "$target" install-service --scope "$scope"; then
   printf 'bandar: installed %s to %s with the %s service registered\n' "$version" "$target" "$scope"
+  report_path
   exit 0
 fi
 
 printf 'bandar: installed %s to %s; skipped the service step because install-service is missing or failed\n' \
   "$version" "$target"
+report_path
 exit 0

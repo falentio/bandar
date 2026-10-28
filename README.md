@@ -61,11 +61,19 @@ curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | s
 ```
 
 The installer downloads the asset for your platform, checks its published sha256, and
-moves the binary to `/usr/local/bin`. It records the install in
-`~/.config/bandar/install.json`, which `bandar update` reads later. The repository is
-public, so no token is needed.
+moves the binary into place. It records the install in `~/.config/bandar/install.json`,
+which `bandar update` reads later. The repository is public, so no token is needed, and
+no sudo is needed either: `/usr/local/bin` is used when it is writable, and otherwise the
+binary lands in `$XDG_BIN_HOME` or `~/.local/bin`.
 
-To install into your own directory, export it on the right of the pipe, because that
+When that directory is not on `PATH`, the installer appends one `export` line to your
+shell's startup file. Pass `--no-modify-path` to have it printed instead:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh | sh -s -- --no-modify-path
+```
+
+To choose the directory yourself, export it on the right of the pipe, because that
 is the side that reaches `sh`:
 
 ```sh

@@ -20,8 +20,11 @@ export type View = (typeof views)[number];
 
 export type ViewPath = View["to"];
 
+// The model row harness is a scratch page inside the app shell, not a workspace view.
+const HARNESS_PATHS = ["/harness/model-row"] as const;
+
 export function isViewPath(path: string): path is ViewPath {
-  return views.some((view) => view.to === path);
+  return views.some((view) => view.to === path) || HARNESS_PATHS.some((p) => p === path);
 }
 
 export function activeView(path: string): View | undefined {

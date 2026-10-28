@@ -14,6 +14,7 @@ import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
 import { ErrorsPanel } from "./components/errors-panel";
 import { OverviewPanel } from "./components/overview-panel";
+import { ModelRowHarness } from "./components/model-row-harness";
 import { isProviderTab, ProviderPage } from "./components/provider-page";
 import { ProvidersPanel } from "./components/providers-panel";
 import { RequestsPanel } from "./components/requests-panel";
@@ -91,6 +92,12 @@ const providerRoute = createRoute({
   component: ProviderDetailRoute,
 });
 
+const harnessRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/harness/model-row",
+  component: ModelRowHarness,
+});
+
 const requestsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/requests",
@@ -122,6 +129,7 @@ const routeTree = rootRoute.addChildren([
     overviewRoute,
     providersRoute,
     providerRoute,
+    harnessRoute,
     tagsRoute,
     requestsRoute,
     errorsRoute,

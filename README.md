@@ -152,6 +152,7 @@ for a system one.
 
 ```json
 {
+  "$schema": "./config.schema.json",
   "server": {
     "host": "0.0.0.0",
     "port": 3000,
@@ -176,6 +177,12 @@ object, an empty host, a port that is not a whole number in range, an empty
 file that is not JSON all fail the boot, and the message names the file and the field. A
 typo never falls back to a default.
 
+`bandar` writes `config.schema.json` beside the settings on every read, and adds
+`"$schema": "./config.schema.json"` to a `config.json` that lacks the key, so an editor
+completes and checks the file offline. The schema is generated from the running binary, so
+it cannot lag it, and a `$schema` you wrote yourself is left alone. Neither write is
+required: a data directory that is not writable only costs the editor completion.
+
 The default trusted origins start with the auth URL's own origin. They then follow the
 resolved port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
 `http://<host>:<port>` when `server.host` names an address rather than `0.0.0.0` or
@@ -193,7 +200,8 @@ and the browser's origin check agree with that one key, and `server.trustedOrigi
 for extra origins only. `authSecret` is not a settings key: the data directory is
 world-readable, while the service env file is mode 600.
 
-Run `bandar config` to print the file it read and where each value came from:
+Run `bandar config` to write the schema, point the file at it, and print what it
+resolved and where each value came from:
 
 ```text
 settings        /home/andrew/.bandar/config.json (found)

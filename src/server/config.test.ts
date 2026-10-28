@@ -1,7 +1,12 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import { ConfigError, parseConfig } from "./config";
+import { ConfigError, detectRunMode, parseConfig } from "./config";
+
+const MODE_HOMES = [
+  ["development", ".bandar_dev"],
+  ["production", ".bandar"],
+] as const;
 
 describe("config", () => {
   test("a provider origin that is not a URL fails at boot", () => {
@@ -49,26 +54,42 @@ describe("config", () => {
       expect(attempt).toThrow("BANDAR_CONFIG_DIR: must be an absolute path");
     }
   });
-  test("BANDAR_HOME defaults the databases under the home directory", () => {
-    const config = parseConfig({});
 
-    expect(config.databasePath).toBe(join(homedir(), ".bandar", "bandar.db"));
-    expect(config.duckdbPath).toBe(join(homedir(), ".bandar", "bandar.duckdb"));
+  test("BANDAR_HOME defaults both databases under the run mode's home directory", () => {
+    for (const [mode, directory] of MODE_HOMES) {
+      const config = parseConfig({}, mode);
+
+      expect(config.databasePath).toBe(join(homedir(), directory, "bandar.db"));
+      expect(config.duckdbPath).toBe(join(homedir(), directory, "bandar.duckdb"));
+    }
   });
 
-  test("BANDAR_HOME moves both databases", () => {
-    const config = parseConfig({ BANDAR_HOME: "/srv/bandar" });
+  test("detectRunMode reports development under the test runner", () => {
+    expect(detectRunMode(), "the test runner is not a compiled binary").toBe("development");
+  });
 
-    expect(config.databasePath).toBe("/srv/bandar/bandar.db");
-    expect(config.duckdbPath).toBe("/srv/bandar/bandar.duckdb");
+  test("parseConfig without a mode takes the home directory of the detected run mode", () => {
+    expect(parseConfig({}).databasePath).toBe(join(homedir(), ".bandar_dev", "bandar.db"));
+  });
+
+  test("an explicit BANDAR_HOME overrides the run mode default", () => {
+    for (const [mode] of MODE_HOMES) {
+      const config = parseConfig({ BANDAR_HOME: "/srv/bandar" }, mode);
+
+      expect(config.databasePath).toBe("/srv/bandar/bandar.db");
+      expect(config.duckdbPath).toBe("/srv/bandar/bandar.duckdb");
+    }
   });
 
   test("BANDAR_DB and BANDAR_DUCKDB no longer move a database", () => {
-    const config = parseConfig({
-      BANDAR_HOME: "/srv/bandar",
-      BANDAR_DB: "/data/x.db",
-      BANDAR_DUCKDB: "/data/x.duckdb",
-    });
+    const config = parseConfig(
+      {
+        BANDAR_HOME: "/srv/bandar",
+        BANDAR_DB: "/data/x.db",
+        BANDAR_DUCKDB: "/data/x.duckdb",
+      },
+      "production",
+    );
 
     expect(config.databasePath).toBe("/srv/bandar/bandar.db");
     expect(config.duckdbPath).toBe("/srv/bandar/bandar.duckdb");

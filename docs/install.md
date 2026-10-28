@@ -171,9 +171,10 @@ A normal user never needs sudo. The first directory that applies wins:
 
 1. `BANDAR_INSTALL_DIR`, when it is set, even when it is not writable: the installer then exits 1
    rather than quietly installing somewhere else.
-2. The directory `install.json` already records, when it is still on `PATH` or is the chosen
-   fallback. A rerun replaces the binary the manifest names instead of leaving a stale copy behind
-   that `bandar update` can no longer reach.
+2. The directory `install.json` already records, when it is the chosen fallback. A rerun
+   replaces the binary the manifest names instead of leaving a stale copy behind that
+   `bandar update` can no longer reach. A fallback that is a symlink matches either spelling: the
+   path the manifest holds, and the directory it resolves to.
 3. `/usr/local/bin`, when it exists and is writable.
 4. `$XDG_BIN_HOME`, when it is set.
 5. `$HOME/.local/bin`, created when missing.

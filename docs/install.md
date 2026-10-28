@@ -48,6 +48,11 @@ replaced.
 
 With `BANDAR_VERSION` set, the release page is not read at all.
 
+A tag becomes a version only when it is letters, digits, dot, dash, or plus: `1.2.3`,
+`1.2.3-rc.1`, `1.2.3+build.5`. Any other tag exits 1 with one line that names it, before any asset
+is downloaded, because that version is also a JSON value in `install.json` and a path segment in
+the asset name. The same rule covers `BANDAR_VERSION` and a private fork's `tag_name`.
+
 ### A private fork
 
 A private fork keeps the API route. Point `BANDAR_RELEASE_API_URL` at its latest-release JSON and
@@ -68,6 +73,12 @@ and never written to `install.json`. A curl that advertises `--config` reads the
 mode-600 config file, so the token stays out of the process arguments. An older curl, and wget,
 receive it as a header argument instead.
 
+Every asset `url` in that feed has to be on `api.github.com`, `github.com`,
+`objects.githubusercontent.com`, `release-assets.githubusercontent.com`, or the host of
+`BANDAR_RELEASE_API_URL`. An installer that sends a token to a host outside that list would hand
+the token to whoever the feed names, so any other host exits 1 before the request. `bandar update`
+applies the same rule.
+
 ### A mirror or a test server
 
 `BANDAR_RELEASE_WEB_URL` replaces `https://github.com/falentio/bandar` as the origin for both the
@@ -85,7 +96,9 @@ and serves `/releases/download/v<version>/<asset>` stands in for GitHub, and nee
   { "source": "install-script", "version": "0.1.0", "path": "/usr/local/bin/bandar" }
   ```
 
-  The directory is created with mode 700 and defaults to `~/.config/bandar`.
+  The directory is created with mode 700 and defaults to `~/.config/bandar`. The path is
+  JSON-escaped, so a directory name holding a quote, a backslash, or a control character still
+  writes a manifest `bandar update` can read.
 
 The manifest is written before the binary is moved into place, because a binary with no manifest is
 one `bandar update` can never replace. When the manifest cannot be written, the installer exits 1

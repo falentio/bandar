@@ -106,7 +106,7 @@ To run the dev server instead of a compiled binary:
 bun run dev
 ```
 
-The client listens on `:5173` and the API on `:3000`. The client proxies `/api` and
+The client listens on `:5173` and the API on `:4133`. The client proxies `/api` and
 `/v1` to the API port.
 
 A run from source is a development environment. Its databases land in `~/.bandar_dev`,
@@ -119,7 +119,7 @@ so they stay clear of an installed copy, which keeps using `~/.bandar`. Set
 BANDAR_AUTH_SECRET="$(openssl rand -hex 32)" bandar
 ```
 
-Open <http://localhost:3000> and create an account. The binary creates `bandar.db` and
+Open <http://localhost:4133> and create an account. The binary creates `bandar.db` and
 `bandar.duckdb` in `BANDAR_HOME`, which defaults to `~/.bandar` for an installed binary.
 Set `BANDAR_AUTH_SECRET` to keep sessions and sealed credentials across restarts, because
 the default is generated per boot and changing the secret makes stored credentials
@@ -158,7 +158,7 @@ for a system one.
   "$schema": "./config.schema.json",
   "server": {
     "host": "0.0.0.0",
-    "port": 3000,
+    "port": 4133,
     "authUrl": "https://llm.example.com",
     "trustedOrigins": ["https://llm.example.com"]
   },
@@ -181,7 +181,7 @@ for a system one.
 | key                     | value                        | default                              |
 | ----------------------- | ---------------------------- | ------------------------------------ |
 | `server.host`           | a non-empty string           | `0.0.0.0`                            |
-| `server.port`           | an integer from 0 to 65535   | `3000`                               |
+| `server.port`           | an integer from 0 to 65535   | `4133`                               |
 | `server.authUrl`        | an http or https URL         | `http://localhost:<port>`            |
 | `server.trustedOrigins` | a non-empty array of origins | derived, see below                   |
 | `update.webUrl`         | an http or https URL         | `https://github.com/falentio/bandar` |
@@ -274,9 +274,9 @@ resolved and where each value came from:
 settings                       /home/andrew/.bandar/config.json (missing)
 mode                           development
 server.host                    0.0.0.0 (default)
-server.port                    3000 (default)
-server.authUrl                 http://localhost:3000 (default)
-server.trustedOrigins          http://localhost:3000, http://127.0.0.1:3000, http://localhost:5173, http://127.0.0.1:5173 (default)
+server.port                    4133 (default)
+server.authUrl                 http://localhost:4133 (default)
+server.trustedOrigins          http://localhost:4133, http://127.0.0.1:4133, http://localhost:5173, http://127.0.0.1:5173 (default)
 providers.kilocode.baseUrl     https://api.kilo.ai/api/openrouter (default)
 providers.kilocode.catalogUrl  https://api.kilo.ai/api/gateway/models (default)
 providers.tokenharbor.baseUrl  https://tokenharbor.ai/v1 (default)

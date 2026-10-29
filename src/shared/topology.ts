@@ -1,4 +1,4 @@
-export const DEFAULT_API_PORT = 3000;
+export const DEFAULT_API_PORT = 4133;
 export const DEV_WEB_PORT = 5173;
 export const DEFAULT_HOST = "0.0.0.0";
 

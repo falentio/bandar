@@ -202,6 +202,7 @@ const riverProvider: ProviderSlot = { provider: null, modelId: "" };
 const nousProvider: ProviderSlot = { provider: null, modelId: "" };
 const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
 const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
+const zroProvider: ProviderSlot = { provider: null, modelId: "" };
 const wireProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let overrideModelId = "";
@@ -261,7 +262,7 @@ try {
 
     assert.deepEqual(
       builtIn.map((provider) => provider.kind),
-      ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper", "opencode"],
+      ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper", "opencode", "zro"],
     );
 
     const byKind = new Map(builtIn.map((provider) => [provider.kind, provider]));
@@ -337,6 +338,17 @@ try {
     assert.deepEqual(opencode.authModes, ["api-key"]);
     assert.equal(opencode.hasCatalog, true);
 
+    const zro = byKind.get("zro");
+
+    if (zro === undefined) throw new Error("the built-in Zro provider is missing");
+
+    assert.equal(zro.name, "Zro");
+    assert.equal(zro.slug, "zro");
+    assert.equal(zro.baseUrl, `${builtInsOrigin}/zro/v1`);
+    assert.deepEqual(zro.authModes, ["api-key"]);
+    assert.deepEqual(zro.compats, ["chat", "messages"]);
+    assert.equal(zro.hasCatalog, true);
+
     kiloProvider.provider = kilo;
     tokenharborProvider.provider = harbor;
     yetaProvider.provider = yeta;
@@ -344,6 +356,7 @@ try {
     nousProvider.provider = nous;
     hyperProvider.provider = hyper;
     opencodeProvider.provider = opencode;
+    zroProvider.provider = zro;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -429,7 +442,7 @@ try {
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 7);
+    assert.equal(builtIn.length, 8);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -1214,6 +1227,125 @@ try {
     assert.equal(error.code, "invalid_request");
     assert.match(error.message, /omen-alpha/);
     assert.equal(opencodeState.requests, before);
+  });
+
+  await check("Zro refuses a keyed import before a key", async () => {
+    const id = zroProvider.provider?.id ?? "";
+
+    const refused = await post(providerPaths.refreshModels(id), {});
+
+    assert.equal(refused.status, 400);
+    assert.equal((await errorBody(refused)).code, "upstream_invalid_request");
+  });
+
+  await check("Zro imports its listed ids at the table's prices", async () => {
+    const id = zroProvider.provider?.id ?? "";
+
+    await postJson(providerPaths.credentials(id), { apiKey: "zro_test" }, ProviderSchema, 201);
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 7);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+    const models = detail.provider.models;
+
+    assert.deepEqual(
+      models.map((model) => model.slug).sort((left, right) => (left < right ? -1 : 1)),
+      [
+        "zro/deepseek-v4.1-flash",
+        "zro/dolly1-security",
+        "zro/glm-5.3-flash",
+        "zro/minimax-m3.1-flash",
+        "zro/zro-newcomer",
+        "zro/zro/glm-5.3",
+        "zro/zro/only-prefixed",
+      ],
+    );
+
+    const twins = models.filter((model) => model.upstreamModel.endsWith("glm-5.3-flash"));
+
+    assert.equal(twins.length, 1, "one model under two ids imported twice");
+    assert.equal(twins[0]?.upstreamModel, "glm-5.3-flash");
+
+    const twinless = models.find((model) => model.slug === "zro/zro/glm-5.3");
+    const prefixed = models.find((model) => model.slug === "zro/zro/only-prefixed");
+
+    assert.equal(twinless?.upstreamModel, "zro/glm-5.3");
+    assert.equal(twinless?.inputPricePerMtok, 1.4);
+    assert.equal(twinless?.cacheInputPricePerMtok, 0.3);
+    assert.equal(twinless?.outputPricePerMtok, 4.2);
+    assert.equal(prefixed?.upstreamModel, "zro/only-prefixed");
+    assert.equal(prefixed?.inputPricePerMtok, null);
+
+    const flash = models.find((model) => model.slug === "zro/glm-5.3-flash");
+    const dolly = models.find((model) => model.slug === "zro/dolly1-security");
+    const newcomer = models.find((model) => model.slug === "zro/zro-newcomer");
+
+    assert.equal(flash?.inputPricePerMtok, 0.15);
+    assert.equal(flash?.cacheInputPricePerMtok, 0.04);
+    assert.equal(flash?.outputPricePerMtok, 0.5);
+    assert.equal(dolly?.inputPricePerMtok, 0.45);
+    assert.equal(dolly?.outputPricePerMtok, 1.5);
+    assert.equal(newcomer?.inputPricePerMtok, null);
+    assert.equal(newcomer?.outputPricePerMtok, null);
+    assert.equal(newcomer?.defaultCompat, "chat");
+    assert.ok(
+      models.every((model) => model.slug !== "zro/dolly2-security"),
+      "a tabled id the upstream omits imported anyway",
+    );
+  });
+
+  await check("Zro answers chat on the chat wire", async () => {
+    const response = await chatRequest("zro/deepseek-v4.1-flash", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Zro");
+    assert.equal(body.usage?.prompt_tokens, 6);
+    assert.equal(body.usage?.completion_tokens, 2);
+  });
+
+  await check("a Zro model overridden to messages answers on the Anthropic wire", async () => {
+    const id = zroProvider.provider?.id ?? "";
+    const { provider } = await getJson(providerPaths.detail(id), ProviderDetailSchema, 200);
+    const dolly = provider.models.find((model) => model.slug === "zro/dolly1-security");
+
+    if (dolly === undefined) throw new Error("dolly1-security is not on Zro");
+
+    const moved = await putModelEdit(id, dolly.id, { compat: "messages" });
+
+    assert.equal(moved.models.find((model) => model.id === dolly.id)?.compat, "messages");
+
+    const response = await chatRequest("zro/dolly1-security", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from Zro Messages");
+    assert.equal(body.usage?.prompt_tokens, 5);
+    assert.equal(body.usage?.completion_tokens, 4);
+  });
+
+  await check("a Zro chat stream carries text and usage", async () => {
+    const response = await chatRequest("zro/glm-5.3-flash", true);
+
+    assert.equal(response.status, 200);
+
+    const stream = await readStream(response);
+
+    assert.equal(stream.text, "Hello from Zro");
+    assert.equal(stream.usage?.prompt_tokens, 6);
+    assert.equal(stream.usage?.completion_tokens, 2);
+    assert.equal(stream.done, true);
   });
 
   await check("the Nous Portal device login returns a code and connects", async () => {
@@ -2768,7 +2900,7 @@ try {
         .filter((provider) => provider.origin === "builtin")
         .map((provider) => provider.kind)
         .sort(),
-      ["hyper", "kilocode", "nous", "opencode", "river", "tokenharbor", "yeta"],
+      ["hyper", "kilocode", "nous", "opencode", "river", "tokenharbor", "yeta", "zro"],
       "a built-in provider was seeded twice",
     );
   });
@@ -2838,6 +2970,7 @@ async function boot(port = 0, timeoutMs = BOOT_TIMEOUT_MS): Promise<Booted> {
         },
         hyper: { baseUrl: `${builtInsOrigin}/hyper/v1` },
         opencode: { baseUrl: `${builtInsOrigin}/opencode/inference` },
+        zro: { baseUrl: `${builtInsOrigin}/zro/v1` },
       },
     }),
   );
@@ -3921,6 +4054,74 @@ function startBuiltIns() {
             },
           ],
           usage: { prompt_tokens: 6, completion_tokens: 5 },
+        });
+      }
+
+      if (url.pathname === "/zro/v1/models") {
+        if (authorization !== "Bearer zro_test") return jsonError(401, "bad zro key");
+
+        return Response.json({
+          object: "list",
+          data: [
+            { id: "zro/glm-5.3-flash", object: "model" },
+            { id: "glm-5.3-flash", object: "model" },
+            { id: "deepseek-v4.1-flash", object: "model" },
+            { id: "minimax-m3.1-flash", object: "model" },
+            { id: "dolly1-security", object: "model" },
+            { id: "zro-newcomer", object: "model" },
+            { id: "zro/glm-5.3", object: "model" },
+            { id: "zro/only-prefixed", object: "model" },
+          ],
+        });
+      }
+
+      if (url.pathname === "/zro/v1/chat/completions") {
+        if (authorization !== "Bearer zro_test") return jsonError(401, "bad zro key");
+
+        if (request.headers.has("x-api-key")) return jsonError(401, "zro takes one bearer");
+
+        const body = v.safeParse(
+          v.object({ stream: v.optional(v.boolean()) }),
+          await request.json(),
+        );
+
+        const stream = body.success ? (body.output.stream ?? false) : false;
+
+        if (!stream) {
+          return Response.json({
+            choices: [
+              {
+                message: { role: "assistant", content: "Hello from Zro" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 6, completion_tokens: 2 },
+          });
+        }
+
+        return sse([
+          { choices: [{ delta: { role: "assistant", content: "Hello" } }] },
+          {
+            choices: [{ delta: { content: " from Zro" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 6, completion_tokens: 2 },
+          },
+          "[DONE]",
+        ]);
+      }
+
+      if (url.pathname === "/zro/v1/messages") {
+        if (authorization !== "Bearer zro_test") return jsonError(401, "bad zro key");
+
+        if (request.headers.get("anthropic-version") !== "2023-06-01") {
+          return jsonError(400, "zro messages needs the version header");
+        }
+
+        if (request.headers.has("x-api-key")) return jsonError(401, "zro takes one bearer");
+
+        return Response.json({
+          content: [{ type: "text", text: "Hello from Zro Messages" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 5, output_tokens: 4 },
         });
       }
 

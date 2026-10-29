@@ -47,6 +47,7 @@ describe("provider registry", () => {
     expect(compatsOf("anthropic")).toEqual(["messages"]);
     expect(compatsOf("google")).toEqual(["genai"]);
     expect(compatsOf("opencode")).toEqual(["chat", "responses", "messages", "genai"]);
+    expect(compatsOf("zro")).toEqual(["chat", "messages"]);
 
     for (const kind of CHAT_ONLY_KINDS) expect(compatsOf(kind)).toEqual(["chat"]);
   });

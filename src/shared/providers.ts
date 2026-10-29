@@ -14,6 +14,7 @@ export const BUILT_IN_PROVIDER_KINDS = [
   "nous",
   "hyper",
   "opencode",
+  "zro",
 ] as const;
 
 export const PROVIDER_KINDS = [...GENERIC_PROVIDER_KINDS, ...BUILT_IN_PROVIDER_KINDS] as const;
@@ -78,6 +79,12 @@ export const BUILT_IN_PROVIDERS = {
     name: "OpenCode Go",
     slug: "opencode",
     baseUrl: "https://opencode.ai/inference",
+  },
+  zro: {
+    kind: "zro",
+    name: "Zro",
+    slug: "zro",
+    baseUrl: "https://zro.moonmath.ai/v1",
   },
 } satisfies Record<
   BuiltInProviderKind,
@@ -288,6 +295,7 @@ export const PROVIDER_KIND_LABELS: Record<ProviderKind, string> = {
   nous: BUILT_IN_PROVIDERS.nous.name,
   hyper: BUILT_IN_PROVIDERS.hyper.name,
   opencode: BUILT_IN_PROVIDERS.opencode.name,
+  zro: BUILT_IN_PROVIDERS.zro.name,
 };
 
 export type GenericProviderKind = v.InferOutput<typeof GenericProviderKindSchema>;

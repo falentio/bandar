@@ -151,6 +151,11 @@ const OpenCodeSettingsSchema = v.pipe(
   v.strictObject({ baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.opencode.baseUrl) }),
 );
 
+const ZroSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({ baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.zro.baseUrl) }),
+);
+
 const UpdateSettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
@@ -181,6 +186,7 @@ const ProvidersSettingsSchema = v.pipe(
     nous: v.optional(NousSettingsSchema),
     hyper: v.optional(HyperSettingsSchema),
     opencode: v.optional(OpenCodeSettingsSchema),
+    zro: v.optional(ZroSettingsSchema),
   }),
 );
 

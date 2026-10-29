@@ -69,6 +69,9 @@ export const PROVIDER_ENDPOINT_SPECS = {
   opencode: {
     baseUrl: baseUrl("opencode", "BANDAR_OPENCODE_API"),
   },
+  zro: {
+    baseUrl: baseUrl("zro", "BANDAR_ZRO_API"),
+  },
 } satisfies Record<BuiltInProviderKind, EndpointSpecs>;
 
 export const PROVIDER_MOUNTS: Record<BuiltInProviderKind, string> = {
@@ -79,6 +82,7 @@ export const PROVIDER_MOUNTS: Record<BuiltInProviderKind, string> = {
   nous: "/v1",
   hyper: "/v1",
   opencode: "/inference",
+  zro: "/v1",
 };
 
 export type ProviderEndpoint = {
@@ -147,4 +151,5 @@ export const DEFAULT_PROVIDER_ENDPOINTS: ProviderEndpoints = {
   nous: defaultEndpoint("nous"),
   hyper: defaultEndpoint("hyper"),
   opencode: defaultEndpoint("opencode"),
+  zro: defaultEndpoint("zro"),
 };

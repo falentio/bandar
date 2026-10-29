@@ -63,6 +63,7 @@ describe("config", () => {
       ["BANDAR_NOUS_PORTAL", "providers.nous.authUrl"],
       ["BANDAR_HYPER_API", "providers.hyper.baseUrl"],
       ["BANDAR_OPENCODE_API", "providers.opencode.baseUrl"],
+      ["BANDAR_ZRO_API", "providers.zro.baseUrl"],
     ] as const) {
       const attempt = () => parseConfig({ [name]: "hyper.local" });
 
@@ -625,6 +626,7 @@ describe("the provider endpoints", () => {
     });
     expect(providers.hyper.baseUrl).toBe("https://hyper.charm.land/v1");
     expect(providers.opencode.baseUrl).toBe("https://opencode.ai/inference");
+    expect(providers.zro.baseUrl).toBe("https://zro.moonmath.ai/v1");
   });
 
   test("the file supplies full base URLs, without a mount", () => {
@@ -697,6 +699,7 @@ describe("the provider endpoints", () => {
       "providers.nous.authUrl": "default",
       "providers.hyper.baseUrl": "default",
       "providers.opencode.baseUrl": "default",
+      "providers.zro.baseUrl": "default",
     });
   });
 

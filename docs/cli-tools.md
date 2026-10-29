@@ -32,7 +32,7 @@ Every tool below needs the ref bandar resolves, not the vendor model name. Three
 
 Claude Code asks for `claude-sonnet-4-6` unless you set `ANTHROPIC_MODEL`. That name will not resolve unless a model carries it as its address, so set the variable.
 
-On each setup page the model picker lists tags first, then each provider's models. Pick one ref or several: the first ref you pick is the tool's default. A tool that carries many refs writes every pick into the same file, so it switches between them without a second edit. A single-ref tool pins that one ref in its file and lists the rest itself.
+The model field on each setup page is a combobox: it lists tags first, then each provider's models, and typing filters both. Pick one ref or several: the first ref you pick is the tool's default. A tool that carries many refs writes every pick into the same file, so it switches between them without a second edit. A single-ref tool pins that one ref in its file and lists the rest itself.
 
 The tools disagree about how a config holds several refs, and the picker follows each one:
 
@@ -246,7 +246,7 @@ The blockers, in the order they pay off:
 
 ## Adding a tool
 
-Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, `modelCapacity`, the steps, and the snippets. `modelCapacity: "many"` means one file holds every picked ref, and the page renders the multi-select for it; `"one"` means the file pins a single ref and the tool lists the rest itself, and the page renders a single picker. A snippet reads `refsOf(input)` for the refs to write and `activeOf(input)` for the default, so a blank pick still renders the placeholder. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status. Add the tool's mark to `CliToolLogo` in `./src/client/components/cli-tool-logo.tsx`; the paths there come from [svgl.app](https://svgl.app), which serves single-color marks, so a two-tone one carries an opacity instead of a second color.
+Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, `modelCapacity`, the steps, and the snippets. `modelCapacity: "many"` means one file holds every picked ref, and the combobox appends each pick as a chip; `"one"` means the file pins a single ref and the tool lists the rest itself, so the combobox replaces the pick instead. A snippet reads `refsOf(input)` for the refs to write and `activeOf(input)` for the default, so a blank pick still renders the placeholder. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status. Add the tool's mark to `CliToolLogo` in `./src/client/components/cli-tool-logo.tsx`; the paths there come from [svgl.app](https://svgl.app), which serves single-color marks, so a two-tone one carries an opacity instead of a second color.
 
 Five rules the tests enforce, so keep them true:
 

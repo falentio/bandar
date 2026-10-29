@@ -14,6 +14,7 @@ const SOURCE_LABEL: Record<ConfigSource, string> = {
   environment: "environment",
   config: "config.json",
   default: "default",
+  tailscale: "tailscale",
 };
 
 export function register(commands: Commands): void {

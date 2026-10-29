@@ -7,7 +7,9 @@ import {
   authUrlForPort,
   DEFAULT_API_PORT,
   DEFAULT_HOST,
-  DEFAULT_WEB_PORT,
+  DEV_WEB_PORT,
+  httpOrigin,
+  isWildcardHost,
   loopbackOrigin,
   MAX_PORT,
   MIN_PORT,
@@ -27,11 +29,12 @@ import {
   type Settings,
   type SettingsIo,
 } from "./settings";
+import { discoverTailnet, type TailnetIdentity, type TailnetLookup } from "./tailnet";
 
 export type Config = {
   readonly host: string;
   readonly port: number;
-  readonly webPort: number;
+  readonly tailscale: boolean;
   readonly databasePath: string;
   readonly duckdbPath: string;
   readonly configDir: string;
@@ -44,7 +47,7 @@ export type Config = {
 
 export type RunMode = "development" | "production";
 
-export type ConfigSource = "environment" | "config" | "default";
+export type ConfigSource = "environment" | "config" | "default" | "tailscale";
 
 export type ConfigRow = {
   readonly key: string;
@@ -55,7 +58,7 @@ export type ConfigRow = {
 type ConfigSources = {
   readonly host: ConfigSource;
   readonly port: ConfigSource;
-  readonly webPort: ConfigSource;
+  readonly tailscale: ConfigSource;
   readonly authUrl: ConfigSource;
   readonly trustedOrigins: ConfigSource;
   readonly updateWebUrl: ConfigSource;
@@ -118,16 +121,6 @@ const UNSET_SECRET_WARNING =
 const ConfigSchema = v.object({
   BANDAR_HOST: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1))),
   BANDAR_PORT: v.optional(
-    v.pipe(
-      v.string(),
-      v.transform(Number),
-      v.number(),
-      v.integer(),
-      v.minValue(MIN_PORT),
-      v.maxValue(MAX_PORT),
-    ),
-  ),
-  BANDAR_WEB_PORT: v.optional(
     v.pipe(
       v.string(),
       v.transform(Number),
@@ -323,6 +316,70 @@ function resolveProviders(
 }
 
 /**
+ * The address a run listens on and the URL a browser reaches it by. A found tailnet supplies both,
+ * so a tailnet run cannot bind the tailnet address while its auth URL stays on the loopback default.
+ */
+type Endpoint = {
+  readonly host: Resolved<string>;
+  readonly authUrl: Resolved<string>;
+  readonly port: Resolved<number>;
+  readonly tailnet: TailnetIdentity | null;
+};
+
+function tailnetEndpoint(
+  identity: TailnetIdentity,
+  port: Resolved<number>,
+  server: Settings["server"],
+  environment: Environment,
+): Endpoint {
+  return {
+    host: { value: identity.address, source: "tailscale" },
+    authUrl: resolve(
+      server?.authUrl,
+      environment.BANDAR_AUTH_URL,
+      httpOrigin(identity.dnsName, port.value),
+      "tailscale",
+    ),
+    port,
+    tailnet: identity,
+  };
+}
+
+function localEndpoint(
+  port: Resolved<number>,
+  server: Settings["server"],
+  environment: Environment,
+): Endpoint {
+  return {
+    host: resolve(server?.host, environment.BANDAR_HOST, DEFAULT_HOST),
+    authUrl: resolve(server?.authUrl, environment.BANDAR_AUTH_URL, authUrlForPort(port.value)),
+    port,
+    tailnet: null,
+  };
+}
+
+/**
+ * server.tailscale reads only the settings file, so a failure it causes is the file's fault and the
+ * summary says so. An unset flag never asks for the tailnet.
+ */
+function resolveEndpoint(
+  tailscale: boolean,
+  server: Settings["server"],
+  environment: Environment,
+  lookup: TailnetLookup,
+): Endpoint {
+  const port = resolve(server?.port, environment.BANDAR_PORT, DEFAULT_API_PORT);
+  const tailnet = tailscale ? lookup() : null;
+
+  if (tailnet?.kind === "missing")
+    throw new ConfigError([`server.tailscale: ${tailnet.reason}`], "invalid configuration");
+
+  return tailnet?.kind === "found"
+    ? tailnetEndpoint(tailnet.identity, port, server, environment)
+    : localEndpoint(port, server, environment);
+}
+
+/**
  * Fills the config from the settings file first, then the environment, then the built-in default,
  * and reports which of the three each server value came from. It stays silent: backup, update, and
  * install-service parse the environment without starting a session, so the warning about a
@@ -334,6 +391,7 @@ function buildConfig(
   mode: RunMode,
   settings: Settings,
   endpointEnvironment: readonly EndpointEnvValue[],
+  lookup: TailnetLookup,
 ): BuiltConfig {
   const server = settings.server;
   const providers = resolveProviders(settings, endpointEnvironment);
@@ -343,16 +401,13 @@ function buildConfig(
       ? undefined
       : parseOrigins(environment.BANDAR_TRUSTED_ORIGINS);
 
-  const host = resolve(server?.host, environment.BANDAR_HOST, DEFAULT_HOST);
-  const port = resolve(server?.port, environment.BANDAR_PORT, DEFAULT_API_PORT);
-  const webPort = resolve(server?.webPort, environment.BANDAR_WEB_PORT, DEFAULT_WEB_PORT);
-
-  const authUrl = resolve(server?.authUrl, environment.BANDAR_AUTH_URL, authUrlForPort(port.value));
+  const tailscale = resolve(server?.tailscale, undefined, false);
+  const endpoint = resolveEndpoint(tailscale.value, server, environment, lookup);
 
   const trustedOrigins = resolve(
     server?.trustedOrigins,
     environmentOrigins,
-    defaultTrustedOrigins(authUrl.value, host.value, port.value, webPort.value, mode),
+    defaultTrustedOrigins(endpoint, mode),
   );
 
   const update = settings.update;
@@ -361,23 +416,23 @@ function buildConfig(
 
   return {
     config: {
-      host: host.value,
-      port: port.value,
-      webPort: webPort.value,
+      host: endpoint.host.value,
+      port: endpoint.port.value,
+      tailscale: tailscale.value,
       databasePath: join(home, DATABASE_FILE),
       duckdbPath: join(home, DUCKDB_FILE),
       configDir: environment.BANDAR_CONFIG_DIR,
-      authUrl: authUrl.value,
+      authUrl: endpoint.authUrl.value,
       authSecret: environment.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
       trustedOrigins: trustedOrigins.value,
       providers: providers.endpoints,
       update: { webUrl: updateWebUrl.value, apiUrl: updateApiUrl.value },
     },
     sources: {
-      host: host.source,
-      port: port.source,
-      webPort: webPort.source,
-      authUrl: authUrl.source,
+      host: endpoint.host.source,
+      port: endpoint.port.source,
+      tailscale: tailscale.source,
+      authUrl: endpoint.authUrl.source,
       trustedOrigins: trustedOrigins.source,
       updateWebUrl: updateWebUrl.source,
       updateApiUrl: updateApiUrl.source,
@@ -395,12 +450,17 @@ type Resolved<T> = {
  * The one place the three tiers are ordered: the settings file, then the environment, then the
  * built-in default. Each tier returns its own label beside the value it supplied.
  */
-function resolve<T>(file: T | undefined, environment: T | undefined, fallback: T): Resolved<T> {
+function resolve<T>(
+  file: T | undefined,
+  environment: T | undefined,
+  fallback: T,
+  fallbackSource: ConfigSource = "default",
+): Resolved<T> {
   if (file !== undefined) return { value: file, source: "config" };
 
   if (environment !== undefined) return { value: environment, source: "environment" };
 
-  return { value: fallback, source: "default" };
+  return { value: fallback, source: fallbackSource };
 }
 
 /**
@@ -435,24 +495,28 @@ function parseOrigins(value: string): readonly string[] {
 }
 
 /**
- * The origins a browser can reach a fresh install from: the auth URL's own origin first, since that
- * is the public face, then the loopback on the listening port. The dev web server runs on its own port,
- * so only a development run can sign in through it.
+ * The origins a browser reaches a fresh install from: the auth URL's own origin first, since that is
+ * the public face, then the address this run listens on. A loopback run adds the loopback names on
+ * the API port, a tailnet run the MagicDNS name. A development run adds the dev server's names, the
+ * loopback ones Vite always serves plus the tailnet ones, because the browser sends its origin
+ * unchanged through the proxy.
  */
-function defaultTrustedOrigins(
-  authUrl: string,
-  host: string,
-  port: number,
-  webPort: number,
-  mode: RunMode,
-): readonly string[] {
-  const origins = [new URL(authUrl).origin, authUrlForPort(port), loopbackOrigin(port)];
-  const anywhere = host === "0.0.0.0" || host === "::";
+function defaultTrustedOrigins(endpoint: Endpoint, mode: RunMode): readonly string[] {
+  const { authUrl, host, port, tailnet } = endpoint;
+  const origins = [new URL(authUrl.value).origin];
 
-  if (!anywhere) origins.push(`http://${host.includes(":") ? `[${host}]` : host}:${port}`);
+  if (tailnet === null) origins.push(authUrlForPort(port.value), loopbackOrigin(port.value));
+  else origins.push(httpOrigin(tailnet.dnsName, port.value));
 
-  if (mode === "development")
-    origins.push(`http://localhost:${webPort}`, `http://127.0.0.1:${webPort}`);
+  if (!isWildcardHost(host.value)) origins.push(httpOrigin(host.value, port.value));
+
+  if (mode === "development") {
+    const webHosts = ["localhost", "127.0.0.1"];
+
+    if (tailnet !== null) webHosts.push(tailnet.dnsName, tailnet.address);
+
+    for (const webHost of webHosts) origins.push(httpOrigin(webHost, DEV_WEB_PORT));
+  }
 
   return [...new Set(origins)];
 }
@@ -461,7 +525,7 @@ function serverRows(config: Config, sources: ConfigSources): readonly ConfigRow[
   return [
     { key: "server.host", value: config.host, source: sources.host },
     { key: "server.port", value: String(config.port), source: sources.port },
-    { key: "server.webPort", value: String(config.webPort), source: sources.webPort },
+    { key: "server.tailscale", value: String(config.tailscale), source: sources.tailscale },
     { key: "server.authUrl", value: config.authUrl, source: sources.authUrl },
     {
       key: "server.trustedOrigins",
@@ -498,7 +562,7 @@ export function parseConfig(
 
   const { environment, endpoints } = parseEnvironment(env);
 
-  return buildConfig(environment, home, mode, {}, endpoints).config;
+  return buildConfig(environment, home, mode, {}, endpoints, discoverTailnet).config;
 }
 
 /**
@@ -511,6 +575,7 @@ export function loadConfigReport(
   env: Record<string, string | undefined>,
   io: SettingsIo,
   mode: RunMode = detectRunMode(),
+  lookup: TailnetLookup = discoverTailnet,
 ): ConfigReport {
   const home = resolveHome(env, mode);
   const { environment, endpoints } = parseEnvironment(env);
@@ -525,6 +590,7 @@ export function loadConfigReport(
     mode,
     report.kind === "ok" ? report.settings : {},
     endpoints,
+    lookup,
   );
 
   return {
@@ -540,6 +606,7 @@ export function loadConfig(
   env: Record<string, string | undefined>,
   io: SettingsIo,
   mode: RunMode = detectRunMode(),
+  lookup: TailnetLookup = discoverTailnet,
 ): Config {
-  return loadConfigReport(env, io, mode).config;
+  return loadConfigReport(env, io, mode, lookup).config;
 }

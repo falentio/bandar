@@ -1,7 +1,7 @@
 import { toJsonSchema } from "@valibot/to-json-schema";
 import { join } from "node:path";
 import * as v from "valibot";
-import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
+import { DEFAULT_API_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
 import { PROVIDER_ENDPOINT_SPECS, type EndpointSpec } from "./providers/endpoints";
 
 const SETTINGS_FILE = "config.json";
@@ -75,21 +75,20 @@ const ServerSettingsSchema = v.pipe(
         v.description("The port to listen on. Defaults to " + String(DEFAULT_API_PORT) + "."),
       ),
     ),
-    webPort: v.optional(
+    tailscale: v.optional(
       v.pipe(
-        v.number(),
-        v.integer(),
-        v.minValue(MIN_PORT),
-        v.maxValue(MAX_PORT),
+        v.boolean(),
         v.description(
-          "The port the web dev server listens on. Defaults to " + String(DEFAULT_WEB_PORT) + ".",
+          "Bind the API to the tailnet address and trust its MagicDNS name. Defaults to false.",
         ),
       ),
     ),
     authUrl: v.optional(
       v.pipe(
         HttpUrlSchema,
-        v.description("The public URL of this server. Defaults to http://localhost:<port>."),
+        v.description(
+          "The public URL of this server. Defaults to http://localhost:<port>, or the MagicDNS URL when server.tailscale is on.",
+        ),
       ),
     ),
     trustedOrigins: v.optional(
@@ -97,7 +96,7 @@ const ServerSettingsSchema = v.pipe(
         v.array(OriginSchema),
         v.minLength(1, "needs at least one origin"),
         v.description(
-          "Origins allowed to sign in. Defaults to the auth URL's origin and the loopback.",
+          "Origins allowed to sign in. Defaults to the auth URL's origin and the addresses this run listens on.",
         ),
       ),
     ),

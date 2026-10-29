@@ -106,8 +106,9 @@ To run the dev server instead of a compiled binary:
 bun run dev
 ```
 
-The client listens on `:5173` and the API on `:3000`. The client proxies `/api` and
-`/v1` to the API port.
+The client listens on `:5173` and the API on `:4133`. The client proxies `/api` and
+`/v1` to the API port. With `server.tailscale: true` the API binds the tailnet address, and
+the client still opens on `http://localhost:5173`.
 
 A run from source is a development environment. Its databases land in `~/.bandar_dev`,
 so they stay clear of an installed copy, which keeps using `~/.bandar`. Set
@@ -119,7 +120,7 @@ so they stay clear of an installed copy, which keeps using `~/.bandar`. Set
 BANDAR_AUTH_SECRET="$(openssl rand -hex 32)" bandar
 ```
 
-Open <http://localhost:3000> and create an account. The binary creates `bandar.db` and
+Open <http://localhost:4133> and create an account. The binary creates `bandar.db` and
 `bandar.duckdb` in `BANDAR_HOME`, which defaults to `~/.bandar` for an installed binary.
 Set `BANDAR_AUTH_SECRET` to keep sessions and sealed credentials across restarts, because
 the default is generated per boot and changing the secret makes stored credentials
@@ -158,8 +159,7 @@ for a system one.
   "$schema": "./config.schema.json",
   "server": {
     "host": "0.0.0.0",
-    "port": 3000,
-    "webPort": 5173,
+    "port": 4133,
     "authUrl": "https://llm.example.com",
     "trustedOrigins": ["https://llm.example.com"]
   },
@@ -182,8 +182,8 @@ for a system one.
 | key                     | value                        | default                              |
 | ----------------------- | ---------------------------- | ------------------------------------ |
 | `server.host`           | a non-empty string           | `0.0.0.0`                            |
-| `server.port`           | an integer from 0 to 65535   | `3000`                               |
-| `server.webPort`        | an integer from 0 to 65535   | `5173`                               |
+| `server.port`           | an integer from 0 to 65535   | `4133`                               |
+| `server.tailscale`      | `true` or `false`            | `false`                              |
 | `server.authUrl`        | an http or https URL         | `http://localhost:<port>`            |
 | `server.trustedOrigins` | a non-empty array of origins | derived, see below                   |
 | `update.webUrl`         | an http or https URL         | `https://github.com/falentio/bandar` |
@@ -214,6 +214,8 @@ provider field its kind does not have, a root that is not a JSON object, an empt
 port that is not a whole number in range, an empty `server.trustedOrigins`, an origin
 with a path, a URL that is not http or https, and a file that is not JSON all fail the
 boot, and the message names the file and the field. A typo never falls back to a default.
+`server.webPort` is no longer a key, so a file that still carries it fails the boot; delete
+the line.
 
 `bandar` writes `config.schema.json` beside the settings on every read, and adds
 `"$schema": "./config.schema.json"` to a `config.json` that lacks the key, so an editor
@@ -225,11 +227,20 @@ the server still rejects at boot. A `$schema` you wrote yourself is left alone, 
 the key changes nothing else in the file. Neither write is required: a data directory that
 is not writable only costs the editor completion.
 
-The default trusted origins start with the auth URL's own origin. They then follow the
-resolved API port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
+The default trusted origins start with the auth URL's own origin. With no tailnet bind,
+they then follow the resolved API port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
 `http://<host>:<port>` when `server.host` names an address rather than `0.0.0.0` or
-`::`. Only a development run adds the web dev server, at `http://localhost:<webPort>`
-and `http://127.0.0.1:<webPort>`.
+`::`. Only a development run adds the web dev server, at `http://localhost:5173`
+and `http://127.0.0.1:5173`.
+
+`server.tailscale: true` asks `tailscale status --json` for this machine's tailnet address
+and MagicDNS name. The API binds that address instead of `server.host`, the auth URL
+defaults to `http://<magicdns>:<port>`, and the trusted origins become the MagicDNS name
+and the tailnet address. A development run also trusts port 5173 on the loopback names
+and the tailnet names, since Vite serves `http://localhost:5173` and the MagicDNS URL, and
+proxies both to the tailnet-bound API. If Tailscale is missing, stopped, or logged out, the
+boot fails and names the reason, because a fallback bind would listen somewhere you did not
+ask for. A tailnet bind has no loopback listener.
 
 A `server.port` of 0 asks the OS for an ephemeral port. The server binds one, but the
 derived auth URL and trusted origins name port 0 and reach nothing, so set
@@ -247,14 +258,15 @@ field.
 | ----------------------- | ------------------------ |
 | `server.host`           | `BANDAR_HOST`            |
 | `server.port`           | `BANDAR_PORT`            |
-| `server.webPort`        | `BANDAR_WEB_PORT`        |
 | `server.authUrl`        | `BANDAR_AUTH_URL`        |
 | `server.trustedOrigins` | `BANDAR_TRUSTED_ORIGINS` |
 | `update.webUrl`         | `BANDAR_RELEASE_WEB_URL` |
 | `update.apiUrl`         | `BANDAR_RELEASE_API_URL` |
 
-The dev server in `vite.config.ts` reads both ports from the same file, so
-`bun run dev` follows an edit to `server.port` or `server.webPort`.
+`server.tailscale` reads only `config.json`; it has no fallback variable.
+
+The dev server in `vite.config.ts` reads `server.port` from the same file for its proxy, so
+`bun run dev` follows an edit there. Vite itself always listens on 5173.
 
 These stay in the environment only: `BANDAR_HOME` and `BANDAR_CONFIG_DIR`, which
 locate files; `BANDAR_AUTH_SECRET`, because the data directory is world-readable and the
@@ -275,10 +287,10 @@ resolved and where each value came from:
 settings                       /home/andrew/.bandar/config.json (missing)
 mode                           development
 server.host                    0.0.0.0 (default)
-server.port                    3000 (default)
-server.webPort                 5173 (default)
-server.authUrl                 http://localhost:3000 (default)
-server.trustedOrigins          http://localhost:3000, http://127.0.0.1:3000, http://localhost:5173, http://127.0.0.1:5173 (default)
+server.port                    4133 (default)
+server.tailscale               false (default)
+server.authUrl                 http://localhost:4133 (default)
+server.trustedOrigins          http://localhost:4133, http://127.0.0.1:4133, http://localhost:5173, http://127.0.0.1:5173 (default)
 providers.kilocode.baseUrl     https://api.kilo.ai/api/openrouter (default)
 providers.kilocode.catalogUrl  https://api.kilo.ai/api/gateway/models (default)
 providers.tokenharbor.baseUrl  https://tokenharbor.ai/v1 (default)

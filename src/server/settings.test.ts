@@ -225,22 +225,22 @@ describe("settings", () => {
     }
   });
 
-  test("the web port parses within the same bounds", () => {
-    expect(settingsFrom(readerOf('{"server":{"webPort":6000}}'))).toEqual({
+  test("the tailscale flag takes a boolean", () => {
+    expect(settingsFrom(readerOf('{"server":{"tailscale":true}}'))).toEqual({
       kind: "ok",
       path,
-      settings: { server: { webPort: 6000 } },
+      settings: { server: { tailscale: true } },
     });
+
+    const reason = reasonOf(settingsFrom(readerOf('{"server":{"tailscale":"true"}}')));
+
+    expect(reason).toContain("server.tailscale");
   });
 
-  test("a web port outside 0..65535, or not a whole number, is invalid", () => {
-    for (const webPort of [-1, 70000, 80.5, "5173"]) {
-      const reason = reasonOf(
-        settingsFrom(readerOf(`{"server":{"webPort":${JSON.stringify(webPort)}}}`)),
-      );
+  test("the removed web port is an unknown key", () => {
+    const reason = reasonOf(settingsFrom(readerOf('{"server":{"webPort":6000}}')));
 
-      expect(reason).toContain("server.webPort");
-    }
+    expect(reason).toMatch(/^server\.webPort: Invalid key\b/u);
   });
 
   test("an empty host is invalid", () => {

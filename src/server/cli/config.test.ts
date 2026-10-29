@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
-import { DEFAULT_API_PORT, DEFAULT_WEB_PORT } from "../../shared/topology";
+import { DEFAULT_API_PORT, DEV_WEB_PORT } from "../../shared/topology";
 import { parseArgs } from "./args";
 import type { Env } from "./command";
 import { createCli } from "./registry";
@@ -103,9 +103,7 @@ describe("the config command", () => {
     expect(lineOf(stdout, "server.port").endsWith(`${String(DEFAULT_API_PORT)} (default)`)).toBe(
       true,
     );
-    expect(lineOf(stdout, "server.webPort").endsWith(`${String(DEFAULT_WEB_PORT)} (default)`)).toBe(
-      true,
-    );
+    expect(lineOf(stdout, "server.tailscale").endsWith("false (default)")).toBe(true);
     expect(
       lineOf(stdout, "server.authUrl").endsWith(
         `http://localhost:${String(DEFAULT_API_PORT)} (default)`,
@@ -116,10 +114,10 @@ describe("the config command", () => {
 
     expect(origins).toContain(`http://localhost:${String(DEFAULT_API_PORT)}`);
     expect(origins).toContain(`http://127.0.0.1:${String(DEFAULT_API_PORT)}`);
-    expect(origins.includes(`http://localhost:${String(DEFAULT_WEB_PORT)}`)).toBe(
+    expect(origins.includes(`http://localhost:${String(DEV_WEB_PORT)}`)).toBe(
       printed === "development",
     );
-    expect(origins.includes(`http://127.0.0.1:${String(DEFAULT_WEB_PORT)}`)).toBe(
+    expect(origins.includes(`http://127.0.0.1:${String(DEV_WEB_PORT)}`)).toBe(
       printed === "development",
     );
     expect(origins.endsWith("(default)")).toBe(true);
@@ -234,7 +232,7 @@ describe("the config command", () => {
       "mode",
       "server.host",
       "server.port",
-      "server.webPort",
+      "server.tailscale",
       "server.authUrl",
       "server.trustedOrigins",
       "providers.kilocode.baseUrl",

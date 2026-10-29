@@ -229,7 +229,7 @@ curl -sS "$ANTHROPIC_BASE_URL/v1/models" -H "Authorization: Bearer $BANDAR_API_K
 The model list proves the URL and the key. Then send one chat turn:
 
 ```bash
-curl -sS "${ANTHROPIC_BASE_URL:-http://localhost:3000}/v1/chat/completions" \
+curl -sS "${ANTHROPIC_BASE_URL:-http://localhost:4133}/v1/chat/completions" \
   -H "Authorization: Bearer $BANDAR_API_KEY" \
   -H "content-type: application/json" \
   -d '{"model":"sonnet","messages":[{"role":"user","content":"say hi"}]}'

@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, vi } from "vite-plus/test";
-import { DEFAULT_API_PORT, DEFAULT_WEB_PORT } from "../shared/topology";
+import { DEFAULT_API_PORT, DEV_WEB_PORT } from "../shared/topology";
 import {
   ConfigError,
   detectRunMode,
@@ -13,6 +13,7 @@ import {
   type ConfigSource,
   type RunMode,
 } from "./config";
+import type { TailnetIdentity, TailnetLookup } from "./tailnet";
 
 const MODE_HOMES = [
   ["development", ".bandar_dev"],
@@ -27,15 +28,21 @@ const missingFile = (): string => {
   throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
 };
 
+const noDiscovery: TailnetLookup = () => {
+  throw new Error("discovery ran with server.tailscale off");
+};
+
 const reportOf = (
   env: Record<string, string | undefined> = {},
   mode: RunMode = "production",
   json = "{}",
+  lookup: TailnetLookup = noDiscovery,
 ) =>
   loadConfigReport(
     { BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set", ...env },
     ioOf(() => json),
     mode,
+    lookup,
   );
 
 const fromFile = (json: string, env: Record<string, string | undefined> = {}) =>
@@ -373,8 +380,8 @@ describe("the derived defaults", () => {
     expect(reportOf({}, "development").config.trustedOrigins).toEqual([
       `http://localhost:${DEFAULT_API_PORT}`,
       `http://127.0.0.1:${DEFAULT_API_PORT}`,
-      `http://localhost:${DEFAULT_WEB_PORT}`,
-      `http://127.0.0.1:${DEFAULT_WEB_PORT}`,
+      `http://localhost:${DEV_WEB_PORT}`,
+      `http://127.0.0.1:${DEV_WEB_PORT}`,
     ]);
   });
 
@@ -433,7 +440,7 @@ describe("the config report", () => {
     ).toEqual([
       "server.host",
       "server.port",
-      "server.webPort",
+      "server.tailscale",
       "server.authUrl",
       "server.trustedOrigins",
     ]);
@@ -451,7 +458,7 @@ describe("the config report", () => {
     expect(rows.filter((row) => row.key.startsWith("server.")).map((row) => row.value)).toEqual([
       "0.0.0.0",
       String(DEFAULT_API_PORT),
-      String(DEFAULT_WEB_PORT),
+      "false",
       `http://localhost:${String(DEFAULT_API_PORT)}`,
       "https://a.example.com, https://b.example.com",
     ]);
@@ -469,7 +476,7 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "default",
       "server.port": "default",
-      "server.webPort": "default",
+      "server.tailscale": "default",
       "server.authUrl": "default",
       "server.trustedOrigins": "default",
     });
@@ -497,7 +504,7 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
-      "server.webPort": "default",
+      "server.tailscale": "default",
       "server.authUrl": "config",
       "server.trustedOrigins": "config",
     });
@@ -521,7 +528,7 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
-      "server.webPort": "default",
+      "server.tailscale": "default",
       "server.authUrl": "config",
       "server.trustedOrigins": "config",
     });
@@ -538,7 +545,7 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "environment",
       "server.port": "environment",
-      "server.webPort": "default",
+      "server.tailscale": "default",
       "server.authUrl": "environment",
       "server.trustedOrigins": "environment",
     });
@@ -553,28 +560,18 @@ describe("the config report", () => {
     expect(sourcesOf(blank)).toEqual({
       "server.host": "default",
       "server.port": "default",
-      "server.webPort": "default",
+      "server.tailscale": "default",
       "server.authUrl": "default",
       "server.trustedOrigins": "default",
     });
   });
 
-  test("the web port takes the file, then the environment", () => {
-    const fromFilePort = reportOf({}, "production", JSON.stringify({ server: { webPort: 6000 } }));
-    const fromEnvironment = reportOf({ BANDAR_WEB_PORT: "6001" });
-
-    expect(fromFilePort.config.webPort).toBe(6000);
-    expect(sourcesOf(fromFilePort)["server.webPort"]).toBe("config");
-    expect(fromEnvironment.config.webPort).toBe(6001);
-    expect(sourcesOf(fromEnvironment)["server.webPort"]).toBe("environment");
-  });
-
-  test("a development run trusts the web dev server on the resolved web port", () => {
-    expect(reportOf({ BANDAR_WEB_PORT: "6000" }, "development").config.trustedOrigins).toEqual([
+  test("a development run trusts the web dev server", () => {
+    expect(reportOf({}, "development").config.trustedOrigins).toEqual([
       `http://localhost:${String(DEFAULT_API_PORT)}`,
       `http://127.0.0.1:${String(DEFAULT_API_PORT)}`,
-      "http://localhost:6000",
-      "http://127.0.0.1:6000",
+      `http://localhost:${String(DEV_WEB_PORT)}`,
+      `http://127.0.0.1:${String(DEV_WEB_PORT)}`,
     ]);
   });
 
@@ -588,10 +585,89 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
-      "server.webPort": "default",
+      "server.tailscale": "default",
       "server.authUrl": "environment",
       "server.trustedOrigins": "default",
     });
+  });
+});
+
+describe("the tailnet bind", () => {
+  const tailnet: TailnetIdentity = { address: "100.90.57.79", dnsName: "host.tailnet.ts.net" };
+  const found: TailnetLookup = () => ({ kind: "found", identity: tailnet });
+
+  const withTailscale = (server: { readonly host?: string; readonly authUrl?: string }): string =>
+    JSON.stringify({ server: { tailscale: true, ...server } });
+
+  test("the tailnet address and the MagicDNS auth URL replace the host and loopback", () => {
+    const report = reportOf({}, "production", withTailscale({}), found);
+
+    expect(report.config.host).toBe(tailnet.address);
+    expect(report.config.authUrl).toBe(`http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`);
+    expect(sourcesOf(report)).toMatchObject({
+      "server.host": "tailscale",
+      "server.authUrl": "tailscale",
+      "server.tailscale": "config",
+    });
+    expect(report.config.trustedOrigins).toEqual([
+      `http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`,
+      `http://${tailnet.address}:${String(DEFAULT_API_PORT)}`,
+    ]);
+  });
+
+  test("the tailnet address wins over a configured host", () => {
+    const report = reportOf({}, "production", withTailscale({ host: "127.0.0.1" }), found);
+
+    expect(report.config.host).toBe(tailnet.address);
+  });
+
+  test("a development run trusts the dev server on the loopback and the tailnet", () => {
+    const report = reportOf({}, "development", withTailscale({}), found);
+
+    expect(report.config.trustedOrigins).toEqual([
+      `http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`,
+      `http://${tailnet.address}:${String(DEFAULT_API_PORT)}`,
+      `http://localhost:${String(DEV_WEB_PORT)}`,
+      `http://127.0.0.1:${String(DEV_WEB_PORT)}`,
+      `http://${tailnet.dnsName}:${String(DEV_WEB_PORT)}`,
+      `http://${tailnet.address}:${String(DEV_WEB_PORT)}`,
+    ]);
+  });
+
+  test("an explicit auth URL wins, and the MagicDNS name is still trusted", () => {
+    const report = reportOf(
+      {},
+      "production",
+      withTailscale({ authUrl: "https://llm.example.com" }),
+      found,
+    );
+
+    expect(report.config.authUrl).toBe("https://llm.example.com");
+    expect(report.config.trustedOrigins).toContain(
+      `http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`,
+    );
+  });
+
+  test("a missing tailnet fails the boot with the reason", () => {
+    expect(() =>
+      reportOf({}, "production", withTailscale({}), () => ({
+        kind: "missing",
+        reason: "tailscale backend is NeedsLogin",
+      })),
+    ).toThrow(/server\.tailscale: tailscale backend is NeedsLogin/u);
+  });
+
+  test("a failure the settings file caused names the file", () => {
+    expect(() =>
+      reportOf({}, "production", withTailscale({}), () => ({
+        kind: "missing",
+        reason: "tailscale is not running",
+      })),
+    ).toThrow(/^invalid configuration:\n {2}server\.tailscale: tailscale is not running$/u);
+  });
+
+  test("the flag off never asks for the tailnet", () => {
+    expect(() => reportOf()).not.toThrow();
   });
 });
 

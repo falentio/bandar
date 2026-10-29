@@ -37,6 +37,11 @@ written into the unit. Passing `--port` writes `BANDAR_PORT` into the unit, whic
 tier: a `server.port` in the file still wins over it, so leave that key out of the file when the
 unit should own the port.
 
+With `server.tailscale: true`, the unit can start before tailscaled assigns the tailnet
+address, and `Bun.serve` then fails to bind. `Restart=on-failure` retries every 5 seconds, so
+the service recovers on its own. Add `After=tailscaled.service` in a drop-in when the retry
+shows up in the journal.
+
 ## What the unit holds
 
 ```ini

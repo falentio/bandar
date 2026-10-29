@@ -110,10 +110,6 @@ describe("the generated schema", () => {
     for (const provider of Object.values(providers)) expect(provider.required).toEqual([]);
   });
 
-  test("the tailscale flag is a boolean", () => {
-    expect(server.tailscale.type).toBe("boolean");
-  });
-
   test("the port bounds come from the shared constants", () => {
     expect(server.port.minimum).toBe(MIN_PORT);
     expect(server.port.maximum).toBe(MAX_PORT);

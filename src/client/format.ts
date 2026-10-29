@@ -32,7 +32,7 @@ export function formatPercent(value: number): string {
 export function formatUsd(value: number | null): string {
   if (value === null) return "—";
 
-  return value === 0 ? "$0" : `${value.toFixed(4)}`;
+  return value === 0 ? "$0" : `$${value.toFixed(4)}`;
 }
 
 /**

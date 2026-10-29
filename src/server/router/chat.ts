@@ -29,6 +29,7 @@ export type ChatDeps = {
 export type ChatInput = {
   readonly userId: string;
   readonly apiKeyId: string;
+  readonly projectUrl: string | null;
   readonly ref: string;
   readonly request: CanonicalRequest;
   readonly stream: boolean;
@@ -47,6 +48,7 @@ type EventBase = {
   inputPricePerMtok: number | null;
   outputPricePerMtok: number | null;
   reference: string;
+  projectUrl: string | null;
   startedAt: Date;
 };
 
@@ -488,6 +490,7 @@ function eventBase(
     inputPricePerMtok: attempt.inputPricePerMtok,
     outputPricePerMtok: attempt.outputPricePerMtok,
     reference,
+    projectUrl: input.projectUrl,
     startedAt,
   };
 }

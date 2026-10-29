@@ -44,6 +44,7 @@ function event(overrides: Partial<RequestEventInput>): RequestEventInput {
     providerKind: "openai",
     model: "fast",
     reference: "fast",
+    projectUrl: null,
     upstreamModel: "gpt-fast",
     status: "success",
     httpStatus: 200,

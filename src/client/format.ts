@@ -29,6 +29,10 @@ export function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+/**
+ * A USD amount at most four decimals, with its leading dollar sign, so the call site adds no
+ * currency mark of its own; the zero amount prints `$0` and a missing one the dash.
+ */
 export function formatUsd(value: number | null): string {
   if (value === null) return "—";
 

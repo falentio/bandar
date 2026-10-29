@@ -75,3 +75,41 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" dist/release/* --title "$GITHUB_REF_NAME" --generate-notes
           fi
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/release
+          merge-multiple: true
+      - name: Stage the npm packages from the release files
+        run: bun scripts/npm.ts --stage
+      - name: Require the npm token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "npm: NPM_TOKEN is empty; set the repository secret NPM_TOKEN to a granular npm token with publish rights" >&2
+            exit 1
+          fi
+      - name: Fail on a version, tag, or binary mismatch
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: bun scripts/npm.ts --preflight
+      - name: Publish the platform packages, then the loader
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun scripts/npm.ts --publish

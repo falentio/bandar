@@ -32,7 +32,6 @@ export type Progress = {
 export function createProgress(stream: ProgressStream): Progress {
   if (stream.isTTY !== true) return QUIET;
 
-  const columns = stream.columns ?? 0;
   let drawn = 0;
   let latest: UpdateEvent | null = null;
   let phase: string | null = null;
@@ -43,6 +42,7 @@ export function createProgress(stream: ProgressStream): Progress {
     if (latest === null) return;
 
     const frame = frameOf(latest, tick);
+    const columns = stream.columns ?? 0;
     const row = columns > 0 ? frame.slice(0, columns) : frame;
 
     stream.write(`\r${row}${" ".repeat(Math.max(0, drawn - row.length))}`);

@@ -6,7 +6,7 @@ type FakeStream = {
   readonly stream: {
     write(chunk: string): void;
     readonly isTTY?: boolean;
-    readonly columns?: number;
+    columns?: number;
   };
 };
 
@@ -170,6 +170,20 @@ describe("createProgress on a terminal", () => {
     progress.report({ kind: "checking" });
 
     expect(written).toEqual(["\r| checking"]);
+
+    progress.finish();
+  });
+
+  test("a terminal that widens mid-row draws the row at its new width", () => {
+    const { written, stream } = streamOf({ isTTY: true, columns: 20 });
+    const progress = createProgress(stream);
+
+    progress.report({ kind: "checking" });
+
+    stream.columns = 80;
+    vi.advanceTimersByTime(80);
+
+    expect(written).toEqual(["\r| checking the lates", "\r/ checking the latest release"]);
 
     progress.finish();
   });

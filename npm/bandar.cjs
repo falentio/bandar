@@ -6,8 +6,8 @@ const { existsSync } = require("node:fs");
 const { dirname, join } = require("node:path");
 
 const PACKAGES = new Map([
-  ["linux-x64", { name: "bandar-linux-x64", os: "linux", file: "bin/bandar", libc: "glibc" }],
-  ["win32-x64", { name: "bandar-windows-x64", os: "windows", file: "bin/bandar.exe" }],
+  ["linux-x64", { name: "bandar-linux-x64", asset: "linux", file: "bin/bandar", libc: "glibc" }],
+  ["win32-x64", { name: "bandar-windows-x64", asset: "windows", file: "bin/bandar.exe" }],
 ]);
 
 const INSTALLER =

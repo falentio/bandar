@@ -25,7 +25,7 @@ const VISIBILITY_INTERVAL = 3_000;
 
 type Platform = {
   readonly name: string;
-  readonly os: string;
+  readonly asset: string;
   readonly file: string;
   readonly libc?: string;
 };
@@ -89,7 +89,7 @@ function split(key: string) {
 function artifactName(key: string, platform: Platform): string {
   const exe = platform.file.endsWith(".exe") ? ".exe" : "";
 
-  return `bandar-${version}-${platform.os}-${split(key).arch}${exe}`;
+  return `bandar-${version}-${platform.asset}-${split(key).arch}${exe}`;
 }
 
 async function digest(path: string): Promise<string> {
@@ -126,7 +126,7 @@ function platformManifest(key: string, platform: Platform): Manifest {
   const manifest: Manifest = {
     ...shared(
       platform.name,
-      `The bandar binary for ${platform.os} ${arch}. Install bandar instead.`,
+      `The bandar binary for ${platform.asset} ${arch}. Install bandar instead.`,
     ),
     os: [os],
     cpu: [arch],

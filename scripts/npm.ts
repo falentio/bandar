@@ -30,7 +30,6 @@ type Platform = {
   readonly libc?: string;
 };
 
-/** The staged package.json a `--stage` run writes: the fields every package carries, plus the ones a variant sets. */
 export type Manifest = {
   readonly name: string;
   readonly version: string;
@@ -49,7 +48,6 @@ export type Manifest = {
   readonly optionalDependencies?: Readonly<Record<string, string>>;
 };
 
-/** What the released linux binary reports its version to be, or why this run could not ask it. */
 type VersionReport =
   | { readonly kind: "ok"; readonly value: string }
   | { readonly kind: "skipped" }
@@ -102,7 +100,6 @@ async function digest(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-/** The harness stages fake release files, so a run never needs a 229 MB build or a real release. */
 function releaseDirectory(args: readonly string[]): string {
   const index = args.indexOf("--release");
   const path = index === -1 ? undefined : args[index + 1];
@@ -157,7 +154,6 @@ function writeManifest(directory: string, manifest: Manifest): void {
   writeFileSync(join(directory, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-/** Copies the release assets into publishable directories. The asset is the only source of bytes. */
 async function stage(): Promise<void> {
   rmSync(OUTPUT, { recursive: true, force: true });
 
@@ -212,7 +208,6 @@ function view(args: readonly string[]) {
   return { ok: result.exitCode === 0, text: result.stdout.toString().trim() };
 }
 
-/** Compares the version the release binary reports with the one npm is about to publish. */
 function reportedVersion(): VersionReport {
   if (process.platform !== "linux") return { kind: "skipped" };
 
@@ -233,7 +228,6 @@ function reportedVersion(): VersionReport {
   return { kind: "skipped" };
 }
 
-/** Every gate that must hold before the first publish. Nothing here writes to the registry. */
 async function preflight(staged: readonly string[]): Promise<void> {
   const problems: string[] = [];
 
@@ -278,13 +272,10 @@ async function preflight(staged: readonly string[]): Promise<void> {
   console.log(`npm: preflight passed for ${staged.join(", ")} at ${version}`);
 }
 
-/** Publishes the platform packages first, so the loader never names a version that is not there. */
 async function publish(staged: readonly string[]): Promise<void> {
   const order = [...staged.filter((name) => name !== LOADER_NAME), LOADER_NAME];
 
   for (const name of order) {
-    // A rerun after a half-finished release has to converge, so a name already at this version is
-    // done, not fatal.
     if (view([`${name}@${version}`, "version"]).ok) {
       console.log(`npm: ${name}@${version} is already published, skipping`);
       continue;

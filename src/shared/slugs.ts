@@ -10,6 +10,8 @@ export const MAX_SLUG_LENGTH = 40;
 export const MAX_UPSTREAM_MODEL_LENGTH = 200;
 export const MAX_MODEL_REF_LENGTH = MAX_SLUG_LENGTH + 1 + MAX_UPSTREAM_MODEL_LENGTH;
 
+export const MAX_MODEL_SLUG_LENGTH = MAX_MODEL_REF_LENGTH;
+
 const MAX_GENERATED_LENGTH = 36;
 
 export const SlugSchema = v.pipe(
@@ -18,6 +20,17 @@ export const SlugSchema = v.pipe(
   v.minLength(1),
   v.maxLength(MAX_SLUG_LENGTH),
   v.regex(SLUG_PATTERN, "use lowercase letters, digits, and single hyphens"),
+);
+
+export const ModelSlugSchema = v.pipe(
+  v.string(),
+  v.trim(),
+  v.minLength(1),
+  v.maxLength(MAX_MODEL_SLUG_LENGTH),
+  v.check(
+    (slug) => !slug.startsWith(TAG_REF_PREFIX),
+    "an address cannot start with " + TAG_REF_PREFIX,
+  ),
 );
 
 export function slugify(value: string): string {
@@ -44,6 +57,10 @@ export function availableSlug(base: string, taken: ReadonlySet<string>): string 
 
 export function providerRefOf(providerSlug: string, upstreamModel: string): string {
   return `${providerSlug}/${upstreamModel}`;
+}
+
+export function defaultModelSlug(providerSlug: string, upstreamModel: string): string {
+  return providerSlug === "" ? upstreamModel : providerRefOf(providerSlug, upstreamModel);
 }
 
 export function tagRefOf(slug: string): string {

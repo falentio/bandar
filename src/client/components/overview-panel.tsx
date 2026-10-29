@@ -10,7 +10,10 @@ import {
   formatTps,
   formatUsd,
 } from "../format";
+import { modelLabels } from "../model-labels";
+import { ModelName } from "../model-name";
 import { useAnalytics } from "../use-analytics";
+import { useProviders } from "../use-providers";
 import { AnalyticsFilterBar } from "./analytics-filters";
 import { TokenChart } from "./token-chart";
 
@@ -18,6 +21,8 @@ const RANGES = [7, 30, 90] as const;
 
 export function OverviewPanel() {
   const analytics = useAnalytics();
+  const providers = useProviders();
+  const labels = modelLabels(providers.providers);
   const data = analytics.data;
 
   return (
@@ -103,7 +108,7 @@ export function OverviewPanel() {
           <Card>
             <CardHeader>
               <CardTitle>By model</CardTitle>
-              <CardDescription>Top aliases in the selected window.</CardDescription>
+              <CardDescription>Top models in the selected window.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -121,7 +126,9 @@ export function OverviewPanel() {
                   <tbody>
                     {data.models.map((model) => (
                       <tr key={`${model.providerKind}:${model.model}`} className="border-b">
-                        <td className="py-2 pr-3 font-mono text-xs">{model.model}</td>
+                        <td className="py-2 pr-3">
+                          <ModelName labels={labels} slug={model.model} />
+                        </td>
                         <td className="py-2 pr-3">{model.providerKind}</td>
                         <td className="py-2 pr-3 text-right">
                           {formatExactTokens(model.requests)}

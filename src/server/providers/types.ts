@@ -80,7 +80,7 @@ export class UpstreamError extends Error {
 
 export type ModelCatalogEntry = {
   readonly upstreamModel: string;
-  readonly alias: string;
+  readonly label: string;
   readonly inputPricePerMtok: number | null;
   readonly cacheInputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;

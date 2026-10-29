@@ -61,7 +61,7 @@ export function ApiKeysPanel() {
             {`curl ${window.location.origin}/v1/chat/completions \
   -H "Authorization: Bearer bandar_..." \
   -H "content-type: application/json" \
-  -d '{"model":"your-alias","messages":[{"role":"user","content":"hello"}]}'`}
+  -d '{"model":"your-address","messages":[{"role":"user","content":"hello"}]}'`}
           </pre>
         </div>
 

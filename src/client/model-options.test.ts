@@ -4,7 +4,7 @@ import { modelChoices } from "./model-options";
 describe("modelChoices", () => {
   test("lists tags first as their own list", () => {
     const choices = modelChoices(
-      [{ name: "Alpha", models: [{ alias: "sonnet", upstreamModel: "sonnet" }] }],
+      [{ name: "Alpha", models: [{ slug: "sonnet", alias: null, upstreamModel: "sonnet" }] }],
       [{ ref: "tags/coding" }],
     );
 
@@ -20,11 +20,11 @@ describe("modelChoices", () => {
         {
           name: "Alpha",
           models: [
-            { alias: "a-one", upstreamModel: "a-one" },
-            { alias: "a-two", upstreamModel: "a-two" },
+            { slug: "a-one", alias: null, upstreamModel: "a-one" },
+            { slug: "a-two", alias: null, upstreamModel: "a-two" },
           ],
         },
-        { name: "Beta", models: [{ alias: "b-one", upstreamModel: "b-one" }] },
+        { name: "Beta", models: [{ slug: "b-one", alias: null, upstreamModel: "b-one" }] },
       ],
       [],
     );
@@ -40,7 +40,7 @@ describe("modelChoices", () => {
     const choices = modelChoices(
       [
         { name: "Empty", models: [] },
-        { name: "Alpha", models: [{ alias: "a-one", upstreamModel: "a-one" }] },
+        { name: "Alpha", models: [{ slug: "a-one", alias: null, upstreamModel: "a-one" }] },
       ],
       [],
     );
@@ -50,35 +50,41 @@ describe("modelChoices", () => {
     ]);
   });
 
-  test("drops a value that already appeared", () => {
+  test("drops an address that already appeared", () => {
     const choices = modelChoices(
       [
         {
           name: "Alpha",
           models: [
-            { alias: "tags/fast", upstreamModel: "alpha-fast" },
-            { alias: "sonnet", upstreamModel: "sonnet" },
+            { slug: "same", alias: "Alpha model", upstreamModel: "alpha-one" },
+            { slug: "sonnet", alias: null, upstreamModel: "sonnet" },
           ],
         },
-        { name: "Beta", models: [{ alias: "sonnet", upstreamModel: "beta-sonnet" }] },
+        { name: "Beta", models: [{ slug: "same", alias: null, upstreamModel: "beta-one" }] },
       ],
       [{ ref: "tags/fast" }, { ref: "tags/fast" }],
     );
 
     expect(choices.tags).toEqual([{ value: "tags/fast", label: "tags/fast" }]);
     expect(choices.providers).toEqual([
-      { label: "Alpha", options: [{ value: "sonnet", label: "sonnet" }] },
+      {
+        label: "Alpha",
+        options: [
+          { value: "same", label: "Alpha model (same)" },
+          { value: "sonnet", label: "sonnet" },
+        ],
+      },
     ]);
   });
 
-  test("adds the upstream name only when it differs from the alias", () => {
+  test("keeps two models that share a label", () => {
     const choices = modelChoices(
       [
         {
           name: "Alpha",
           models: [
-            { alias: "sonnet", upstreamModel: "claude-sonnet-4-6" },
-            { alias: "haiku", upstreamModel: "haiku" },
+            { slug: "alpha/gpt-4o-mini", alias: "Cheap", upstreamModel: "gpt-4o-mini" },
+            { slug: "beta/gpt-4o-mini", alias: "Cheap", upstreamModel: "gpt-4o-mini" },
           ],
         },
       ],
@@ -86,7 +92,27 @@ describe("modelChoices", () => {
     );
 
     expect(choices.providers[0]?.options).toEqual([
-      { value: "sonnet", label: "sonnet (claude-sonnet-4-6)" },
+      { value: "alpha/gpt-4o-mini", label: "Cheap (alpha/gpt-4o-mini)" },
+      { value: "beta/gpt-4o-mini", label: "Cheap (beta/gpt-4o-mini)" },
+    ]);
+  });
+
+  test("adds the address only when it differs from the label", () => {
+    const choices = modelChoices(
+      [
+        {
+          name: "Alpha",
+          models: [
+            { slug: "openai/sonnet", alias: "Sonnet", upstreamModel: "claude-sonnet-4-6" },
+            { slug: "haiku", alias: null, upstreamModel: "haiku" },
+          ],
+        },
+      ],
+      [],
+    );
+
+    expect(choices.providers[0]?.options).toEqual([
+      { value: "openai/sonnet", label: "Sonnet (openai/sonnet)" },
       { value: "haiku", label: "haiku" },
     ]);
   });

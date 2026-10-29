@@ -6,7 +6,7 @@ import type { ProviderDeps } from "../providers";
 import { isBuiltInProviderKind, type ProviderEndpoints } from "../providers/endpoints";
 
 export type ResolvedAttempt = {
-  readonly alias: string;
+  readonly slug: string;
   readonly upstreamModel: string;
   readonly compat: Compat | null;
   readonly inputPricePerMtok: number | null;
@@ -33,7 +33,7 @@ export type ResolvedPlan = {
 export type ModelRef = { readonly id: string; readonly createdAt: Date };
 
 type AttemptRow = {
-  readonly alias: string;
+  readonly slug: string;
   readonly upstreamModel: string;
   readonly compat: string | null;
   readonly inputPricePerMtok: number | null;
@@ -52,7 +52,7 @@ type AttemptRow = {
 };
 
 const attemptColumns = {
-  alias: providerModels.alias,
+  slug: providerModels.slug,
   upstreamModel: providerModels.upstreamModel,
   compat: providerModels.compat,
   inputPricePerMtok: providerModels.inputPricePerMtok,
@@ -89,7 +89,7 @@ export async function resolvePlan(
   userId: string,
   ref: string,
 ): Promise<ResolvedPlan> {
-  const aliasRows = await deps.db
+  const slugRows = await deps.db
     .select(attemptColumns)
     .from(providerModels)
     .innerJoin(providers, eq(providers.id, providerModels.providerId))
@@ -97,14 +97,14 @@ export async function resolvePlan(
     .where(
       and(
         eq(providerModels.userId, userId),
-        eq(providerModels.alias, ref),
+        eq(providerModels.slug, ref),
         eq(providerModels.enabled, true),
       ),
     )
     .orderBy(asc(providerCredentials.priority));
 
-  if (aliasRows.length > 0)
-    return { ref, tag: null, attempts: attemptsOf(aliasRows, deps.endpoints) };
+  if (slugRows.length > 0)
+    return { ref, tag: null, attempts: attemptsOf(slugRows, deps.endpoints) };
 
   if (ref.startsWith(TAG_REF_PREFIX)) {
     const slug = ref.slice(TAG_REF_PREFIX.length);
@@ -159,7 +159,7 @@ export async function listModelRefs(
 ): Promise<readonly ModelRef[]> {
   const modelRows = await deps.db
     .select({
-      alias: providerModels.alias,
+      slug: providerModels.slug,
       upstreamModel: providerModels.upstreamModel,
       providerSlug: providers.slug,
       createdAt: providerModels.createdAt,
@@ -168,15 +168,15 @@ export async function listModelRefs(
     .innerJoin(providers, eq(providers.id, providerModels.providerId))
     .where(and(eq(providerModels.userId, userId), eq(providerModels.enabled, true)));
 
-  const aliases = modelRows.map((row): ModelRef => ({ id: row.alias, createdAt: row.createdAt }));
-  const aliasIds = new Set(aliases.map((model) => model.id));
+  const addresses = modelRows.map((row): ModelRef => ({ id: row.slug, createdAt: row.createdAt }));
+  const addressIds = new Set(addresses.map((model) => model.id));
 
   const providerRefs = modelRows.flatMap((row): ModelRef[] => {
     if (row.providerSlug === "") return [];
 
     const ref = providerRefOf(row.providerSlug, row.upstreamModel);
 
-    return aliasIds.has(ref) ? [] : [{ id: ref, createdAt: row.createdAt }];
+    return addressIds.has(ref) ? [] : [{ id: ref, createdAt: row.createdAt }];
   });
 
   const tagRows = await deps.db
@@ -194,7 +194,7 @@ export async function listModelRefs(
 
   const byId = new Map<string, ModelRef>();
 
-  for (const model of [...aliases, ...tagRefs, ...providerRefs]) {
+  for (const model of [...addresses, ...tagRefs, ...providerRefs]) {
     if (!byId.has(model.id)) byId.set(model.id, model);
   }
 

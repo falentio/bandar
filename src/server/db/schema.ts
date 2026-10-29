@@ -66,7 +66,8 @@ export const providerModels = sqliteTable(
     providerId: text("provider_id")
       .notNull()
       .references(() => providers.id, { onDelete: "cascade" }),
-    alias: text("alias").notNull(),
+    slug: text("slug").notNull(),
+    alias: text("alias"),
     upstreamModel: text("upstream_model").notNull(),
     compat: text("compat"),
     inputPricePerMtok: real("input_price_per_mtok"),
@@ -78,7 +79,7 @@ export const providerModels = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
-    uniqueIndex("provider_models_user_alias").on(table.userId, table.alias),
+    uniqueIndex("provider_models_user_slug").on(table.userId, table.slug),
     uniqueIndex("provider_models_provider_upstream").on(table.providerId, table.upstreamModel),
   ],
 );
@@ -126,7 +127,7 @@ export const cooldownEvents = sqliteTable(
     providerId: text("provider_id").notNull(),
     providerName: text("provider_name").notNull(),
     modelId: text("model_id").notNull(),
-    modelAlias: text("model_alias").notNull(),
+    modelSlug: text("model_slug").notNull(),
     credentialId: text("credential_id"),
     credentialName: text("credential_name"),
     errorKind: text("error_kind").notNull(),

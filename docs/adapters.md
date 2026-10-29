@@ -106,13 +106,13 @@ error envelope, its completed response, and its stream frames:
 
 `POST /v1/messages` accepts these fields:
 
-| Field                                                  | Meaning                                                                      |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `model`                                                | An alias, `tags/<slug>`, or `<provider>/<model>`, resolved by `resolvePlan`  |
-| `messages`                                             | `user` and `assistant` turns; content is a string or an array of text blocks |
-| `system`                                               | A string or an array of text blocks; becomes the leading system message      |
-| `stream`                                               | `true` answers SSE, `false` or absent answers one message                    |
-| `max_tokens`, `temperature`, `top_p`, `stop_sequences` | Passed through as `maxTokens`, `temperature`, `topP`, `stop`                 |
+| Field                                                  | Meaning                                                                       |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `model`                                                | An address, `tags/<slug>`, or `<provider>/<model>`, resolved by `resolvePlan` |
+| `messages`                                             | `user` and `assistant` turns; content is a string or an array of text blocks  |
+| `system`                                               | A string or an array of text blocks; becomes the leading system message       |
+| `stream`                                               | `true` answers SSE, `false` or absent answers one message                     |
+| `max_tokens`, `temperature`, `top_p`, `stop_sequences` | Passed through as `maxTokens`, `temperature`, `topP`, `stop`                  |
 
 Every other field is ignored, including `metadata`, `thinking`, `top_k`,
 `tools`, and `tool_choice`. Multiple text blocks in one message join with a
@@ -577,8 +577,8 @@ On OpenCode Go, `defaultCompat` is the table, so the override is how a listed id
 put on another wire. Importing a catalog never touches an existing row: a re-import
 skips an upstream model it already has, so it cannot clobber a user's override.
 
-The Models tab renders one native select per row, labelled `Compatibility for
-<alias>`. Its first option is `Provider default (<wire>)`, or `Provider default
+A model's edit dialog carries one native select labelled `Protocol`. Its first
+option is `Provider default (<wire>)`, or `Provider default
 (no wire)` for a model the provider cannot route, then one option per
 `provider.compats`. Choosing the default clears the column; the select is disabled
 while a write is in flight.

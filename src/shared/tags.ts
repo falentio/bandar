@@ -3,7 +3,8 @@ import { SlugSchema } from "./slugs";
 
 export const TagModelSchema = v.object({
   modelId: v.string(),
-  alias: v.string(),
+  slug: v.string(),
+  alias: v.nullable(v.string()),
   upstreamModel: v.string(),
   ref: v.string(),
   providerId: v.string(),

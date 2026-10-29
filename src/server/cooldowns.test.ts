@@ -33,7 +33,7 @@ type Seeded = {
   readonly providerId: string;
   readonly providerName: string;
   readonly modelId: string;
-  readonly modelAlias: string;
+  readonly modelSlug: string;
   readonly credentialId: string;
   readonly credentialName: string;
 };
@@ -62,7 +62,7 @@ describe("cooldown history", () => {
       providerId: seeded.providerId,
       providerName: "Primary",
       modelId: seeded.modelId,
-      modelAlias: "fast",
+      modelSlug: "fast",
       credentialId: seeded.credentialId,
       credentialName: "primary",
       errorKind: "auth",
@@ -127,7 +127,7 @@ function failureOf(seeded: Seeded, now: Date): FailureRecord {
     providerId: seeded.providerId,
     providerName: seeded.providerName,
     modelId: seeded.modelId,
-    modelAlias: seeded.modelAlias,
+    modelSlug: seeded.modelSlug,
     credentialId: seeded.credentialId,
     credentialName: seeded.credentialName,
   };
@@ -147,10 +147,10 @@ async function seedCredential(handle: DatabaseHandle, userId: string): Promise<S
 
   const withModel = await addProviderModel(deps, userId, provider.id, {
     upstreamModel: "m",
-    alias: "fast",
+    slug: "fast",
   });
 
-  const model = withModel?.models.find((entry) => entry.alias === "fast");
+  const model = withModel?.models.find((entry) => entry.slug === "fast");
 
   const added = await addProviderCredential(deps, userId, provider.id, {
     label: "primary",
@@ -172,7 +172,7 @@ async function seedCredential(handle: DatabaseHandle, userId: string): Promise<S
     providerId: provider.id,
     providerName: provider.name,
     modelId: model.id,
-    modelAlias: model.alias,
+    modelSlug: model.slug,
     credentialId: credential.id,
     credentialName: credential.label,
   };

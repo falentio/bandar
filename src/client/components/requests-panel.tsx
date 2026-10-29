@@ -1,10 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatExactTokens, formatMs, formatTps, formatUsd, formatWhen } from "../format";
+import { modelLabels } from "../model-labels";
+import { ModelName } from "../model-name";
+import { useProviders } from "../use-providers";
 import { useRequests } from "../use-requests";
 
 export function RequestsPanel() {
   const requests = useRequests(50);
+  const providers = useProviders();
+  const labels = modelLabels(providers.providers);
 
   return (
     <div className="space-y-4">
@@ -56,7 +61,7 @@ export function RequestsPanel() {
                         {formatWhen(request.startedAt)}
                       </td>
                       <td className="py-2 pr-3">
-                        <span className="font-mono text-xs">{request.model}</span>
+                        <ModelName labels={labels} slug={request.model} className="text-xs" />
                         {request.reference === null ||
                         request.reference === request.model ? null : (
                           <span className="mt-0.5 block font-mono text-xs text-muted-foreground">

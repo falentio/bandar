@@ -13,7 +13,7 @@ SQLite.
 ## Why it exists
 
 **One API for many providers.** A request names a model in one of three forms: an
-alias such as `fast`, a tag such as `tags/cheap-first`, or a provider reference such
+address such as `fast`, a tag such as `tags/cheap-first`, or a provider reference such
 as `kilo/qwen3-coder`. A tag is a named fallback chain, walked in order until a model
 answers.
 
@@ -38,7 +38,7 @@ responses, messages, and GenAI endpoints. Three generic wires, `openai`, `anthro
 and `google`, cover a custom upstream added from the dashboard without changing code.
 
 **Analytics that survive a deletion.** Every attempt writes one row to DuckDB:
-tokens, time to first token, duration, tokens per second, the resolved alias, and the
+tokens, time to first token, duration, tokens per second, the resolved address, and the
 string the client sent. The row is denormalized, so deleting a provider keeps its
 history. Each failure that flags a subject also writes one row to the cooldown
 history, which the Errors page lists.

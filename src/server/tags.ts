@@ -20,7 +20,8 @@ export async function listTags(deps: TagDeps, userId: string): Promise<TagList> 
       slug: tags.slug,
       createdAt: tags.createdAt,
       modelId: providerModels.id,
-      alias: providerModels.alias,
+      modelSlug: providerModels.slug,
+      modelAlias: providerModels.alias,
       upstreamModel: providerModels.upstreamModel,
       priority: tagModels.priority,
       providerId: providers.id,
@@ -47,7 +48,7 @@ export async function listTags(deps: TagDeps, userId: string): Promise<TagList> 
 
     if (
       row.modelId !== null &&
-      row.alias !== null &&
+      row.modelSlug !== null &&
       row.priority !== null &&
       row.providerId !== null &&
       row.providerName !== null &&
@@ -56,7 +57,8 @@ export async function listTags(deps: TagDeps, userId: string): Promise<TagList> 
     ) {
       tag.models.push({
         modelId: row.modelId,
-        alias: row.alias,
+        slug: row.modelSlug,
+        alias: row.modelAlias,
         upstreamModel: row.upstreamModel,
         ref: providerRefOf(row.providerSlug, row.upstreamModel),
         providerId: row.providerId,

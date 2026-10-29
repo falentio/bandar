@@ -27,7 +27,7 @@ export type FailureContext = {
   readonly providerId: string;
   readonly providerName: string;
   readonly modelId: string;
-  readonly modelAlias: string;
+  readonly modelSlug: string;
   readonly credentialId: string | null;
   readonly credentialName: string | null;
 };
@@ -104,7 +104,7 @@ export function recordFailure(db: Db, record: FailureRecord): void {
         providerId: context.providerId,
         providerName: context.providerName,
         modelId: context.modelId,
-        modelAlias: context.modelAlias,
+        modelSlug: context.modelSlug,
         credentialId: context.credentialId,
         credentialName: context.credentialName,
         errorKind: context.errorKind,
@@ -216,7 +216,7 @@ function subjectNameOf(subject: Subject, context: FailureContext): string {
     }
 
     case "model": {
-      return context.modelAlias;
+      return context.modelSlug;
     }
 
     case "credential": {

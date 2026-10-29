@@ -364,10 +364,10 @@ try {
     assert.equal(Object.hasOwn(openaiProvider.provider?.credentials[0] ?? {}, "apiKey"), false);
   });
 
-  await check("POST /api/providers/:id/models adds an alias to a provider", async () => {
+  await check("POST /api/providers/:id/models adds an address to a provider", async () => {
     const provider = await postJson(
       providerPaths.models(openaiProvider.provider?.id ?? ""),
-      { upstreamModel: "fake-openai-model", alias: "fast" },
+      { upstreamModel: "fake-openai-model", slug: "fast" },
       ProviderSchema,
       201,
     );
@@ -376,8 +376,8 @@ try {
     openaiProvider.modelId = provider.models[0]?.id ?? "";
 
     assert.deepEqual(
-      provider.models.map((model) => [model.alias, model.upstreamModel]),
-      [["fast", "fake-openai-model"]],
+      provider.models.map((model) => [model.slug, model.alias, model.upstreamModel]),
+      [["fast", null, "fake-openai-model"]],
     );
   });
 
@@ -396,7 +396,7 @@ try {
 
     const seeded = await postJson(
       providerPaths.models(claudeProvider.provider?.id ?? ""),
-      { upstreamModel: "fake-claude", alias: "claude" },
+      { upstreamModel: "fake-claude", slug: "claude" },
       ProviderSchema,
       201,
     );
@@ -417,7 +417,7 @@ try {
 
     await postJson(
       providerPaths.models(google.id),
-      { upstreamModel: "fake-gemini", alias: "gemini" },
+      { upstreamModel: "fake-gemini", slug: "gemini" },
       ProviderSchema,
       201,
     );
@@ -448,18 +448,22 @@ try {
     assert.equal((await errorBody(response)).code, "conflict");
   });
 
-  await check("POST /api/providers/:id/models rejects a duplicate alias with 409", async () => {
+  await check("POST /api/providers/:id/models rejects a duplicate address with 409", async () => {
     const response = await post(providerPaths.models(claudeProvider.provider?.id ?? ""), {
       upstreamModel: "other-model",
-      alias: "fast",
+      slug: "fast",
     });
 
     assert.equal(response.status, 409);
-    assert.equal((await errorBody(response)).code, "conflict");
+
+    const error = await errorBody(response);
+
+    assert.equal(error.code, "conflict");
+    assert.equal(error.message, "the address fast is taken");
 
     const duplicateUpstream = await post(providerPaths.models(openaiProvider.provider?.id ?? ""), {
       upstreamModel: "fake-openai-model",
-      alias: "fast-2",
+      slug: "fast-2",
     });
 
     assert.equal(duplicateUpstream.status, 409);
@@ -467,7 +471,7 @@ try {
   });
 
   await check(
-    "DELETE /api/providers/:id/models/:modelId removes a model and its alias",
+    "DELETE /api/providers/:id/models/:modelId removes a model and its address",
     async () => {
       assert.notEqual(claudeProvider.modelId, "");
 
@@ -485,12 +489,12 @@ try {
       assert.deepEqual(
         body.data.map((model) => model.id).sort(),
         ["fake-google/fake-gemini", "fake-openai/fake-openai-model", "fast", "gemini"],
-        `aliases after the removal: ${body.data.map((model) => model.id).join(", ")}`,
+        `addresses after the removal: ${body.data.map((model) => model.id).join(", ")}`,
       );
 
       const restored = await postJson(
         providerPaths.models(claudeProvider.provider?.id ?? ""),
-        { upstreamModel: "fake-claude", alias: "claude" },
+        { upstreamModel: "fake-claude", slug: "claude" },
         ProviderSchema,
         201,
       );
@@ -499,13 +503,37 @@ try {
     },
   );
 
+  await check("two models may share a label", async () => {
+    const provider = await postJson(
+      providerPaths.models(claudeProvider.provider?.id ?? ""),
+      { upstreamModel: "other-model", alias: "fast" },
+      ProviderSchema,
+      201,
+    );
+
+    const shared = provider.models.find((model) => model.upstreamModel === "other-model");
+
+    assert.equal(shared?.slug, "fake-anthropic/other-model");
+    assert.equal(shared?.alias, "fast");
+
+    const listed = await fetch(new URL("/v1/models", origin), { headers: bearer() });
+    const models = v.parse(ModelListSchema, await listed.json());
+
+    assert.equal(models.data.filter((model) => model.id === "fast").length, 1);
+
+    await deleteJson(
+      providerPaths.model(claudeProvider.provider?.id ?? "", shared?.id ?? ""),
+      ProviderSchema,
+    );
+  });
+
   await check("POST /api/auth/api-key/create mints a gateway key", async () => {
     const minted = await mintGatewayKey();
 
     assert.ok(minted.startsWith("bandar_"), `key ${minted} lacks the bandar_ prefix`);
   });
 
-  await check("GET /v1/models lists aliases and provider refs", async () => {
+  await check("GET /v1/models lists addresses and provider refs", async () => {
     const response = await fetch(new URL("/v1/models", origin), { headers: bearer() });
     assert.equal(response.status, 200);
 
@@ -572,7 +600,7 @@ try {
     assert.ok(stream.done, "the stream did not end with [DONE]");
   });
 
-  await check("an unknown alias is a 404 model_not_found", async () => {
+  await check("an unknown address is a 404 model_not_found", async () => {
     const response = await fetch(new URL("/v1/chat/completions", origin), {
       method: "POST",
       headers: { "content-type": "application/json", ...bearer() },
@@ -795,24 +823,33 @@ try {
       200,
     );
 
-    assert.equal(refresh.added, 4);
-    assert.equal(refresh.skipped, 1);
+    assert.equal(refresh.added, 5);
+    assert.equal(refresh.skipped, 0);
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
-    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
-      "anthropic/claude-sonnet-4",
-      "anthropic/claude-sonnet-4:free",
-      "kilo-auto/free",
-      "openai/gpt-5-codex",
-    ]);
-
-    const sonnet = detail.provider.models.find(
-      (model) => model.alias === "anthropic/claude-sonnet-4",
+    const imported = [...detail.provider.models].sort((left, right) =>
+      left.slug < right.slug ? -1 : 1,
     );
 
-    const free = detail.provider.models.find((model) => model.alias === "kilo-auto/free");
-    const auto = detail.provider.models.find((model) => model.alias === "openai/gpt-5-codex");
+    assert.deepEqual(
+      imported.map((model) => [model.slug, model.alias]),
+      [
+        ["kilo/anthropic/claude-sonnet-4", null],
+        ["kilo/anthropic/claude-sonnet-4:free", "anthropic/claude-sonnet-4"],
+        ["kilo/fast", null],
+        ["kilo/kilo-auto/free", null],
+        ["kilo/openai/gpt-5-codex", null],
+      ],
+    );
+
+    const sonnet = detail.provider.models.find(
+      (model) => model.slug === "kilo/anthropic/claude-sonnet-4",
+    );
+
+    const free = detail.provider.models.find((model) => model.slug === "kilo/kilo-auto/free");
+
+    const auto = detail.provider.models.find((model) => model.slug === "kilo/openai/gpt-5-codex");
 
     assert.equal(sonnet?.inputPricePerMtok, 3);
     assert.equal(sonnet?.outputPricePerMtok, 15);
@@ -834,7 +871,7 @@ try {
     const response = await fetch(new URL("/v1/chat/completions", origin), {
       method: "POST",
       headers: { "content-type": "application/json", ...bearer() },
-      body: JSON.stringify(chat("anthropic/claude-sonnet-4", true, "kilocode")),
+      body: JSON.stringify(chat("kilo/anthropic/claude-sonnet-4", true, "kilocode")),
     });
 
     assert.equal(response.status, 200);
@@ -850,7 +887,7 @@ try {
     const response = await fetch(new URL("/v1/chat/completions", origin), {
       method: "POST",
       headers: { "content-type": "application/json", ...bearer() },
-      body: JSON.stringify(chat("openai/gpt-5-codex", false, "kilocode")),
+      body: JSON.stringify(chat("kilo/openai/gpt-5-codex", false, "kilocode")),
     });
 
     assert.equal(response.status, 200);
@@ -896,7 +933,7 @@ try {
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
-    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+    assert.deepEqual(detail.provider.models.map((model) => model.upstreamModel).sort(), [
       "thk-mini",
       "thk-pro",
     ]);
@@ -907,7 +944,7 @@ try {
       "Token Harbor publishes no prices",
     );
 
-    const response = await chatRequest("thk-pro", false);
+    const response = await chatRequest("tokenharbor/thk-pro", false);
 
     assert.equal(response.status, 200);
 
@@ -933,15 +970,15 @@ try {
     assert.equal(refresh.added, 2);
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
-    const large = detail.provider.models.find((model) => model.alias === "yeta-large");
-    const image = detail.provider.models.find((model) => model.alias === "yeta-image");
+    const large = detail.provider.models.find((model) => model.upstreamModel === "yeta-large");
+    const image = detail.provider.models.find((model) => model.upstreamModel === "yeta-image");
 
     assert.equal(large?.inputPricePerMtok, 3);
     assert.equal(large?.outputPricePerMtok, 12);
     assert.equal(image?.inputPricePerMtok, null);
     assert.equal(image?.outputPricePerMtok, null);
 
-    const response = await chatRequest("yeta-large", true);
+    const response = await chatRequest("yeta/yeta-large", true);
 
     assert.equal(response.status, 200);
 
@@ -966,14 +1003,14 @@ try {
     assert.equal(refresh.added, 2);
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
-    const flow = detail.provider.models.find((model) => model.alias === "river-flow");
+    const flow = detail.provider.models.find((model) => model.upstreamModel === "river-flow");
 
     assert.equal(flow?.inputPricePerMtok, 0.4);
     assert.equal(flow?.outputPricePerMtok, 1.6);
 
     await postJson(providerPaths.credentials(id), { apiKey: "rv_test" }, ProviderSchema, 201);
 
-    const response = await chatRequest("river-flow", false);
+    const response = await chatRequest("river/river-flow", false);
 
     assert.equal(response.status, 200);
 
@@ -999,15 +1036,18 @@ try {
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
     assert.deepEqual(detail.provider.credentials, []);
-    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+    assert.deepEqual(detail.provider.models.map((model) => model.upstreamModel).sort(), [
       "hyper-noted",
       "hyper-prism",
       "hyper-unpriced",
     ]);
 
-    const prism = detail.provider.models.find((model) => model.alias === "hyper-prism");
-    const noted = detail.provider.models.find((model) => model.alias === "hyper-noted");
-    const unpriced = detail.provider.models.find((model) => model.alias === "hyper-unpriced");
+    const prism = detail.provider.models.find((model) => model.upstreamModel === "hyper-prism");
+    const noted = detail.provider.models.find((model) => model.upstreamModel === "hyper-noted");
+
+    const unpriced = detail.provider.models.find(
+      (model) => model.upstreamModel === "hyper-unpriced",
+    );
 
     assert.equal(prism?.inputPricePerMtok, 2.5);
     assert.equal(prism?.outputPricePerMtok, 6);
@@ -1018,7 +1058,7 @@ try {
 
     await postJson(providerPaths.credentials(id), { apiKey: "hyper_test" }, ProviderSchema, 201);
 
-    const response = await chatRequest("hyper-prism", false);
+    const response = await chatRequest("hyper/hyper-prism", false);
 
     assert.equal(response.status, 200);
 
@@ -1044,16 +1084,16 @@ try {
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
     assert.deepEqual(detail.provider.credentials, []);
-    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+    assert.deepEqual(detail.provider.models.map((model) => model.upstreamModel).sort(), [
       "claude-haiku-5-5",
       "gemini-4-argon",
       "glm-5.3",
       "gpt-6-luna",
     ]);
 
-    const glm = detail.provider.models.find((model) => model.alias === "glm-5.3");
-    const gemini = detail.provider.models.find((model) => model.alias === "gemini-4-argon");
-    const luna = detail.provider.models.find((model) => model.alias === "gpt-6-luna");
+    const glm = detail.provider.models.find((model) => model.upstreamModel === "glm-5.3");
+    const gemini = detail.provider.models.find((model) => model.upstreamModel === "gemini-4-argon");
+    const luna = detail.provider.models.find((model) => model.upstreamModel === "gpt-6-luna");
 
     assert.equal(glm?.inputPricePerMtok, 1.4);
     assert.equal(glm?.outputPricePerMtok, 4.4);
@@ -1068,7 +1108,7 @@ try {
 
     await postJson(providerPaths.credentials(id), { apiKey: "opencode_test" }, ProviderSchema, 201);
 
-    const openai = await chatRequest("glm-5.3", false);
+    const openai = await chatRequest("opencode/glm-5.3", false);
 
     assert.equal(openai.status, 200);
     assert.equal(
@@ -1076,7 +1116,7 @@ try {
       "Hello from OpenCode OpenAI",
     );
 
-    const anthropic = await chatRequest("claude-haiku-5-5", false);
+    const anthropic = await chatRequest("opencode/claude-haiku-5-5", false);
 
     assert.equal(anthropic.status, 200);
 
@@ -1086,7 +1126,7 @@ try {
     assert.equal(anthropicBody.usage?.prompt_tokens, 5);
     assert.equal(anthropicBody.usage?.completion_tokens, 3);
 
-    const google = await chatRequest("gemini-4-argon", false);
+    const google = await chatRequest("opencode/gemini-4-argon", false);
 
     assert.equal(google.status, 200);
     assert.equal(
@@ -1094,7 +1134,7 @@ try {
       "Hello from OpenCode Google",
     );
 
-    const anthropicStream = await chatRequest("claude-haiku-5-5", true);
+    const anthropicStream = await chatRequest("opencode/claude-haiku-5-5", true);
 
     assert.equal(anthropicStream.status, 200);
 
@@ -1104,7 +1144,7 @@ try {
     assert.equal(anthropicEvents.usage?.prompt_tokens, 5);
     assert.equal(anthropicEvents.usage?.completion_tokens, 3);
 
-    const googleStream = await chatRequest("gemini-4-argon", true);
+    const googleStream = await chatRequest("opencode/gemini-4-argon", true);
 
     assert.equal(googleStream.status, 200);
 
@@ -1114,7 +1154,7 @@ try {
     assert.equal(googleEvents.usage?.prompt_tokens, 4);
     assert.equal(googleEvents.usage?.completion_tokens, 2);
 
-    const responses = await chatRequest("gpt-6-luna", false);
+    const responses = await chatRequest("opencode/gpt-6-luna", false);
 
     assert.equal(responses.status, 200);
 
@@ -1124,7 +1164,7 @@ try {
     assert.equal(responsesBody.usage?.prompt_tokens, 7);
     assert.equal(responsesBody.usage?.completion_tokens, 3);
 
-    const responsesStream = await chatRequest("gpt-6-luna", true);
+    const responsesStream = await chatRequest("opencode/gpt-6-luna", true);
 
     assert.equal(responsesStream.status, 200);
 
@@ -1140,7 +1180,7 @@ try {
 
     await postJson(
       providerPaths.models(id),
-      { upstreamModel: "grok-4.7", alias: "grok-luna" },
+      { upstreamModel: "grok-4.7", slug: "grok-luna" },
       ProviderSchema,
       201,
     );
@@ -1159,7 +1199,7 @@ try {
 
     await postJson(
       providerPaths.models(id),
-      { upstreamModel: "omen-alpha", alias: "omen-gap" },
+      { upstreamModel: "omen-alpha", slug: "omen-gap" },
       ProviderSchema,
       201,
     );
@@ -1234,13 +1274,13 @@ try {
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
 
-    assert.deepEqual(detail.provider.models.map((model) => model.alias).sort(), [
+    assert.deepEqual(detail.provider.models.map((model) => model.upstreamModel).sort(), [
       "nous-omni",
       "nous-text-large",
     ]);
 
-    const large = detail.provider.models.find((model) => model.alias === "nous-text-large");
-    const omni = detail.provider.models.find((model) => model.alias === "nous-omni");
+    const large = detail.provider.models.find((model) => model.upstreamModel === "nous-text-large");
+    const omni = detail.provider.models.find((model) => model.upstreamModel === "nous-omni");
 
     assert.equal(large?.inputPricePerMtok, 3);
     assert.equal(large?.outputPricePerMtok, 15);
@@ -1249,7 +1289,7 @@ try {
   });
 
   await check("the Nous Portal answers chat with its oauth bearer", async () => {
-    const response = await chatRequest("nous-text-large", false);
+    const response = await chatRequest("nous/nous-text-large", false);
 
     assert.equal(response.status, 200);
 
@@ -1264,8 +1304,8 @@ try {
     const before = nousState.presented.length;
 
     const responses = await Promise.all([
-      chatRequest("nous-text-large", false),
-      chatRequest("nous-text-large", false),
+      chatRequest("nous/nous-text-large", false),
+      chatRequest("nous/nous-text-large", false),
     ]);
 
     assert.deepEqual(
@@ -1277,7 +1317,7 @@ try {
 
   await check("a renewed Nous token is rotated and persisted", async () => {
     const before = nousState.presented.length;
-    const response = await chatRequest("nous-text-large", false);
+    const response = await chatRequest("nous/nous-text-large", false);
 
     assert.equal(response.status, 200);
     assert.equal(nousState.presented.length, before + 1);
@@ -1309,7 +1349,7 @@ try {
 
     nousState.refreshToken = "rt-elsewhere";
 
-    const response = await chatRequest("nous-text-large", false);
+    const response = await chatRequest("nous/nous-text-large", false);
 
     assert.equal(response.status, 502);
     assert.equal((await openAiError(response)).code, "auth");
@@ -1333,7 +1373,7 @@ try {
 
     assert.equal(connected.state, "connected");
 
-    const response = await chatRequest("nous-text-large", false);
+    const response = await chatRequest("nous/nous-text-large", false);
 
     assert.equal(response.status, 502);
     assert.equal((await openAiError(response)).code, "auth");
@@ -1356,7 +1396,7 @@ try {
 
     nousState.refreshToken = "rt-1";
 
-    const response = await chatRequest("nous-text-large", false);
+    const response = await chatRequest("nous/nous-text-large", false);
 
     assert.equal(response.status, 200);
   });
@@ -1370,7 +1410,7 @@ try {
     assert.equal(byName.get("Fake Google")?.slug, "fake-google");
     assert.equal(byName.get("Kilo Code")?.slug, "kilo");
 
-    const fast = byName.get("Fake OpenAI")?.models.find((model) => model.alias === "fast");
+    const fast = byName.get("Fake OpenAI")?.models.find((model) => model.slug === "fast");
 
     assert.equal(fast?.ref, "fake-openai/fake-openai-model");
     assert.equal(fast?.shadowed, false);
@@ -1453,7 +1493,7 @@ try {
       "both fallback attempts",
     );
 
-    assert.equal(rows.find((request) => request.status === "error")?.model, "dead-model");
+    assert.equal(rows.find((request) => request.status === "error")?.model, "dead/dead-model");
     assert.equal(rows.find((request) => request.status === "success")?.model, "fast");
 
     const deadDetail = await getJson(
@@ -1502,7 +1542,7 @@ try {
     assert.ok(event, "no cooldown event for tags/failover");
     assert.equal(event.subject, "credential");
     assert.equal(event.providerName, "Dead");
-    assert.equal(event.modelAlias, "dead-model");
+    assert.equal(event.modelSlug, "dead/dead-model");
     assert.equal(event.credentialName, "");
     assert.equal(event.errorMessage, "bad openai key");
   });
@@ -1518,9 +1558,9 @@ try {
 
     assert.equal(tag?.ref, "tags/failover");
     assert.deepEqual(
-      tag?.models.map((model) => model.alias),
-      ["fast", "dead-model"],
-      `failover order: ${tag?.models.map((model) => model.alias).join(", ")}`,
+      tag?.models.map((model) => model.slug),
+      ["fast", "dead/dead-model"],
+      `failover order: ${tag?.models.map((model) => model.slug).join(", ")}`,
     );
   });
 
@@ -1530,8 +1570,8 @@ try {
 
     if (tag === undefined) throw new Error("the failover tag is missing");
 
-    const dead = tag.models.find((model) => model.alias === "dead-model");
-    const fast = tag.models.find((model) => model.alias === "fast");
+    const dead = tag.models.find((model) => model.upstreamModel === "dead-model");
+    const fast = tag.models.find((model) => model.slug === "fast");
 
     if (dead === undefined || fast === undefined)
       throw new Error("the failover models are missing");
@@ -1568,12 +1608,12 @@ try {
 
     const withModel = await postJson(
       providerPaths.models(provider.id),
-      { upstreamModel: "fake-openai-model", alias: "rotating" },
+      { upstreamModel: "fake-openai-model", slug: "rotating" },
       ProviderSchema,
       201,
     );
 
-    assert.equal(withModel.models[0]?.alias, "rotating");
+    assert.equal(withModel.models[0]?.slug, "rotating");
 
     const added = await postJson(
       providerPaths.credentials(provider.id),
@@ -1632,7 +1672,7 @@ try {
 
     await postJson(
       providerPaths.models(provider.id),
-      { upstreamModel: "fake-openai-model", alias: "probing" },
+      { upstreamModel: "fake-openai-model", slug: "probing" },
       ProviderSchema,
       201,
     );
@@ -1883,7 +1923,7 @@ try {
     );
 
     assert.ok(tag.summary.requests >= 4, `tag filter saw ${tag.summary.requests} requests`);
-    assert.deepEqual(tag.models.map((model) => model.model).sort(), ["dead-model", "fast"]);
+    assert.deepEqual(tag.models.map((model) => model.model).sort(), ["dead/dead-model", "fast"]);
 
     const narrowed = await getJson(
       `${analyticsPaths.analytics}?days=30&tag=failover&model=fast`,
@@ -1905,7 +1945,28 @@ try {
 
     assert.equal(absent.summary.requests, 0);
   });
-  await check("an alias wins over an identical provider ref", async () => {
+  await check("an address wins over an identical provider ref", async () => {
+    const rival = await postJson(
+      providerPaths.list,
+      {
+        name: "Kilo Auto",
+        kind: "openai",
+        baseUrl: `${upstreamOrigin}/openai`,
+        apiKey: "openai-key",
+      },
+      ProviderSchema,
+      201,
+    );
+
+    assert.equal(rival.slug, "kilo-auto");
+
+    await postJson(
+      providerPaths.models(rival.id),
+      { upstreamModel: "free", slug: "kilo-auto-free" },
+      ProviderSchema,
+      201,
+    );
+
     const provider = await postJson(
       providerPaths.list,
       {
@@ -1922,29 +1983,33 @@ try {
 
     const withModel = await postJson(
       providerPaths.models(provider.id),
-      { upstreamModel: "claude-sonnet-4" },
+      { upstreamModel: "claude-sonnet-4", slug: "kilo-auto/free" },
       ProviderSchema,
       201,
     );
 
     const model = withModel.models.find((entry) => entry.upstreamModel === "claude-sonnet-4");
 
+    assert.equal(model?.slug, "kilo-auto/free");
     assert.equal(model?.ref, "anthropic/claude-sonnet-4");
-    assert.equal(model?.shadowed, true);
 
-    const response = await chatRequest("anthropic/claude-sonnet-4", true);
+    const rivalDetail = await getJson(providerPaths.detail(rival.id), ProviderDetailSchema, 200);
+
+    assert.equal(rivalDetail.provider.models[0]?.shadowed, true);
+
+    const response = await chatRequest("kilo-auto/free", true);
 
     assert.equal(response.status, 200);
 
     const stream = await readStream(response);
 
-    assert.equal(stream.text, "Hello from Kilo");
+    assert.equal(stream.text, "Hello from Anthropic");
 
     const listed = await fetch(new URL("/v1/models", origin), { headers: bearer() });
     const models = v.parse(ModelListSchema, await listed.json());
 
     assert.equal(
-      models.data.filter((model) => model.id === "anthropic/claude-sonnet-4").length,
+      models.data.filter((model) => model.id === "kilo-auto/free").length,
       1,
       "the shadowed provider ref was listed twice",
     );
@@ -1953,7 +2018,7 @@ try {
   await check("reserved refs and slugs are rejected", async () => {
     const reservedAlias = await post(providerPaths.models(openaiProvider.provider?.id ?? ""), {
       upstreamModel: "reserved-model",
-      alias: "tags/x",
+      slug: "tags/x",
     });
 
     assert.equal(reservedAlias.status, 422);
@@ -2003,7 +2068,7 @@ try {
 
     const withModel = await postJson(
       providerPaths.models(named.id),
-      { upstreamModel: "named-model", alias: "named-fast" },
+      { upstreamModel: "named-model", slug: "named-fast" },
       ProviderSchema,
       201,
     );
@@ -2055,9 +2120,9 @@ try {
     const failover = after.tags.find((tag) => tag.slug === "failover");
 
     assert.deepEqual(
-      failover?.models.map((model) => model.alias),
-      ["dead-model"],
-      `failover order after the model removal: ${failover?.models.map((model) => model.alias).join(", ")}`,
+      failover?.models.map((model) => model.slug),
+      ["dead/dead-model"],
+      `failover order after the model removal: ${failover?.models.map((model) => model.slug).join(", ")}`,
     );
     assert.deepEqual(
       failover?.models.map((model) => model.priority),
@@ -2081,12 +2146,12 @@ try {
 
     const withModel = await postJson(
       providerPaths.models(provider.id),
-      { upstreamModel: "cascade-model", alias: "cascade-alias" },
+      { upstreamModel: "cascade-model", slug: "cascade-alias" },
       ProviderSchema,
       201,
     );
 
-    const model = withModel.models.find((entry) => entry.alias === "cascade-alias");
+    const model = withModel.models.find((entry) => entry.slug === "cascade-alias");
 
     if (model === undefined) throw new Error("the cascade model is missing");
 
@@ -2119,7 +2184,7 @@ try {
     );
   });
 
-  await check("the longest provider ref is callable", async () => {
+  await check("the longest provider ref and default address are callable", async () => {
     const created = await postJson(
       providerPaths.list,
       {
@@ -2145,12 +2210,13 @@ try {
 
     const withModel = await postJson(
       providerPaths.models(created.id),
-      { upstreamModel: "m".repeat(200), alias: "long-ref" },
+      { upstreamModel: "m".repeat(200), slug: "long-ref" },
       ProviderSchema,
       201,
     );
 
-    const ref = withModel.models.find((model) => model.alias === "long-ref")?.ref ?? "";
+    const ref =
+      withModel.models.find((model) => model.upstreamModel === "m".repeat(200))?.ref ?? "";
 
     assert.equal(ref.length, 241);
 
@@ -2166,6 +2232,26 @@ try {
     const list = v.parse(ModelListSchema, await models.json());
 
     assert.ok(list.data.some((model) => model.id === ref));
+
+    const defaulted = await postJson(
+      providerPaths.models(created.id),
+      { upstreamModel: "n".repeat(200) },
+      ProviderSchema,
+      201,
+    );
+
+    const address =
+      defaulted.models.find((model) => model.upstreamModel === "n".repeat(200))?.slug ?? "";
+
+    assert.equal(address.length, 241);
+
+    const filtered = await getJson(
+      `${analyticsPaths.analytics}?days=30&model=${encodeURIComponent(address)}`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(filtered.summary.requests, 0);
   });
 
   await check(
@@ -2185,7 +2271,7 @@ try {
 
       const withModel = await postJson(
         providerPaths.models(provider.id),
-        { upstreamModel: "wire-upstream-model", alias: "wire-openai" },
+        { upstreamModel: "wire-upstream-model", slug: "wire-openai" },
         ProviderSchema,
         201,
       );
@@ -2261,12 +2347,12 @@ try {
 
     const withModel = await postJson(
       providerPaths.models(dead.id),
-      { upstreamModel: "dead-wire-model", alias: "dead-wire" },
+      { upstreamModel: "dead-wire-model", slug: "dead-wire" },
       ProviderSchema,
       201,
     );
 
-    const deadModel = withModel.models.find((model) => model.alias === "dead-wire");
+    const deadModel = withModel.models.find((model) => model.slug === "dead-wire");
     const wireModelId = wireProvider.modelId;
 
     if (deadModel === undefined) throw new Error("the dead wire model is missing");
@@ -2333,7 +2419,7 @@ try {
   await check(
     "POST /v1/messages answers an upstream failure in the Anthropic envelope",
     async () => {
-      const response = await postMessages(messageRequest("dead-model", false));
+      const response = await postMessages(messageRequest("dead/dead-model", false));
 
       assert.equal(response.status, 502);
 
@@ -2379,12 +2465,12 @@ try {
 
     const added = await postJson(
       providerPaths.models(id),
-      { upstreamModel: "fake-openai-override", alias: "override-fast" },
+      { upstreamModel: "fake-openai-override", slug: "override-fast" },
       ProviderSchema,
       201,
     );
 
-    overrideModelId = added.models.find((model) => model.alias === "override-fast")?.id ?? "";
+    overrideModelId = added.models.find((model) => model.slug === "override-fast")?.id ?? "";
 
     const moved = await putModelEdit(id, overrideModelId, { compat: "responses" });
 
@@ -2441,14 +2527,17 @@ try {
   await check("PUT a model's compat on a missing model is a 404", async () => {
     const id = openaiProvider.provider?.id ?? "";
     const { provider } = await getJson(providerPaths.detail(id), ProviderDetailSchema, 200);
-    const aliasFree = provider.models.every((row) => row.alias !== "missing-model-alias");
+    const addressFree = provider.models.every((row) => row.slug !== "missing-model-address");
 
-    assert.ok(aliasFree, "a model holds missing-model-alias, so the alias clash answers first");
+    assert.ok(
+      addressFree,
+      "a model holds missing-model-address, so the address clash answers first",
+    );
 
     const response = await put(
       providerPaths.model(id, "missing-model"),
       modelEdit(await currentModel(id, overrideModelId), {
-        alias: "missing-model-alias",
+        slug: "missing-model-address",
         compat: "chat",
       }),
     );
@@ -2484,12 +2573,12 @@ try {
 
     const added = await postJson(
       providerPaths.models(id),
-      { upstreamModel: "fake-openai-broken", alias: "openai-broken" },
+      { upstreamModel: "fake-openai-broken", slug: "openai-broken" },
       ProviderSchema,
       201,
     );
 
-    const brokenId = added.models.find((model) => model.alias === "openai-broken")?.id ?? "";
+    const brokenId = added.models.find((model) => model.slug === "openai-broken")?.id ?? "";
 
     await putModelEdit(id, brokenId, { compat: "responses" });
 
@@ -2508,12 +2597,12 @@ try {
 
     const added = await postJson(
       providerPaths.models(id),
-      { upstreamModel: "fake-openai-stream-broken", alias: "openai-stream-broken" },
+      { upstreamModel: "fake-openai-stream-broken", slug: "openai-stream-broken" },
       ProviderSchema,
       201,
     );
 
-    const brokenId = added.models.find((model) => model.alias === "openai-stream-broken")?.id ?? "";
+    const brokenId = added.models.find((model) => model.slug === "openai-stream-broken")?.id ?? "";
 
     await putModelEdit(id, brokenId, { compat: "responses" });
 
@@ -2902,6 +2991,7 @@ function modelEdit(
   change: Partial<ProviderModelEditInput>,
 ): ProviderModelEditInput {
   return {
+    slug: model.slug,
     alias: model.alias,
     compat: model.compat,
     inputPricePerMtok: model.inputPricePerMtok,
@@ -3475,7 +3565,6 @@ function startKilocode() {
             },
             { id: "kilo-auto/free", pricing: { prompt: "0", completion: "0" } },
             { id: "openai/gpt-5-codex", pricing: { prompt: "-1", completion: "-1" } },
-            // `fast` is already an alias on the OpenAI provider, so this one is skipped.
             { id: "fast", pricing: { prompt: "0.000001", completion: "0.000002" } },
           ],
         });

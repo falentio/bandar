@@ -31,6 +31,8 @@ import {
   type ProviderModel,
   type ProviderModelRefresh,
 } from "../../shared/providers";
+import { modelLabelOf, modelLabels, modelSecondaryOf } from "../model-labels";
+import { ModelName } from "../model-name";
 import {
   formatExactTokens,
   formatMs,
@@ -499,7 +501,7 @@ function ModelsCard({
   onChanged: () => void;
 }) {
   const [upstreamModel, setUpstreamModel] = useState("");
-  const [alias, setAlias] = useState("");
+  const [name, setName] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshed, setRefreshed] = useState<ProviderModelRefresh | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -511,12 +513,12 @@ function ModelsCard({
 
     const added = await providers.addModel(provider.id, {
       upstreamModel: upstreamModel.trim(),
-      alias: alias.trim() === "" ? undefined : alias.trim(),
+      alias: name.trim() === "" ? undefined : name.trim(),
     });
 
     if (added) {
       setUpstreamModel("");
-      setAlias("");
+      setName("");
       onChanged();
     }
   };
@@ -527,11 +529,11 @@ function ModelsCard({
         <div className="grid gap-1">
           <CardTitle>Models</CardTitle>
           <CardDescription>
-            Alias is what clients send as <code>model</code>. They can also send{" "}
+            Clients reach a model by its address, which starts as{" "}
             <code>
               {provider.slug === "" ? "<provider-slug>" : provider.slug}/&lt;upstream-model&gt;
-            </code>{" "}
-            to reach a model directly.
+            </code>
+            . The name is shown in this dashboard only.
           </CardDescription>
         </div>
         {provider.hasCatalog ? (
@@ -583,14 +585,14 @@ function ModelsCard({
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="model-alias" className="text-xs">
-              Alias
+            <Label htmlFor="model-name" className="text-xs">
+              Name
             </Label>
             <Input
-              id="model-alias"
-              value={alias}
-              onChange={(event) => setAlias(event.target.value)}
-              placeholder="fast"
+              id="model-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder=""
               maxLength={100}
               disabled={providers.pending}
             />
@@ -613,14 +615,14 @@ function ModelsCard({
               : `Imported ${refreshed.added} model${refreshed.added === 1 ? "" : "s"}${
                   refreshed.skipped === 0
                     ? "."
-                    : `; skipped ${refreshed.skipped} already present or whose alias is taken.`
+                    : `; skipped ${refreshed.skipped} already present or whose address is taken.`
                 }`}
           </p>
         )}
 
         {provider.models.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No models yet. Clients cannot use this provider until it has an alias.
+            No models yet. Clients cannot use this provider until it has a model with an address.
           </p>
         ) : (
           <ul className="divide-y rounded-lg border">
@@ -691,6 +693,8 @@ export function ModelRow({
   };
 
   const wire = COMPAT_LABELS[compatOf(model)];
+  const label = modelLabelOf(model);
+  const secondary = modelSecondaryOf(model);
 
   return (
     <li className="group/model px-3 py-2.5 text-sm">
@@ -699,20 +703,22 @@ export function ModelRow({
           type="button"
           onClick={() => openEditor(true)}
           disabled={pending}
-          aria-label={`Edit ${model.alias}`}
+          aria-label={`Edit ${label}`}
           className="min-w-0 flex-1 rounded py-0.5 text-left transition-colors duration-150 ease-out hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50"
         >
           <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="truncate font-medium">{labelOf(model)}</span>
-            <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-              {shortRef(model)}
-            </code>
+            <span className="truncate font-medium">{label}</span>
+            {secondary === null ? null : (
+              <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+                {secondary}
+              </code>
+            )}
           </span>
         </button>
         <div className="-me-1 flex shrink-0 items-center opacity-100 transition-opacity duration-150 ease-out sm:opacity-0 sm:group-hover/model:opacity-100 sm:focus-within:opacity-100">
           <button
             type="button"
-            aria-label={`Edit ${model.alias || model.upstreamModel}`}
+            aria-label={`Edit ${label}`}
             disabled={pending}
             onClick={() => openEditor(true)}
             className="rounded p-1.5 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
@@ -721,10 +727,10 @@ export function ModelRow({
           </button>
           <button
             type="button"
-            aria-label={`Remove ${model.alias || model.upstreamModel}`}
+            aria-label={`Remove ${label}`}
             disabled={pending}
             onClick={() => {
-              if (window.confirm(`Remove the alias ${model.alias}?`)) onRemove();
+              if (window.confirm(`Remove ${label}?`)) onRemove();
             }}
             className="rounded p-1.5 text-muted-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-90 disabled:pointer-events-none"
           >
@@ -737,7 +743,7 @@ export function ModelRow({
         <span className="text-foreground/80">{wire}</span>
         <span aria-hidden="true">·</span>
         <PriceTiers model={model} />
-        {model.shadowed ? <span>· shadowed by an alias</span> : null}
+        {model.shadowed ? <span>· shadowed by another model's address</span> : null}
         <HealthBadge failures={model.failures} flaggedUntil={model.flaggedUntil} />
       </p>
 
@@ -776,16 +782,6 @@ function PriceTiers({ model }: { model: ProviderModel }) {
   );
 }
 
-function shortRef(model: ProviderModel): string {
-  const slash = model.ref.indexOf("/");
-
-  return slash === -1 ? model.ref : model.ref.slice(slash + 1);
-}
-
-function labelOf(model: ProviderModel): string {
-  return model.alias === "" ? model.upstreamModel : model.alias;
-}
-
 function TagChip({ tag }: { tag: ModelTag }) {
   return (
     <span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[0.7rem]">
@@ -802,6 +798,8 @@ function compatOf(model: ProviderModel): Compat {
 
 function RequestsCard({ providerId, providerName }: { providerId: string; providerName: string }) {
   const requests = useRequests(10, providerId);
+  const providers = useProviders();
+  const labels = modelLabels(providers.providers);
 
   return (
     <Card>
@@ -832,7 +830,9 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
                     <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
                       {formatWhen(request.startedAt)}
                     </td>
-                    <td className="py-2 pr-3 font-mono text-xs">{request.model}</td>
+                    <td className="py-2 pr-3">
+                      <ModelName labels={labels} slug={request.model} className="text-xs" />
+                    </td>
                     <td className="py-2 pr-3">
                       <span
                         className={

@@ -18,6 +18,7 @@ import {
   type ProviderModel,
   type ProviderModelEditInput,
 } from "../../shared/providers";
+import { MAX_MODEL_SLUG_LENGTH, TAG_REF_PREFIX } from "../../shared/slugs";
 import type { Providers } from "../use-providers";
 
 // An unset field means the catalog's price stands, so the input round-trips to null.
@@ -52,14 +53,16 @@ export function EditModelDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [alias, setAlias] = useState(model.alias);
+  const [name, setName] = useState(model.alias ?? "");
+  const [slug, setSlug] = useState(model.slug);
   const [compat, setCompat] = useState<Compat | null>(model.compat);
   const [inputPrice, setInputPrice] = useState(priceText(model.inputPricePerMtok));
   const [cachePrice, setCachePrice] = useState(priceText(model.cacheInputPricePerMtok));
   const [outputPrice, setOutputPrice] = useState(priceText(model.outputPricePerMtok));
 
   const reset = () => {
-    setAlias(model.alias);
+    setName(model.alias ?? "");
+    setSlug(model.slug);
     setCompat(model.compat);
     setInputPrice(priceText(model.inputPricePerMtok));
     setCachePrice(priceText(model.cacheInputPricePerMtok));
@@ -73,14 +76,17 @@ export function EditModelDialog({
   const pricesValid =
     parsedInput !== undefined && parsedCache !== undefined && parsedOutput !== undefined;
 
-  const aliasValid = alias.trim() !== "" && !alias.trim().startsWith("tags/");
+  const slugValid =
+    slug.trim() !== "" &&
+    slug.trim().length <= MAX_MODEL_SLUG_LENGTH &&
+    !slug.trim().startsWith(TAG_REF_PREFIX);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (
       !pricesValid ||
-      !aliasValid ||
+      !slugValid ||
       parsedInput === undefined ||
       parsedCache === undefined ||
       parsedOutput === undefined
@@ -89,7 +95,8 @@ export function EditModelDialog({
     }
 
     const edit: ProviderModelEditInput = {
-      alias: alias.trim(),
+      slug: slug.trim(),
+      alias: name.trim() === "" ? null : name.trim(),
       compat,
       inputPricePerMtok: parsedInput,
       cacheInputPricePerMtok: parsedCache,
@@ -114,7 +121,8 @@ export function EditModelDialog({
         <DialogHeader>
           <DialogTitle>Edit model</DialogTitle>
           <DialogDescription>
-            The upstream id stays fixed. The name, wire, and prices are yours to set.
+            The upstream id <code>{model.upstreamModel}</code> stays fixed. The address, name, wire,
+            and prices are yours to set.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={(event) => void submit(event)} className="grid gap-4">
@@ -122,20 +130,37 @@ export function EditModelDialog({
             <Label htmlFor="model-edit-alias">Name</Label>
             <Input
               id="model-edit-alias"
-              value={alias}
-              onChange={(event) => setAlias(event.target.value)}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
               placeholder={model.upstreamModel}
               maxLength={100}
               autoFocus
               disabled={providers.pending}
-              aria-invalid={!aliasValid}
             />
             <p className="text-xs text-muted-foreground">
-              What clients send. The label matches the upstream id unless you change it.
+              Shown in the UI only. Clients never send it.
             </p>
-            {aliasValid ? null : (
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="model-edit-slug">Address</Label>
+            <Input
+              id="model-edit-slug"
+              value={slug}
+              onChange={(event) => setSlug(event.target.value)}
+              placeholder={model.ref}
+              maxLength={MAX_MODEL_SLUG_LENGTH}
+              required
+              disabled={providers.pending}
+              aria-invalid={!slugValid}
+            />
+            <p className="text-xs text-muted-foreground">
+              What clients send as <code>model</code>. It defaults to {model.ref}.
+            </p>
+            {slugValid ? null : (
               <p className="text-xs text-destructive">
-                A name needs at least one character and cannot start with tags/.
+                An address needs at least one character, {MAX_MODEL_SLUG_LENGTH} at most, and cannot
+                start with {TAG_REF_PREFIX}.
               </p>
             )}
           </div>
@@ -229,7 +254,7 @@ export function EditModelDialog({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={providers.pending || !pricesValid || !aliasValid}>
+            <Button type="submit" disabled={providers.pending || !pricesValid || !slugValid}>
               Save
             </Button>
           </DialogFooter>

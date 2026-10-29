@@ -27,6 +27,12 @@ command -v npm >/dev/null 2>&1 || die "npm is required to install the staged pac
 command -v node >/dev/null 2>&1 || die "node is required to run the installed loader"
 
 VERSION=$(cd "$ROOT" && bun --eval 'process.stdout.write((await Bun.file("package.json").json()).version)')
+LOADER_NAME=@falentio/bandar
+PLATFORM_NAME=$LOADER_NAME-linux-x64
+WINDOWS_NAME=$LOADER_NAME-windows-x64
+
+# The staged directory of a scoped package is its flattened name, the one npm pack would give it.
+slug() { printf '%s' "$1" | sed 's#^@##; s#/#-#'; }
 KEY=$(bun --eval 'process.stdout.write(process.platform + "-" + process.arch)')
 
 [ "$KEY" = linux-x64 ] || die "npm-test covers linux-x64 only, not $KEY"
@@ -56,11 +62,11 @@ write_asset "$RELEASE_DIR/bandar-$VERSION-windows-x64.exe"
 bun "$ROOT/scripts/npm.ts" --stage --release "$RELEASE_DIR" --output "$STAGED" >"$WORK/stage.log" 2>&1 ||
   die "scripts/npm.ts --stage failed: $(cat "$WORK/stage.log")"
 
-for name in bandar-linux-x64 bandar-windows-x64 bandar; do
-  [ -f "$STAGED/$name/package.json" ] || die "scripts/npm.ts --stage left $name unstaged"
+for name in "$PLATFORM_NAME" "$WINDOWS_NAME" "$LOADER_NAME"; do
+  [ -f "$STAGED/$(slug "$name")/package.json" ] || die "scripts/npm.ts --stage left $name unstaged"
 done
 
-loader_manifest=$STAGED/bandar/package.json
+loader_manifest=$STAGED/$(slug "$LOADER_NAME")/package.json
 
 if grep -q '"os"' "$loader_manifest"; then
   fail "the loader manifest carries an os field, so npm would refuse an unsupported platform"
@@ -69,8 +75,8 @@ else
 fi
 
 lifecycle=
-for name in bandar-linux-x64 bandar-windows-x64 bandar; do
-  if grep -q '"scripts"' "$STAGED/$name/package.json"; then lifecycle="$lifecycle $name"; fi
+for name in "$PLATFORM_NAME" "$WINDOWS_NAME" "$LOADER_NAME"; do
+  if grep -q '"scripts"' "$STAGED/$(slug "$name")/package.json"; then lifecycle="$lifecycle $name"; fi
 done
 
 if [ -z "$lifecycle" ]; then
@@ -80,8 +86,8 @@ else
 fi
 
 provenance=
-for name in bandar-linux-x64 bandar-windows-x64 bandar; do
-  if grep -q '"provenance"' "$STAGED/$name/package.json"; then provenance="$provenance $name"; fi
+for name in "$PLATFORM_NAME" "$WINDOWS_NAME" "$LOADER_NAME"; do
+  if grep -q '"provenance"' "$STAGED/$(slug "$name")/package.json"; then provenance="$provenance $name"; fi
 done
 
 if [ -z "$provenance" ]; then
@@ -92,8 +98,8 @@ fi
 
 mkdir -p "$TARBALLS"
 
-for name in bandar-linux-x64 bandar-windows-x64 bandar; do
-  (cd "$STAGED/$name" && npm pack --pack-destination "$TARBALLS" >/dev/null 2>&1) ||
+for name in "$PLATFORM_NAME" "$WINDOWS_NAME" "$LOADER_NAME"; do
+  (cd "$STAGED/$(slug "$name")" && npm pack --pack-destination "$TARBALLS" >/dev/null 2>&1) ||
     die "npm pack failed for $name"
 done
 
@@ -111,26 +117,26 @@ registry=http://127.0.0.1:$(cat "$PORT_FILE")
 
 install_bandar() {
   npm install --global --prefix "$1" --registry "$registry" --cache "$WORK/cache" \
-    --no-audit --no-fund --no-update-notifier --fetch-retries=0 "bandar@$VERSION"
+    --no-audit --no-fund --no-update-notifier --fetch-retries=0 "$LOADER_NAME@$VERSION"
 }
 
 if install_bandar "$PREFIX" >"$WORK/install.log" 2>&1; then
-  pass "npm install -g bandar@$VERSION from the stub registry"
+  pass "npm install -g $LOADER_NAME@$VERSION from the stub registry"
 else
-  fail "npm install -g bandar@$VERSION from the stub registry"
+  fail "npm install -g $LOADER_NAME@$VERSION from the stub registry"
   sed -n '1,40p' "$WORK/install.log"
 fi
 
 bin=$PREFIX/bin/bandar
-loader=$PREFIX/lib/node_modules/bandar/bin/bandar.cjs
+loader=$PREFIX/lib/node_modules/@falentio/bandar/bin/bandar.cjs
 
 resolve_package() {
-  (cd "$PREFIX/lib/node_modules/bandar" &&
+  (cd "$PREFIX/lib/node_modules/@falentio/bandar" &&
     node -e "process.stdout.write(require.resolve('$1/package.json'))" 2>/dev/null) || true
 }
 
-platform_manifest=$(resolve_package bandar-linux-x64)
-[ -n "$platform_manifest" ] || die "node cannot resolve bandar-linux-x64 from the installed loader"
+platform_manifest=$(resolve_package "$PLATFORM_NAME")
+[ -n "$platform_manifest" ] || die "node cannot resolve $PLATFORM_NAME from the installed loader"
 
 platform_dir=$(dirname "$platform_manifest")
 installed=$platform_dir/bin/bandar
@@ -145,10 +151,10 @@ else
   fail "the installed shim did not run"
 fi
 
-if [ -n "$(resolve_package bandar-windows-x64)" ]; then
-  fail "npm installed bandar-windows-x64 as well"
+if [ -n "$(resolve_package "$WINDOWS_NAME")" ]; then
+  fail "npm installed $WINDOWS_NAME as well"
 else
-  pass "npm installed only bandar-linux-x64"
+  pass "npm installed only $PLATFORM_NAME"
 fi
 
 windows=$(node -e '
@@ -156,13 +162,17 @@ const path = require("node:path");
 const { resolveBinary } = require(process.argv[1]);
 
 process.stdout.write(
-  JSON.stringify(resolveBinary("win32", "x64", (request) => path.join(process.argv[2], request))),
+  JSON.stringify(
+    resolveBinary("win32", "x64", (request) =>
+      path.join(process.argv[2], request.replace(/^@/u, "").replace("/", "-")),
+    ),
+  ),
 );
 ' "$loader" "$STAGED")
 
 case "$windows" in
 *'"kind":"ready"'*'"path":"'*'bandar-windows-x64/bin/bandar.exe"'*)
-  pass "resolveBinary picks bandar-windows-x64/bin/bandar.exe for win32-x64"
+  pass "resolveBinary picks the windows package's bin/bandar.exe for win32-x64"
   ;;
 *)
   fail "resolveBinary for win32-x64 said: $windows"
@@ -175,7 +185,7 @@ const manifest = require(process.argv[1]);
 process.stdout.write(
   JSON.stringify({ os: manifest.os, libc: manifest.libc, files: manifest.files }),
 );
-' "$STAGED/bandar-windows-x64/package.json")
+' "$STAGED/$(slug "$WINDOWS_NAME")/package.json")
 
 if [ "$windows_manifest" = '{"os":["win32"],"files":["bin/bandar.exe"]}' ]; then
   pass "the windows manifest declares win32, no libc, and bin/bandar.exe"
@@ -270,8 +280,8 @@ mv "$WORK/hidden" "$platform_dir"
 
 if [ "$status" = 1 ] && [ ! -s "$WORK/absent.out" ] &&
   [ "$(wc -l <"$WORK/absent.err")" -eq 1 ] &&
-  grep -q 'bandar-linux-x64' "$WORK/absent.err" &&
-  grep -q 'npm install -g bandar@latest' "$WORK/absent.err" &&
+  grep -q '@falentio/bandar-linux-x64' "$WORK/absent.err" &&
+  grep -q 'npm install -g @falentio/bandar@latest' "$WORK/absent.err" &&
   grep -q 'install.sh' "$WORK/absent.err"; then
   pass "a missing platform package refuses in one line"
 else
@@ -289,17 +299,17 @@ else
 fi
 
 cp -R "$PREFIX" "$WORK/mixed"
-mixed_platform=$(cd "$WORK/mixed/lib/node_modules/bandar" &&
-  node -e "process.stdout.write(require.resolve('bandar-linux-x64/package.json'))")
+mixed_platform=$(cd "$WORK/mixed/lib/node_modules/@falentio/bandar" &&
+  node -e "process.stdout.write(require.resolve('@falentio/bandar-linux-x64/package.json'))")
 node -e 'fs=require("node:fs");p=process.argv[1];m=JSON.parse(fs.readFileSync(p,"utf8"));m.version="0.0.0";fs.writeFileSync(p,JSON.stringify(m,null,2))' "$mixed_platform"
 
 status=0
-node "$WORK/mixed/lib/node_modules/bandar/bin/bandar.cjs" --version \
+node "$WORK/mixed/lib/node_modules/@falentio/bandar/bin/bandar.cjs" --version \
   >"$WORK/mismatch.out" 2>"$WORK/mismatch.err" || status=$?
 
 if [ "$status" = 1 ] && [ ! -s "$WORK/mismatch.out" ] &&
   [ "$(wc -l <"$WORK/mismatch.err")" -eq 1 ] &&
-  grep -q 'bandar-linux-x64 is 0.0.0' "$WORK/mismatch.err" &&
+  grep -q '@falentio/bandar-linux-x64 is 0.0.0' "$WORK/mismatch.err" &&
   grep -q "loader is $VERSION" "$WORK/mismatch.err"; then
   pass "a platform package at another version refuses in one line"
 else

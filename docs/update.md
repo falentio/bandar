@@ -78,18 +78,18 @@ manifest.
 
 ## An npm install
 
-A copy installed with `npm install -g bandar` has no `install.json`, because `install.sh` never
+A copy installed with `npm install -g @falentio/bandar` has no `install.json`, because `install.sh` never
 ran. `bandar update` refuses it in one line and writes nothing:
 
 ```text
-bandar: no install.json records an install source; an npm install updates with "npm install -g bandar@latest"; otherwise reinstall with install.sh from https://github.com/falentio/bandar to let bandar update itself
+bandar: no install.json records an install source; an npm install updates with "npm install -g @falentio/bandar@latest"; otherwise reinstall with install.sh from https://github.com/falentio/bandar to let bandar update itself
 ```
 
 npm owns that copy: it recorded the version and chose where the files went, and replacing the binary
 behind npm's back would leave the two disagreeing. So the update is npm's:
 
 ```sh
-npm install -g bandar@latest
+npm install -g @falentio/bandar@latest
 ```
 
 `bandar update --check` still works for an npm copy, because a report reads the release and writes

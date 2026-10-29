@@ -1,6 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import type { AnalyticsSummary, DailyUsage } from "../../shared/analytics";
 import { formatMs, formatPercent, formatTokens, formatTps, formatUsd } from "../format";
+import { tokenSeries } from "./token-chart";
 
 export function OverviewStats({
   summary,
@@ -74,8 +75,18 @@ function TokenSplitBar({ input, output }: { readonly input: number; readonly out
     <div className="mt-4 flex h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
       {total === 0 ? null : (
         <>
-          <div className="bg-primary/40" style={{ width: `${String((input / total) * 100)}%` }} />
-          <div className="bg-primary" style={{ width: `${String((output / total) * 100)}%` }} />
+          <div
+            style={{
+              backgroundColor: tokenSeries.inputTokens.color,
+              width: `${String((input / total) * 100)}%`,
+            }}
+          />
+          <div
+            style={{
+              backgroundColor: tokenSeries.outputTokens.color,
+              width: `${String((output / total) * 100)}%`,
+            }}
+          />
         </>
       )}
     </div>

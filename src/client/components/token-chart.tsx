@@ -10,7 +10,7 @@ import {
 import type { DailyUsage } from "../../shared/analytics";
 import { formatDay, formatExactTokens, formatTokens } from "../format";
 
-const chartConfig = {
+export const tokenSeries = {
   inputTokens: { label: "Input", color: "var(--chart-2)" },
   outputTokens: { label: "Output", color: "var(--chart-5)" },
 } satisfies ChartConfig;
@@ -19,7 +19,7 @@ export function TokenChart({ daily }: { daily: readonly DailyUsage[] }) {
   const requestsByDate = new Map(daily.map((day): [string, number] => [day.date, day.requests]));
 
   return (
-    <ChartContainer config={chartConfig} className="aspect-auto h-56 w-full">
+    <ChartContainer config={tokenSeries} className="aspect-auto h-56 w-full">
       <BarChart accessibilityLayer data={[...daily]}>
         <XAxis
           dataKey="date"

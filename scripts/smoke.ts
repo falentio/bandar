@@ -2541,6 +2541,7 @@ try {
           { type: "text", text: "be" },
           { type: "text", text: "brief" },
         ]),
+        { ...bearer(), [SESSION_ID_HEADER]: "session-messages" },
       );
 
       assert.equal(response.status, 200);
@@ -2557,6 +2558,16 @@ try {
       if (upstreamBody === undefined) throw new Error("the fake OpenAI upstream saw no chat");
 
       assert.deepEqual(upstreamBody.messages[0], { role: "system", content: "be\nbrief" });
+
+      // The value catalog caches a user's session list for five minutes, so read the row
+      // back through the filter instead of the list.
+      const tagged = await getJson(
+        `${analyticsPaths.analytics}?days=30&sessionId=session-messages`,
+        AnalyticsSchema,
+        200,
+      );
+
+      assert.equal(tagged.summary.requests, 1);
 
       const providerRef = await postMessages(
         messageRequest("wire-openai/wire-upstream-model", false),

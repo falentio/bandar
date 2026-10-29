@@ -32,7 +32,7 @@ export type Progress = {
 export function createProgress(stream: ProgressStream): Progress {
   if (stream.isTTY !== true) return QUIET;
 
-  let drawn = 0;
+  let widest = 0;
   let latest: UpdateEvent | null = null;
   let phase: string | null = null;
   let tick = 0;
@@ -45,17 +45,17 @@ export function createProgress(stream: ProgressStream): Progress {
     const columns = stream.columns ?? 0;
     const row = columns > 0 ? frame.slice(0, columns) : frame;
 
-    stream.write(`\r${row}${" ".repeat(Math.max(0, drawn - row.length))}`);
+    stream.write(`\r${row}${" ".repeat(Math.max(0, widest - row.length))}`);
 
-    drawn = Math.max(drawn, row.length);
+    widest = Math.max(widest, row.length);
   };
 
   const erase = (): void => {
-    if (drawn === 0) return;
+    if (widest === 0) return;
 
-    stream.write(`\r${" ".repeat(drawn)}\r`);
+    stream.write(`\r${" ".repeat(widest)}\r`);
 
-    drawn = 0;
+    widest = 0;
   };
 
   const startFrames = (): void => {

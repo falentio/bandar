@@ -28,7 +28,11 @@ const LOADER_NAME = "@falentio/bandar";
 const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 const TRUSTED_PUBLISHING_NPM = "11.5.1";
 const VERSION_TEXT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
-const VISIBILITY_TIMEOUT = 300_000;
+
+// npm accepts the upload and signs its provenance, then the version reaches the registry minutes
+// later: 213s for 0.3.0 and 623s for 0.3.1, both a 71MB linux tarball. A short wait reports a live
+// publish as a failure and leaves the release half-published.
+const VISIBILITY_TIMEOUT = 1_800_000;
 const VISIBILITY_INTERVAL = 5_000;
 
 const REGISTRY = (process.env.NPM_CONFIG_REGISTRY ?? "https://registry.npmjs.org").replace(

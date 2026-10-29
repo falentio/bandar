@@ -10,8 +10,11 @@ export const httpOrigin = (host: string, port: number): string =>
 
 export const loopbackOrigin = (port: number): string => httpOrigin("127.0.0.1", port);
 
+/** A wildcard bind listens on every interface, so its own address is not an origin to open. */
+export const isWildcardHost = (host: string): boolean => host === "0.0.0.0" || host === "::";
+
 export const originForHost = (host: string, port: number): string =>
-  httpOrigin(host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host, port);
+  httpOrigin(isWildcardHost(host) ? "127.0.0.1" : host, port);
 
 /**
  * The auth URL a run falls back to: loopback on the resolved port. The schema's help text names the

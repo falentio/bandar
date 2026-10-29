@@ -9,6 +9,7 @@ import {
   DEFAULT_HOST,
   DEV_WEB_PORT,
   httpOrigin,
+  isWildcardHost,
   loopbackOrigin,
   MAX_PORT,
   MIN_PORT,
@@ -315,6 +316,66 @@ function resolveProviders(
 }
 
 /**
+ * The address a run listens on and the URL a browser reaches it by. A found tailnet supplies both,
+ * so a tailnet run cannot bind the tailnet address while its auth URL stays on the loopback default.
+ */
+type Endpoint = {
+  readonly host: Resolved<string>;
+  readonly authUrl: Resolved<string>;
+  readonly port: Resolved<number>;
+  readonly tailnet: TailnetIdentity | null;
+};
+
+function tailnetEndpoint(
+  identity: TailnetIdentity,
+  port: Resolved<number>,
+  server: Settings["server"],
+  environment: Environment,
+): Endpoint {
+  return {
+    host: { value: identity.address, source: "tailscale" },
+    authUrl: resolve(
+      server?.authUrl,
+      environment.BANDAR_AUTH_URL,
+      httpOrigin(identity.dnsName, port.value),
+      "tailscale",
+    ),
+    port,
+    tailnet: identity,
+  };
+}
+
+function localEndpoint(
+  port: Resolved<number>,
+  server: Settings["server"],
+  environment: Environment,
+): Endpoint {
+  return {
+    host: resolve(server?.host, environment.BANDAR_HOST, DEFAULT_HOST),
+    authUrl: resolve(server?.authUrl, environment.BANDAR_AUTH_URL, authUrlForPort(port.value)),
+    port,
+    tailnet: null,
+  };
+}
+
+/** server.tailscale reads only the settings file, and an unset flag never asks for the tailnet. */
+function resolveEndpoint(
+  tailscale: boolean,
+  server: Settings["server"],
+  environment: Environment,
+  lookup: TailnetLookup,
+): Endpoint {
+  const port = resolve(server?.port, environment.BANDAR_PORT, DEFAULT_API_PORT);
+  const tailnet = tailscale ? lookup() : null;
+
+  if (tailnet?.kind === "missing") throw new ConfigError([`server.tailscale: ${tailnet.reason}`]);
+
+  return tailnet?.kind === "found"
+    ? tailnetEndpoint(tailnet.identity, port, server, environment)
+    : localEndpoint(port, server, environment);
+}
+
+/**
  * Fills the config from the settings file first, then the environment, then the built-in default,
  * and reports which of the three each server value came from. It stays silent: backup, update, and
  * install-service parse the environment without starting a session, so the warning about a
@@ -336,35 +397,13 @@ function buildConfig(
       ? undefined
       : parseOrigins(environment.BANDAR_TRUSTED_ORIGINS);
 
-  const port = resolve(server?.port, environment.BANDAR_PORT, DEFAULT_API_PORT);
-
-  const tailscale =
-    server?.tailscale === undefined
-      ? { value: false, source: "default" as const }
-      : { value: server.tailscale, source: "config" as const };
-
-  const tailnet = tailscale.value ? lookup() : null;
-
-  if (tailnet?.kind === "missing") throw new ConfigError([`server.tailscale: ${tailnet.reason}`]);
-
-  const found = tailnet?.kind === "found" ? tailnet.identity : null;
-
-  const host =
-    found === null
-      ? resolve(server?.host, environment.BANDAR_HOST, DEFAULT_HOST)
-      : { value: found.address, source: "tailscale" as const };
-
-  const authUrl = resolve(
-    server?.authUrl,
-    environment.BANDAR_AUTH_URL,
-    found === null ? authUrlForPort(port.value) : httpOrigin(found.dnsName, port.value),
-    found === null ? "default" : "tailscale",
-  );
+  const tailscale = resolve(server?.tailscale, undefined, false);
+  const endpoint = resolveEndpoint(tailscale.value, server, environment, lookup);
 
   const trustedOrigins = resolve(
     server?.trustedOrigins,
     environmentOrigins,
-    defaultTrustedOrigins(authUrl.value, host.value, port.value, mode, found),
+    defaultTrustedOrigins(endpoint, mode),
   );
 
   const update = settings.update;
@@ -373,23 +412,23 @@ function buildConfig(
 
   return {
     config: {
-      host: host.value,
-      port: port.value,
+      host: endpoint.host.value,
+      port: endpoint.port.value,
       tailscale: tailscale.value,
       databasePath: join(home, DATABASE_FILE),
       duckdbPath: join(home, DUCKDB_FILE),
       configDir: environment.BANDAR_CONFIG_DIR,
-      authUrl: authUrl.value,
+      authUrl: endpoint.authUrl.value,
       authSecret: environment.BANDAR_AUTH_SECRET ?? randomBytes(32).toString("hex"),
       trustedOrigins: trustedOrigins.value,
       providers: providers.endpoints,
       update: { webUrl: updateWebUrl.value, apiUrl: updateApiUrl.value },
     },
     sources: {
-      host: host.source,
-      port: port.source,
+      host: endpoint.host.source,
+      port: endpoint.port.source,
       tailscale: tailscale.source,
-      authUrl: authUrl.source,
+      authUrl: endpoint.authUrl.source,
       trustedOrigins: trustedOrigins.source,
       updateWebUrl: updateWebUrl.source,
       updateApiUrl: updateApiUrl.source,
@@ -451,21 +490,20 @@ function parseOrigins(value: string): readonly string[] {
   return origins;
 }
 
-function defaultTrustedOrigins(
-  authUrl: string,
-  host: string,
-  port: number,
-  mode: RunMode,
-  tailnet: TailnetIdentity | null,
-): readonly string[] {
-  const origins = [new URL(authUrl).origin];
+/**
+ * The origins a browser reaches a fresh install from: the auth URL's own origin first, since that is
+ * the public face, then the address this run listens on. A loopback run adds the loopback names on
+ * the API port, a tailnet run the MagicDNS name, and a development run the dev server's names,
+ * because the browser sends its origin unchanged through the proxy.
+ */
+function defaultTrustedOrigins(endpoint: Endpoint, mode: RunMode): readonly string[] {
+  const { authUrl, host, port, tailnet } = endpoint;
+  const origins = [new URL(authUrl.value).origin];
 
-  if (tailnet === null) origins.push(authUrlForPort(port), loopbackOrigin(port));
-  else origins.push(httpOrigin(tailnet.dnsName, port));
+  if (tailnet === null) origins.push(authUrlForPort(port.value), loopbackOrigin(port.value));
+  else origins.push(httpOrigin(tailnet.dnsName, port.value));
 
-  const anywhere = host === "0.0.0.0" || host === "::";
-
-  if (!anywhere) origins.push(httpOrigin(host, port));
+  if (!isWildcardHost(host.value)) origins.push(httpOrigin(host.value, port.value));
 
   if (mode === "development") {
     const webHosts =

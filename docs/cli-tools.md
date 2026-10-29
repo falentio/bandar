@@ -45,6 +45,8 @@ The tools disagree about how a config holds several refs, and the picker follows
 
 Claude Code cannot list models in its settings file. Its page therefore pins one starting ref in `ANTHROPIC_MODEL`, and the three alias variables are how `/model` gains bandar entries.
 
+Token limits come from the model row. A model you add or import keeps whatever the provider's catalog reports; when the catalog reports nothing, bandar asks [models.dev](https://models.dev) for that model id and stores the answer. The model dialog edits both numbers, so a custom model carries them too. opencode and pi write them into their configs; Codex and Claude Code take no limits, so their snippets ignore them.
+
 ## Secret rules
 
 These hold for every tool on the page. The snippets enforce the first one and a test checks it.
@@ -76,7 +78,10 @@ Global config: `~/.config/opencode/opencode.json`. The provider block uses `@ai-
         "apiKey": "{env:BANDAR_API_KEY}"
       },
       "models": {
-        "sonnet": { "name": "sonnet" },
+        "sonnet": {
+          "name": "sonnet",
+          "limit": { "context": 200000, "output": 64000 }
+        },
         "tags/coding": { "name": "tags/coding" }
       }
     }
@@ -91,7 +96,7 @@ opencode
 
 `{file:~/.config/bandar/key}` also works where `{env:...}` does, and keeps the value out of the environment. A missing variable substitutes an empty string, so a 401 means the export never reached the process that started opencode.
 
-Every key in `models` is a model opencode offers, and the top-level `model` is the one it starts on. `/models` opens the list, so a second ref costs one map entry and no restart.
+Every key in `models` is a model opencode offers, and the top-level `model` is the one it starts on. `/models` opens the list, so a second ref costs one map entry and no restart. A ref whose context window and max output are known carries a `limit`; a tag ref never does, because the tag picks the model at request time.
 
 Status: partial. opencode sends `tools` with every turn, bandar drops them, so the agent answers but never calls a tool.
 
@@ -110,7 +115,10 @@ Global config: `~/.config/opencode/opencode.jsonc`. v2 moves providers under `pr
       "package": "@opencode/ai/providers/openai-compatible",
       "settings": { "baseURL": "https://bandar.example/v1" },
       "models": {
-        "sonnet": { "name": "sonnet" },
+        "sonnet": {
+          "name": "sonnet",
+          "limit": { "context": 200000, "output": 64000 }
+        },
         "tags/coding": { "name": "tags/coding" }
       }
     }
@@ -203,7 +211,7 @@ Config: `~/.pi/agent/models.json`. pi resolves `$BANDAR_API_KEY` when it builds 
       "api": "openai-completions",
       "apiKey": "$BANDAR_API_KEY",
       "models": [
-        { "id": "sonnet", "name": "sonnet" },
+        { "id": "sonnet", "name": "sonnet", "contextWindow": 200000, "maxTokens": 64000 },
         { "id": "tags/coding", "name": "tags/coding" }
       ]
     }
@@ -218,7 +226,7 @@ pi --list-models
 
 `apiKey` accepts a literal, `$NAME`, `${NAME}`, or a leading `!command`. A command runs at request time, so a vault CLI works. Without `$BANDAR_API_KEY` set, pi reports the provider as unauthenticated instead of sending an empty key.
 
-Each entry in `models` appears under `/model`, and pi keeps the one you used last, so the file carries no default.
+Each entry in `models` appears under `/model`, and pi keeps the one you used last, so the file carries no default. pi takes `contextWindow` and `maxTokens` from the model's stored limits, and leaves both out for a tag.
 
 Status: partial, same reason as opencode.
 

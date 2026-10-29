@@ -38,12 +38,19 @@ export type CliSnippet =
       readonly code: string;
     };
 
+export type ModelLimit = {
+  readonly contextWindow: number;
+  readonly maxOutput: number;
+};
+
 export type CliRenderInput = {
   readonly origin: string;
   /** Model refs as bandar resolves them. Index 0 is the tool's default. Empty renders the placeholder. */
   readonly models: readonly string[];
   /** Key shown once at creation, empty to render the placeholder. */
   readonly key: string;
+  /** Token limits by model ref. A tag ref never gets one: the tag picks the model at request time. */
+  readonly limits: ReadonlyMap<string, ModelLimit>;
 };
 
 export type CliTool = {
@@ -95,6 +102,7 @@ export function renderInput(
   origin: string,
   models: readonly string[],
   key: string,
+  limits: ReadonlyMap<string, ModelLimit> = new Map(),
 ): CliRenderInput {
   const trimmed = models.map((ref) => ref.trim());
 
@@ -102,6 +110,7 @@ export function renderInput(
     origin: origin.replace(/\/+$/u, ""),
     models: [...new Set(trimmed)].filter((ref) => ref !== ""),
     key: key.trim(),
+    limits,
   };
 }
 
@@ -139,7 +148,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
                 baseURL: v1Of(input),
                 apiKey: "{env:BANDAR_API_KEY}",
               },
-              models: modelEntries(refsOf(input)),
+              models: modelEntries(refsOf(input), input.limits),
             },
           },
         }),
@@ -182,7 +191,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
               env: ["BANDAR_API_KEY"],
               package: "@opencode/ai/providers/openai-compatible",
               settings: { baseURL: v1Of(input) },
-              models: modelEntries(refsOf(input)),
+              models: modelEntries(refsOf(input), input.limits),
             },
           },
         }),
@@ -306,7 +315,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
               baseUrl: v1Of(input),
               api: "openai-completions",
               apiKey: "$BANDAR_API_KEY",
-              models: refsOf(input).map((ref) => ({ id: ref, name: ref })),
+              models: piEntries(refsOf(input), input.limits),
             },
           },
         }),
@@ -346,8 +355,44 @@ function modelRef(ref: string): string {
   return `bandar/${ref}`;
 }
 
-function modelEntries(refs: readonly string[]): Record<string, { readonly name: string }> {
-  return Object.fromEntries(refs.map((ref): [string, { name: string }] => [ref, { name: ref }]));
+type OpenCodeModelEntry = {
+  readonly name: string;
+  readonly limit?: { readonly context: number; readonly output: number };
+};
+
+function modelEntries(
+  refs: readonly string[],
+  limits: ReadonlyMap<string, ModelLimit>,
+): Record<string, OpenCodeModelEntry> {
+  return Object.fromEntries(
+    refs.map((ref): [string, OpenCodeModelEntry] => {
+      const limit = limits.get(ref);
+
+      if (limit === undefined) return [ref, { name: ref }];
+
+      return [ref, { name: ref, limit: { context: limit.contextWindow, output: limit.maxOutput } }];
+    }),
+  );
+}
+
+type PiModelEntry = {
+  readonly id: string;
+  readonly name: string;
+  readonly contextWindow?: number;
+  readonly maxTokens?: number;
+};
+
+function piEntries(
+  refs: readonly string[],
+  limits: ReadonlyMap<string, ModelLimit>,
+): readonly PiModelEntry[] {
+  return refs.map((ref) => {
+    const limit = limits.get(ref);
+
+    if (limit === undefined) return { id: ref, name: ref };
+
+    return { id: ref, name: ref, contextWindow: limit.contextWindow, maxTokens: limit.maxOutput };
+  });
 }
 
 function profileSnippets(refs: readonly string[]): readonly CliSnippet[] {

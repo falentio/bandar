@@ -219,3 +219,54 @@ describe("status", () => {
     expect(CLI_TOOLS.filter((tool) => toolStatus(tool).status === "ready")).toEqual([]);
   });
 });
+
+describe("token limits", () => {
+  const limits = new Map([["sonnet", { contextWindow: 200000, maxOutput: 64000 }]]);
+
+  test("opencode writes the limit it knows and leaves the rest alone", () => {
+    const render = renderInput(ORIGIN, ["sonnet", CODING], KEY, limits);
+    const code = fileCode(toolById("opencode-v1"), render);
+
+    expect(JSON.parse(code)).toMatchObject({
+      provider: {
+        bandar: {
+          models: {
+            sonnet: { name: "sonnet", limit: { context: 200000, output: 64000 } },
+            [CODING]: { name: CODING },
+          },
+        },
+      },
+    });
+  });
+
+  test("pi writes contextWindow and maxTokens", () => {
+    const render = renderInput(ORIGIN, ["sonnet", CODING], KEY, limits);
+
+    expect(JSON.parse(fileCode(toolById("pi"), render))).toMatchObject({
+      providers: {
+        bandar: {
+          models: [
+            { id: "sonnet", name: "sonnet", contextWindow: 200000, maxTokens: 64000 },
+            { id: CODING, name: CODING },
+          ],
+        },
+      },
+    });
+  });
+
+  test("a ref with no known limit carries no limit key", () => {
+    const render = renderInput(ORIGIN, ["sonnet"], KEY);
+    const code = fileCode(toolById("opencode-v1"), render);
+
+    expect(code).toContain('"name": "sonnet"');
+    expect(code).not.toContain('"limit"');
+  });
+
+  test("codex and claude code ignore limits", () => {
+    const render = renderInput(ORIGIN, ["sonnet"], KEY, limits);
+
+    for (const id of ["codex", "claude-code"] as const) {
+      expect(fileCode(toolById(id), render)).not.toContain("limit");
+    }
+  });
+});

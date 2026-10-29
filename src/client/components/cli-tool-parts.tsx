@@ -8,6 +8,7 @@ import {
   type CliRenderInput,
   type CliTool,
   type CliToolStatus,
+  type ModelLimit,
 } from "@/shared/cli-tools";
 import { modelChoices } from "../model-options";
 import { ModelCombobox } from "./model-combobox";
@@ -15,6 +16,28 @@ import { ModelSelect } from "./model-select";
 import { useApiKeys } from "../use-api-keys";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
+
+function modelLimitsOf(
+  providers: readonly { readonly models: readonly ProviderModelLike[] }[],
+): ReadonlyMap<string, ModelLimit> {
+  const limits = new Map<string, ModelLimit>();
+
+  for (const provider of providers) {
+    for (const model of provider.models) {
+      if (model.contextWindow === null || model.maxOutput === null) continue;
+
+      limits.set(model.slug, { contextWindow: model.contextWindow, maxOutput: model.maxOutput });
+    }
+  }
+
+  return limits;
+}
+
+type ProviderModelLike = {
+  readonly slug: string;
+  readonly contextWindow: number | null;
+  readonly maxOutput: number | null;
+};
 
 const STATUS_LABEL: Record<CliToolStatus["status"], string> = {
   ready: "Ready",
@@ -63,7 +86,7 @@ export function KeyAndModelsCard({
   const busy = providers.pending || tags.pending;
 
   const key = apiKeys.created ?? pastedKey;
-  const input = renderInput(origin, models, key);
+  const input = renderInput(origin, models, key, modelLimitsOf(providers.providers));
   const choices = modelChoices(providers.providers, tags.tags);
   const single = tool.modelCapacity === "one";
 

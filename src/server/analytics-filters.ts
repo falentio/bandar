@@ -14,6 +14,7 @@ export function filterParams(search: URLSearchParams): Record<AnalyticsFilterDim
     model: nonBlankValues(search, "model"),
     tag: nonBlankValues(search, "tag"),
     projectUrl: nonBlankValues(search, "projectUrl"),
+    sessionId: nonBlankValues(search, "sessionId"),
   };
 }
 

@@ -1,7 +1,12 @@
 import type { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
 import * as v from "valibot";
-import { AnalyticsSchema, ProjectListSchema, RequestListSchema } from "../shared/analytics";
+import {
+  AnalyticsSchema,
+  ProjectListSchema,
+  RequestListSchema,
+  SessionListSchema,
+} from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import { CooldownListSchema } from "../shared/cooldowns";
@@ -23,7 +28,13 @@ import {
   ProviderParamsSchema,
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
-import { readAnalytics, readProjectUrls, readProviderUsage, readRequests } from "./analytics";
+import {
+  readAnalytics,
+  readProjectUrls,
+  readProviderUsage,
+  readRequests,
+  readSessionIds,
+} from "./analytics";
 import { AnalyticsFiltersInputSchema, filterParams, isBlank } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import { createBackup } from "./backup";
@@ -100,6 +111,7 @@ const RequestsQuerySchema = v.object({
 export function createApi(deps: ApiDeps) {
   const pendingLogins = new Map<string, { code: string; expiresAt: number }>();
   const projectUrls = createValueCatalog((userId) => readProjectUrls(deps.duck, { userId }));
+  const sessionIds = createValueCatalog((userId) => readSessionIds(deps.duck, { userId }));
 
   const app = new Elysia({ prefix: "/api" })
     .onError(({ code, error, path, set }) => {
@@ -689,6 +701,13 @@ export function createApi(deps: ApiDeps) {
       if (caller instanceof Response) return caller;
 
       return v.parse(ProjectListSchema, { projects: projectUrls.list(caller.userId) });
+    })
+    .get("/analytics/sessions", async ({ request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      return v.parse(SessionListSchema, { sessions: sessionIds.list(caller.userId) });
     })
     .get("/requests", async ({ query, request }) => {
       const caller = await authenticate(deps.auth, request);

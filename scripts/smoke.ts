@@ -19,6 +19,7 @@ import {
   AnalyticsSchema,
   ProjectListSchema,
   RequestListSchema,
+  SessionListSchema,
   analyticsPaths,
   type Analytics,
   type RequestEvent,
@@ -47,6 +48,7 @@ import {
 } from "../src/shared/providers";
 import { CHARS_PER_TOKEN } from "../src/server/router/anthropic-wire";
 import { PROJECT_URL_HEADER } from "../src/shared/project";
+import { SESSION_ID_HEADER } from "../src/shared/session-id";
 import { TagListSchema, tagPaths } from "../src/shared/tags";
 
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
@@ -795,6 +797,57 @@ try {
     );
 
     assert.equal(blank.summary.requests, after.summary.requests);
+  });
+
+  await check("GET /api/analytics filters by the session id header", async () => {
+    const before = await getJson(`${analyticsPaths.analytics}?days=30`, AnalyticsSchema, 200);
+
+    const tagged = await fetch(new URL("/v1/chat/completions", origin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [SESSION_ID_HEADER]: "session-alpha",
+        ...bearer(),
+      },
+      body: JSON.stringify(chat("fast", false, "session")),
+    });
+
+    assert.equal(tagged.status, 200);
+
+    const untagged = await fetch(new URL("/v1/chat/completions", origin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [SESSION_ID_HEADER]: "has space",
+        ...bearer(),
+      },
+      body: JSON.stringify(chat("fast", false, "unusable session")),
+    });
+
+    assert.equal(untagged.status, 200);
+
+    const sessions = await getJson(analyticsPaths.sessions, SessionListSchema, 200);
+
+    assert.deepEqual(sessions, { sessions: ["session-alpha"] });
+
+    const after = await getJson(`${analyticsPaths.analytics}?days=30`, AnalyticsSchema, 200);
+
+    assert.equal(after.summary.requests, before.summary.requests + 2);
+
+    const filtered = await getJson(
+      `${analyticsPaths.analytics}?days=30&sessionId=session-alpha`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(filtered.summary.requests, 1);
+
+    const rejected = await fetch(
+      new URL(`${analyticsPaths.analytics}?days=30&sessionId=has%20space`, origin),
+      { headers: sessionHeaders() },
+    );
+
+    assert.equal(rejected.status, 422);
   });
 
   await check("POST /api/providers cannot create another built-in provider", async () => {

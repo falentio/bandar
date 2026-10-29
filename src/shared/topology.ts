@@ -1,5 +1,5 @@
 export const DEFAULT_API_PORT = 3000;
-export const DEFAULT_WEB_PORT = 5173;
+export const DEV_WEB_PORT = 5173;
 export const DEFAULT_HOST = "0.0.0.0";
 
 export const MIN_PORT = 0;

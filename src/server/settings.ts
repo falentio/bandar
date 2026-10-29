@@ -1,7 +1,7 @@
 import { toJsonSchema } from "@valibot/to-json-schema";
 import { join } from "node:path";
 import * as v from "valibot";
-import { DEFAULT_API_PORT, DEFAULT_WEB_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
+import { DEFAULT_API_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
 import { PROVIDER_ENDPOINT_SPECS, type EndpointSpec } from "./providers/endpoints";
 
 const SETTINGS_FILE = "config.json";
@@ -73,17 +73,6 @@ const ServerSettingsSchema = v.pipe(
         v.minValue(MIN_PORT),
         v.maxValue(MAX_PORT),
         v.description("The port to listen on. Defaults to " + String(DEFAULT_API_PORT) + "."),
-      ),
-    ),
-    webPort: v.optional(
-      v.pipe(
-        v.number(),
-        v.integer(),
-        v.minValue(MIN_PORT),
-        v.maxValue(MAX_PORT),
-        v.description(
-          "The port the web dev server listens on. Defaults to " + String(DEFAULT_WEB_PORT) + ".",
-        ),
       ),
     ),
     authUrl: v.optional(

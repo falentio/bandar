@@ -225,22 +225,10 @@ describe("settings", () => {
     }
   });
 
-  test("the web port parses within the same bounds", () => {
-    expect(settingsFrom(readerOf('{"server":{"webPort":6000}}'))).toEqual({
-      kind: "ok",
-      path,
-      settings: { server: { webPort: 6000 } },
-    });
-  });
+  test("the removed web port is an unknown key", () => {
+    const reason = reasonOf(settingsFrom(readerOf('{"server":{"webPort":6000}}')));
 
-  test("a web port outside 0..65535, or not a whole number, is invalid", () => {
-    for (const webPort of [-1, 70000, 80.5, "5173"]) {
-      const reason = reasonOf(
-        settingsFrom(readerOf(`{"server":{"webPort":${JSON.stringify(webPort)}}}`)),
-      );
-
-      expect(reason).toContain("server.webPort");
-    }
+    expect(reason).toMatch(/^server\.webPort: Invalid key\b/u);
   });
 
   test("an empty host is invalid", () => {

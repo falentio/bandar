@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, vi } from "vite-plus/test";
-import { DEFAULT_API_PORT, DEFAULT_WEB_PORT } from "../shared/topology";
+import { DEFAULT_API_PORT, DEV_WEB_PORT } from "../shared/topology";
 import {
   ConfigError,
   detectRunMode,
@@ -373,8 +373,8 @@ describe("the derived defaults", () => {
     expect(reportOf({}, "development").config.trustedOrigins).toEqual([
       `http://localhost:${DEFAULT_API_PORT}`,
       `http://127.0.0.1:${DEFAULT_API_PORT}`,
-      `http://localhost:${DEFAULT_WEB_PORT}`,
-      `http://127.0.0.1:${DEFAULT_WEB_PORT}`,
+      `http://localhost:${DEV_WEB_PORT}`,
+      `http://127.0.0.1:${DEV_WEB_PORT}`,
     ]);
   });
 
@@ -430,13 +430,7 @@ describe("the config report", () => {
       reportOf()
         .rows.filter((row) => row.key.startsWith("server."))
         .map((row) => row.key),
-    ).toEqual([
-      "server.host",
-      "server.port",
-      "server.webPort",
-      "server.authUrl",
-      "server.trustedOrigins",
-    ]);
+    ).toEqual(["server.host", "server.port", "server.authUrl", "server.trustedOrigins"]);
   });
 
   test("a row carries the resolved value beside its source", () => {
@@ -451,7 +445,6 @@ describe("the config report", () => {
     expect(rows.filter((row) => row.key.startsWith("server.")).map((row) => row.value)).toEqual([
       "0.0.0.0",
       String(DEFAULT_API_PORT),
-      String(DEFAULT_WEB_PORT),
       `http://localhost:${String(DEFAULT_API_PORT)}`,
       "https://a.example.com, https://b.example.com",
     ]);
@@ -469,7 +462,6 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "default",
       "server.port": "default",
-      "server.webPort": "default",
       "server.authUrl": "default",
       "server.trustedOrigins": "default",
     });
@@ -497,7 +489,6 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
-      "server.webPort": "default",
       "server.authUrl": "config",
       "server.trustedOrigins": "config",
     });
@@ -521,7 +512,6 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
-      "server.webPort": "default",
       "server.authUrl": "config",
       "server.trustedOrigins": "config",
     });
@@ -538,7 +528,6 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "environment",
       "server.port": "environment",
-      "server.webPort": "default",
       "server.authUrl": "environment",
       "server.trustedOrigins": "environment",
     });
@@ -553,28 +542,17 @@ describe("the config report", () => {
     expect(sourcesOf(blank)).toEqual({
       "server.host": "default",
       "server.port": "default",
-      "server.webPort": "default",
       "server.authUrl": "default",
       "server.trustedOrigins": "default",
     });
   });
 
-  test("the web port takes the file, then the environment", () => {
-    const fromFilePort = reportOf({}, "production", JSON.stringify({ server: { webPort: 6000 } }));
-    const fromEnvironment = reportOf({ BANDAR_WEB_PORT: "6001" });
-
-    expect(fromFilePort.config.webPort).toBe(6000);
-    expect(sourcesOf(fromFilePort)["server.webPort"]).toBe("config");
-    expect(fromEnvironment.config.webPort).toBe(6001);
-    expect(sourcesOf(fromEnvironment)["server.webPort"]).toBe("environment");
-  });
-
-  test("a development run trusts the web dev server on the resolved web port", () => {
-    expect(reportOf({ BANDAR_WEB_PORT: "6000" }, "development").config.trustedOrigins).toEqual([
+  test("a development run trusts the web dev server", () => {
+    expect(reportOf({}, "development").config.trustedOrigins).toEqual([
       `http://localhost:${String(DEFAULT_API_PORT)}`,
       `http://127.0.0.1:${String(DEFAULT_API_PORT)}`,
-      "http://localhost:6000",
-      "http://127.0.0.1:6000",
+      `http://localhost:${String(DEV_WEB_PORT)}`,
+      `http://127.0.0.1:${String(DEV_WEB_PORT)}`,
     ]);
   });
 
@@ -588,7 +566,6 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
-      "server.webPort": "default",
       "server.authUrl": "environment",
       "server.trustedOrigins": "default",
     });

@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite-plus";
 import { loadConfig } from "./src/server/config";
 import { settingsReadIo } from "./src/server/settings-io";
-import { loopbackOrigin } from "./src/shared/topology";
+import { DEV_WEB_PORT, loopbackOrigin } from "./src/shared/topology";
 
 const ignored = [
   "src/server/generated/**",
@@ -52,7 +52,7 @@ export default defineConfig({
   },
   server: {
     host: true,
-    port: config.webPort,
+    port: DEV_WEB_PORT,
     // MagicDNS names resolve to this machine on the tailnet; Vite rejects unknown Host headers.
     allowedHosts: [".ts.net"],
     proxy: {

@@ -159,7 +159,6 @@ for a system one.
   "server": {
     "host": "0.0.0.0",
     "port": 3000,
-    "webPort": 5173,
     "authUrl": "https://llm.example.com",
     "trustedOrigins": ["https://llm.example.com"]
   },
@@ -183,7 +182,6 @@ for a system one.
 | ----------------------- | ---------------------------- | ------------------------------------ |
 | `server.host`           | a non-empty string           | `0.0.0.0`                            |
 | `server.port`           | an integer from 0 to 65535   | `3000`                               |
-| `server.webPort`        | an integer from 0 to 65535   | `5173`                               |
 | `server.authUrl`        | an http or https URL         | `http://localhost:<port>`            |
 | `server.trustedOrigins` | a non-empty array of origins | derived, see below                   |
 | `update.webUrl`         | an http or https URL         | `https://github.com/falentio/bandar` |
@@ -214,6 +212,8 @@ provider field its kind does not have, a root that is not a JSON object, an empt
 port that is not a whole number in range, an empty `server.trustedOrigins`, an origin
 with a path, a URL that is not http or https, and a file that is not JSON all fail the
 boot, and the message names the file and the field. A typo never falls back to a default.
+`server.webPort` is no longer a key, so a file that still carries it fails the boot; delete
+the line.
 
 `bandar` writes `config.schema.json` beside the settings on every read, and adds
 `"$schema": "./config.schema.json"` to a `config.json` that lacks the key, so an editor
@@ -228,8 +228,8 @@ is not writable only costs the editor completion.
 The default trusted origins start with the auth URL's own origin. They then follow the
 resolved API port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
 `http://<host>:<port>` when `server.host` names an address rather than `0.0.0.0` or
-`::`. Only a development run adds the web dev server, at `http://localhost:<webPort>`
-and `http://127.0.0.1:<webPort>`.
+`::`. Only a development run adds the web dev server, at `http://localhost:5173`
+and `http://127.0.0.1:5173`.
 
 A `server.port` of 0 asks the OS for an ephemeral port. The server binds one, but the
 derived auth URL and trusted origins name port 0 and reach nothing, so set
@@ -247,14 +247,13 @@ field.
 | ----------------------- | ------------------------ |
 | `server.host`           | `BANDAR_HOST`            |
 | `server.port`           | `BANDAR_PORT`            |
-| `server.webPort`        | `BANDAR_WEB_PORT`        |
 | `server.authUrl`        | `BANDAR_AUTH_URL`        |
 | `server.trustedOrigins` | `BANDAR_TRUSTED_ORIGINS` |
 | `update.webUrl`         | `BANDAR_RELEASE_WEB_URL` |
 | `update.apiUrl`         | `BANDAR_RELEASE_API_URL` |
 
-The dev server in `vite.config.ts` reads both ports from the same file, so
-`bun run dev` follows an edit to `server.port` or `server.webPort`.
+The dev server in `vite.config.ts` reads `server.port` from the same file for its proxy, so
+`bun run dev` follows an edit there. Vite itself always listens on 5173.
 
 These stay in the environment only: `BANDAR_HOME` and `BANDAR_CONFIG_DIR`, which
 locate files; `BANDAR_AUTH_SECRET`, because the data directory is world-readable and the
@@ -276,7 +275,6 @@ settings                       /home/andrew/.bandar/config.json (missing)
 mode                           development
 server.host                    0.0.0.0 (default)
 server.port                    3000 (default)
-server.webPort                 5173 (default)
 server.authUrl                 http://localhost:3000 (default)
 server.trustedOrigins          http://localhost:3000, http://127.0.0.1:3000, http://localhost:5173, http://127.0.0.1:5173 (default)
 providers.kilocode.baseUrl     https://api.kilo.ai/api/openrouter (default)

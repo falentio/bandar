@@ -13,6 +13,7 @@ import {
   type ConfigSource,
   type RunMode,
 } from "./config";
+import type { TailnetIdentity, TailnetLookup } from "./tailnet";
 
 const MODE_HOMES = [
   ["development", ".bandar_dev"],
@@ -27,15 +28,21 @@ const missingFile = (): string => {
   throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
 };
 
+const noDiscovery: TailnetLookup = () => {
+  throw new Error("discovery ran with server.tailscale off");
+};
+
 const reportOf = (
   env: Record<string, string | undefined> = {},
   mode: RunMode = "production",
   json = "{}",
+  lookup: TailnetLookup = noDiscovery,
 ) =>
   loadConfigReport(
     { BANDAR_HOME: home, BANDAR_AUTH_SECRET: "set", ...env },
     ioOf(() => json),
     mode,
+    lookup,
   );
 
 const fromFile = (json: string, env: Record<string, string | undefined> = {}) =>
@@ -430,7 +437,13 @@ describe("the config report", () => {
       reportOf()
         .rows.filter((row) => row.key.startsWith("server."))
         .map((row) => row.key),
-    ).toEqual(["server.host", "server.port", "server.authUrl", "server.trustedOrigins"]);
+    ).toEqual([
+      "server.host",
+      "server.port",
+      "server.tailscale",
+      "server.authUrl",
+      "server.trustedOrigins",
+    ]);
   });
 
   test("a row carries the resolved value beside its source", () => {
@@ -445,6 +458,7 @@ describe("the config report", () => {
     expect(rows.filter((row) => row.key.startsWith("server.")).map((row) => row.value)).toEqual([
       "0.0.0.0",
       String(DEFAULT_API_PORT),
+      "false",
       `http://localhost:${String(DEFAULT_API_PORT)}`,
       "https://a.example.com, https://b.example.com",
     ]);
@@ -462,6 +476,7 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "default",
       "server.port": "default",
+      "server.tailscale": "default",
       "server.authUrl": "default",
       "server.trustedOrigins": "default",
     });
@@ -489,6 +504,7 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
+      "server.tailscale": "default",
       "server.authUrl": "config",
       "server.trustedOrigins": "config",
     });
@@ -512,6 +528,7 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
+      "server.tailscale": "default",
       "server.authUrl": "config",
       "server.trustedOrigins": "config",
     });
@@ -528,6 +545,7 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "environment",
       "server.port": "environment",
+      "server.tailscale": "default",
       "server.authUrl": "environment",
       "server.trustedOrigins": "environment",
     });
@@ -542,6 +560,7 @@ describe("the config report", () => {
     expect(sourcesOf(blank)).toEqual({
       "server.host": "default",
       "server.port": "default",
+      "server.tailscale": "default",
       "server.authUrl": "default",
       "server.trustedOrigins": "default",
     });
@@ -566,9 +585,78 @@ describe("the config report", () => {
     expect(sourcesOf(report)).toEqual({
       "server.host": "config",
       "server.port": "config",
+      "server.tailscale": "default",
       "server.authUrl": "environment",
       "server.trustedOrigins": "default",
     });
+  });
+});
+
+describe("the tailnet bind", () => {
+  const tailnet: TailnetIdentity = { address: "100.90.57.79", dnsName: "host.tailnet.ts.net" };
+  const found: TailnetLookup = () => ({ kind: "found", identity: tailnet });
+
+  const withTailscale = (server: { readonly host?: string; readonly authUrl?: string }): string =>
+    JSON.stringify({ server: { tailscale: true, ...server } });
+
+  test("the tailnet address and the MagicDNS auth URL replace the host and loopback", () => {
+    const report = reportOf({}, "production", withTailscale({}), found);
+
+    expect(report.config.host).toBe(tailnet.address);
+    expect(report.config.authUrl).toBe(`http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`);
+    expect(sourcesOf(report)).toMatchObject({
+      "server.host": "tailscale",
+      "server.authUrl": "tailscale",
+      "server.tailscale": "config",
+    });
+    expect(report.config.trustedOrigins).toEqual([
+      `http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`,
+      `http://${tailnet.address}:${String(DEFAULT_API_PORT)}`,
+    ]);
+  });
+
+  test("the tailnet address wins over a configured host", () => {
+    const report = reportOf({}, "production", withTailscale({ host: "127.0.0.1" }), found);
+
+    expect(report.config.host).toBe(tailnet.address);
+  });
+
+  test("a development run trusts the dev server by its tailnet names", () => {
+    const report = reportOf({}, "development", withTailscale({}), found);
+
+    expect(report.config.trustedOrigins).toEqual([
+      `http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`,
+      `http://${tailnet.address}:${String(DEFAULT_API_PORT)}`,
+      `http://${tailnet.dnsName}:${String(DEV_WEB_PORT)}`,
+      `http://${tailnet.address}:${String(DEV_WEB_PORT)}`,
+    ]);
+  });
+
+  test("an explicit auth URL wins, and the MagicDNS name is still trusted", () => {
+    const report = reportOf(
+      {},
+      "production",
+      withTailscale({ authUrl: "https://llm.example.com" }),
+      found,
+    );
+
+    expect(report.config.authUrl).toBe("https://llm.example.com");
+    expect(report.config.trustedOrigins).toContain(
+      `http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`,
+    );
+  });
+
+  test("a missing tailnet fails the boot with the reason", () => {
+    expect(() =>
+      reportOf({}, "production", withTailscale({}), () => ({
+        kind: "missing",
+        reason: "tailscale backend is NeedsLogin",
+      })),
+    ).toThrow(/server\.tailscale: tailscale backend is NeedsLogin/u);
+  });
+
+  test("the flag off never asks for the tailnet", () => {
+    expect(() => reportOf()).not.toThrow();
   });
 });
 

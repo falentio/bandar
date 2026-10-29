@@ -75,10 +75,20 @@ const ServerSettingsSchema = v.pipe(
         v.description("The port to listen on. Defaults to " + String(DEFAULT_API_PORT) + "."),
       ),
     ),
+    tailscale: v.optional(
+      v.pipe(
+        v.boolean(),
+        v.description(
+          "Bind the API to the tailnet address and trust its MagicDNS name. Defaults to false.",
+        ),
+      ),
+    ),
     authUrl: v.optional(
       v.pipe(
         HttpUrlSchema,
-        v.description("The public URL of this server. Defaults to http://localhost:<port>."),
+        v.description(
+          "The public URL of this server. Defaults to http://localhost:<port>, or the MagicDNS URL when server.tailscale is on.",
+        ),
       ),
     ),
     trustedOrigins: v.optional(
@@ -86,7 +96,7 @@ const ServerSettingsSchema = v.pipe(
         v.array(OriginSchema),
         v.minLength(1, "needs at least one origin"),
         v.description(
-          "Origins allowed to sign in. Defaults to the auth URL's origin and the loopback.",
+          "Origins allowed to sign in. Defaults to the auth URL's origin and the addresses this run listens on.",
         ),
       ),
     ),

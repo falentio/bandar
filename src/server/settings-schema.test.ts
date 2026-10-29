@@ -36,6 +36,10 @@ const GeneratedSchema = v.strictObject({
           maximum: v.number(),
           description: v.string(),
         }),
+        tailscale: v.looseObject({
+          type: v.literal("boolean"),
+          description: v.string(),
+        }),
         authUrl: Property,
         trustedOrigins: Property,
       }),
@@ -84,7 +88,7 @@ describe("the generated schema", () => {
 
   test("it lists the keys the parser reads, and no others", () => {
     expect(Object.keys(document.properties)).toEqual(["$schema", "server", "providers", "update"]);
-    expect(Object.keys(server)).toEqual(["host", "port", "authUrl", "trustedOrigins"]);
+    expect(Object.keys(server)).toEqual(["host", "port", "tailscale", "authUrl", "trustedOrigins"]);
     expect(Object.keys(providers)).toEqual([...BUILT_IN_PROVIDER_KINDS]);
     expect(Object.keys(providers.kilocode.properties)).toEqual(["baseUrl", "catalogUrl"]);
     expect(Object.keys(providers.tokenharbor.properties)).toEqual(["baseUrl"]);
@@ -104,6 +108,10 @@ describe("the generated schema", () => {
     expect(document.properties.update.required).toEqual([]);
 
     for (const provider of Object.values(providers)) expect(provider.required).toEqual([]);
+  });
+
+  test("the tailscale flag is a boolean", () => {
+    expect(server.tailscale.type).toBe("boolean");
   });
 
   test("the port bounds come from the shared constants", () => {

@@ -5,7 +5,13 @@ export const DEFAULT_HOST = "0.0.0.0";
 export const MIN_PORT = 0;
 export const MAX_PORT = 65535;
 
-export const loopbackOrigin = (port: number): string => `http://127.0.0.1:${port}`;
+export const httpOrigin = (host: string, port: number): string =>
+  `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
+
+export const loopbackOrigin = (port: number): string => httpOrigin("127.0.0.1", port);
+
+export const originForHost = (host: string, port: number): string =>
+  httpOrigin(host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host, port);
 
 /**
  * The auth URL a run falls back to: loopback on the resolved port. The schema's help text names the

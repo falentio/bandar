@@ -8,6 +8,7 @@ import {
   DEFAULT_API_PORT,
   DEFAULT_HOST,
   DEV_WEB_PORT,
+  httpOrigin,
   loopbackOrigin,
   MAX_PORT,
   MIN_PORT,
@@ -27,10 +28,12 @@ import {
   type Settings,
   type SettingsIo,
 } from "./settings";
+import { discoverTailnet, type TailnetIdentity, type TailnetLookup } from "./tailnet";
 
 export type Config = {
   readonly host: string;
   readonly port: number;
+  readonly tailscale: boolean;
   readonly databasePath: string;
   readonly duckdbPath: string;
   readonly configDir: string;
@@ -43,7 +46,7 @@ export type Config = {
 
 export type RunMode = "development" | "production";
 
-export type ConfigSource = "environment" | "config" | "default";
+export type ConfigSource = "environment" | "config" | "default" | "tailscale";
 
 export type ConfigRow = {
   readonly key: string;
@@ -54,6 +57,7 @@ export type ConfigRow = {
 type ConfigSources = {
   readonly host: ConfigSource;
   readonly port: ConfigSource;
+  readonly tailscale: ConfigSource;
   readonly authUrl: ConfigSource;
   readonly trustedOrigins: ConfigSource;
   readonly updateWebUrl: ConfigSource;
@@ -322,6 +326,7 @@ function buildConfig(
   mode: RunMode,
   settings: Settings,
   endpointEnvironment: readonly EndpointEnvValue[],
+  lookup: TailnetLookup,
 ): BuiltConfig {
   const server = settings.server;
   const providers = resolveProviders(settings, endpointEnvironment);
@@ -331,14 +336,35 @@ function buildConfig(
       ? undefined
       : parseOrigins(environment.BANDAR_TRUSTED_ORIGINS);
 
-  const host = resolve(server?.host, environment.BANDAR_HOST, DEFAULT_HOST);
   const port = resolve(server?.port, environment.BANDAR_PORT, DEFAULT_API_PORT);
-  const authUrl = resolve(server?.authUrl, environment.BANDAR_AUTH_URL, authUrlForPort(port.value));
+
+  const tailscale =
+    server?.tailscale === undefined
+      ? { value: false, source: "default" as const }
+      : { value: server.tailscale, source: "config" as const };
+
+  const tailnet = tailscale.value ? lookup() : null;
+
+  if (tailnet?.kind === "missing") throw new ConfigError([`server.tailscale: ${tailnet.reason}`]);
+
+  const found = tailnet?.kind === "found" ? tailnet.identity : null;
+
+  const host =
+    found === null
+      ? resolve(server?.host, environment.BANDAR_HOST, DEFAULT_HOST)
+      : { value: found.address, source: "tailscale" as const };
+
+  const authUrl = resolve(
+    server?.authUrl,
+    environment.BANDAR_AUTH_URL,
+    found === null ? authUrlForPort(port.value) : httpOrigin(found.dnsName, port.value),
+    found === null ? "default" : "tailscale",
+  );
 
   const trustedOrigins = resolve(
     server?.trustedOrigins,
     environmentOrigins,
-    defaultTrustedOrigins(authUrl.value, host.value, port.value, mode),
+    defaultTrustedOrigins(authUrl.value, host.value, port.value, mode, found),
   );
 
   const update = settings.update;
@@ -349,6 +375,7 @@ function buildConfig(
     config: {
       host: host.value,
       port: port.value,
+      tailscale: tailscale.value,
       databasePath: join(home, DATABASE_FILE),
       duckdbPath: join(home, DUCKDB_FILE),
       configDir: environment.BANDAR_CONFIG_DIR,
@@ -361,6 +388,7 @@ function buildConfig(
     sources: {
       host: host.source,
       port: port.source,
+      tailscale: tailscale.source,
       authUrl: authUrl.source,
       trustedOrigins: trustedOrigins.source,
       updateWebUrl: updateWebUrl.source,
@@ -379,12 +407,17 @@ type Resolved<T> = {
  * The one place the three tiers are ordered: the settings file, then the environment, then the
  * built-in default. Each tier returns its own label beside the value it supplied.
  */
-function resolve<T>(file: T | undefined, environment: T | undefined, fallback: T): Resolved<T> {
+function resolve<T>(
+  file: T | undefined,
+  environment: T | undefined,
+  fallback: T,
+  fallbackSource: ConfigSource = "default",
+): Resolved<T> {
   if (file !== undefined) return { value: file, source: "config" };
 
   if (environment !== undefined) return { value: environment, source: "environment" };
 
-  return { value: fallback, source: "default" };
+  return { value: fallback, source: fallbackSource };
 }
 
 /**
@@ -418,24 +451,28 @@ function parseOrigins(value: string): readonly string[] {
   return origins;
 }
 
-/**
- * The origins a browser can reach a fresh install from: the auth URL's own origin first, since that
- * is the public face, then the loopback on the listening port. The dev web server always listens on
- * DEV_WEB_PORT, so only a development run can sign in through it.
- */
 function defaultTrustedOrigins(
   authUrl: string,
   host: string,
   port: number,
   mode: RunMode,
+  tailnet: TailnetIdentity | null,
 ): readonly string[] {
-  const origins = [new URL(authUrl).origin, authUrlForPort(port), loopbackOrigin(port)];
+  const origins = [new URL(authUrl).origin];
+
+  if (tailnet === null) origins.push(authUrlForPort(port), loopbackOrigin(port));
+  else origins.push(httpOrigin(tailnet.dnsName, port));
+
   const anywhere = host === "0.0.0.0" || host === "::";
 
-  if (!anywhere) origins.push(`http://${host.includes(":") ? `[${host}]` : host}:${port}`);
+  if (!anywhere) origins.push(httpOrigin(host, port));
 
-  if (mode === "development")
-    origins.push(`http://localhost:${DEV_WEB_PORT}`, `http://127.0.0.1:${DEV_WEB_PORT}`);
+  if (mode === "development") {
+    const webHosts =
+      tailnet === null ? ["localhost", "127.0.0.1"] : [tailnet.dnsName, tailnet.address];
+
+    for (const webHost of webHosts) origins.push(httpOrigin(webHost, DEV_WEB_PORT));
+  }
 
   return [...new Set(origins)];
 }
@@ -444,6 +481,7 @@ function serverRows(config: Config, sources: ConfigSources): readonly ConfigRow[
   return [
     { key: "server.host", value: config.host, source: sources.host },
     { key: "server.port", value: String(config.port), source: sources.port },
+    { key: "server.tailscale", value: String(config.tailscale), source: sources.tailscale },
     { key: "server.authUrl", value: config.authUrl, source: sources.authUrl },
     {
       key: "server.trustedOrigins",
@@ -480,7 +518,7 @@ export function parseConfig(
 
   const { environment, endpoints } = parseEnvironment(env);
 
-  return buildConfig(environment, home, mode, {}, endpoints).config;
+  return buildConfig(environment, home, mode, {}, endpoints, discoverTailnet).config;
 }
 
 /**
@@ -493,6 +531,7 @@ export function loadConfigReport(
   env: Record<string, string | undefined>,
   io: SettingsIo,
   mode: RunMode = detectRunMode(),
+  lookup: TailnetLookup = discoverTailnet,
 ): ConfigReport {
   const home = resolveHome(env, mode);
   const { environment, endpoints } = parseEnvironment(env);
@@ -507,6 +546,7 @@ export function loadConfigReport(
     mode,
     report.kind === "ok" ? report.settings : {},
     endpoints,
+    lookup,
   );
 
   return {
@@ -522,6 +562,7 @@ export function loadConfig(
   env: Record<string, string | undefined>,
   io: SettingsIo,
   mode: RunMode = detectRunMode(),
+  lookup: TailnetLookup = discoverTailnet,
 ): Config {
-  return loadConfigReport(env, io, mode).config;
+  return loadConfigReport(env, io, mode, lookup).config;
 }

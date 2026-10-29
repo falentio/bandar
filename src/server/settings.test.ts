@@ -225,6 +225,18 @@ describe("settings", () => {
     }
   });
 
+  test("the tailscale flag takes a boolean", () => {
+    expect(settingsFrom(readerOf('{"server":{"tailscale":true}}'))).toEqual({
+      kind: "ok",
+      path,
+      settings: { server: { tailscale: true } },
+    });
+
+    const reason = reasonOf(settingsFrom(readerOf('{"server":{"tailscale":"true"}}')));
+
+    expect(reason).toContain("server.tailscale");
+  });
+
   test("the removed web port is an unknown key", () => {
     const reason = reasonOf(settingsFrom(readerOf('{"server":{"webPort":6000}}')));
 

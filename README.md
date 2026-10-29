@@ -182,6 +182,7 @@ for a system one.
 | ----------------------- | ---------------------------- | ------------------------------------ |
 | `server.host`           | a non-empty string           | `0.0.0.0`                            |
 | `server.port`           | an integer from 0 to 65535   | `4133`                               |
+| `server.tailscale`      | `true` or `false`            | `false`                              |
 | `server.authUrl`        | an http or https URL         | `http://localhost:<port>`            |
 | `server.trustedOrigins` | a non-empty array of origins | derived, see below                   |
 | `update.webUrl`         | an http or https URL         | `https://github.com/falentio/bandar` |
@@ -225,11 +226,19 @@ the server still rejects at boot. A `$schema` you wrote yourself is left alone, 
 the key changes nothing else in the file. Neither write is required: a data directory that
 is not writable only costs the editor completion.
 
-The default trusted origins start with the auth URL's own origin. They then follow the
-resolved API port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
+The default trusted origins start with the auth URL's own origin. With no tailnet bind,
+they then follow the resolved API port: `http://localhost:<port>` and `http://127.0.0.1:<port>`, plus
 `http://<host>:<port>` when `server.host` names an address rather than `0.0.0.0` or
 `::`. Only a development run adds the web dev server, at `http://localhost:5173`
 and `http://127.0.0.1:5173`.
+
+`server.tailscale: true` asks `tailscale status --json` for this machine's tailnet address
+and MagicDNS name. The API binds that address instead of `server.host`, the auth URL
+defaults to `http://<magicdns>:<port>`, and the trusted origins become the MagicDNS name
+and the tailnet address. A development run also trusts both names on port 5173, for the Vite
+dev server. If Tailscale is missing, stopped, or logged out, the boot fails and names the
+reason, because a fallback bind would listen somewhere you did not ask for. A tailnet bind
+has no loopback listener.
 
 A `server.port` of 0 asks the OS for an ephemeral port. The server binds one, but the
 derived auth URL and trusted origins name port 0 and reach nothing, so set
@@ -251,6 +260,8 @@ field.
 | `server.trustedOrigins` | `BANDAR_TRUSTED_ORIGINS` |
 | `update.webUrl`         | `BANDAR_RELEASE_WEB_URL` |
 | `update.apiUrl`         | `BANDAR_RELEASE_API_URL` |
+
+`server.tailscale` reads only `config.json`; it has no fallback variable.
 
 The dev server in `vite.config.ts` reads `server.port` from the same file for its proxy, so
 `bun run dev` follows an edit there. Vite itself always listens on 5173.
@@ -275,6 +286,7 @@ settings                       /home/andrew/.bandar/config.json (missing)
 mode                           development
 server.host                    0.0.0.0 (default)
 server.port                    4133 (default)
+server.tailscale               false (default)
 server.authUrl                 http://localhost:4133 (default)
 server.trustedOrigins          http://localhost:4133, http://127.0.0.1:4133, http://localhost:5173, http://127.0.0.1:5173 (default)
 providers.kilocode.baseUrl     https://api.kilo.ai/api/openrouter (default)

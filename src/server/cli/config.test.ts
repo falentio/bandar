@@ -88,7 +88,7 @@ describe("the config command", () => {
 
     expect(code).toBe(0);
     expect(stderr).toEqual([]);
-    expect(stdout).toHaveLength(19);
+    expect(stdout).toHaveLength(20);
 
     const printed = lineOf(stdout, "mode").replace(/^mode\s+/u, "");
 
@@ -103,6 +103,7 @@ describe("the config command", () => {
     expect(lineOf(stdout, "server.port").endsWith(`${String(DEFAULT_API_PORT)} (default)`)).toBe(
       true,
     );
+    expect(lineOf(stdout, "server.tailscale").endsWith("false (default)")).toBe(true);
     expect(
       lineOf(stdout, "server.authUrl").endsWith(
         `http://localhost:${String(DEFAULT_API_PORT)} (default)`,
@@ -231,6 +232,7 @@ describe("the config command", () => {
       "mode",
       "server.host",
       "server.port",
+      "server.tailscale",
       "server.authUrl",
       "server.trustedOrigins",
       "providers.kilocode.baseUrl",

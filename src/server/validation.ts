@@ -30,6 +30,13 @@ export function issueText(issue: v.BaseIssue<unknown>): IssueText {
   return { param, message: param === null ? issue.message : `${param}: ${issue.message}` };
 }
 
+/** The first issue of a failed parse, rendered for the caller. */
+export function issueOf(
+  issues: readonly [v.BaseIssue<unknown>, ...v.BaseIssue<unknown>[]],
+): IssueText {
+  return issueText(issues[0]);
+}
+
 function issueParam(issue: v.BaseIssue<unknown>): string | null {
   const path = issue.path?.map((item) => String(item.key)).join(".");
 

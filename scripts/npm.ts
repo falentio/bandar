@@ -30,6 +30,25 @@ type Platform = {
   readonly libc?: string;
 };
 
+/** The staged package.json a `--stage` run writes: the fields every package carries, plus the ones a variant sets. */
+export type Manifest = {
+  readonly name: string;
+  readonly version: string;
+  readonly description: string;
+  readonly license: string;
+  readonly repository: { readonly type: string; readonly url: string };
+  readonly homepage: string;
+  readonly bugs: { readonly url: string };
+  readonly publishConfig: { readonly access: string; readonly provenance: boolean };
+  readonly files: readonly string[];
+  readonly os?: readonly string[];
+  readonly cpu?: readonly string[];
+  readonly libc?: readonly string[];
+  readonly bin?: { readonly bandar: string };
+  readonly engines?: { readonly node: string };
+  readonly optionalDependencies?: Readonly<Record<string, string>>;
+};
+
 const require = createRequire(LOADER);
 const { PACKAGES } = require(LOADER) as { readonly PACKAGES: ReadonlyMap<string, Platform> };
 
@@ -111,7 +130,7 @@ function shared(name: string, description: string) {
   };
 }
 
-function platformManifest(key: string, platform: Platform) {
+function platformManifest(key: string, platform: Platform): Manifest {
   const { os, arch } = split(key);
 
   return {
@@ -123,7 +142,7 @@ function platformManifest(key: string, platform: Platform) {
   };
 }
 
-function loaderManifest(staged: readonly string[]) {
+function loaderManifest(staged: readonly string[]): Manifest {
   const installed = [...PACKAGES.values()].filter((platform) => staged.includes(platform.name));
 
   return {
@@ -137,7 +156,7 @@ function loaderManifest(staged: readonly string[]) {
   };
 }
 
-function writeManifest(directory: string, manifest: Record<string, unknown>): void {
+function writeManifest(directory: string, manifest: Manifest): void {
   writeFileSync(join(directory, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 

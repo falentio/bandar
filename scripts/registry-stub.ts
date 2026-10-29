@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { Manifest } from "./npm";
+
 const packages = value("--packages");
 const tarballs = value("--tarballs");
 const portFile = value("--port-file");
@@ -9,7 +11,7 @@ const portFile = value("--port-file");
 type Entry = {
   readonly name: string;
   readonly version: string;
-  readonly manifest: Record<string, unknown>;
+  readonly manifest: Manifest;
   readonly tarball: string;
 };
 
@@ -18,10 +20,7 @@ const entries = new Map<string, Entry>();
 for (const directory of readdirSync(packages, { withFileTypes: true })) {
   if (!directory.isDirectory()) continue;
 
-  const manifest = JSON.parse(readFileSync(join(packages, directory.name, "package.json"), "utf8")) as {
-    name: string;
-    version: string;
-  };
+  const manifest = JSON.parse(readFileSync(join(packages, directory.name, "package.json"), "utf8")) as Manifest;
 
   entries.set(manifest.name, {
     name: manifest.name,

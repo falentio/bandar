@@ -332,5 +332,5 @@ async function visible(name: string): Promise<void> {
     if (view([`${name}@${version}`, "version"]).ok) return;
   }
 
-  fail(`${name}@${version} is not readable after 60s, so the loader was not published`);
+  fail(`${name}@${version} is not readable after 60s; the rest of the release was not published`);
 }

@@ -621,12 +621,14 @@ describe("the tailnet bind", () => {
     expect(report.config.host).toBe(tailnet.address);
   });
 
-  test("a development run trusts the dev server by its tailnet names", () => {
+  test("a development run trusts the dev server on the loopback and the tailnet", () => {
     const report = reportOf({}, "development", withTailscale({}), found);
 
     expect(report.config.trustedOrigins).toEqual([
       `http://${tailnet.dnsName}:${String(DEFAULT_API_PORT)}`,
       `http://${tailnet.address}:${String(DEFAULT_API_PORT)}`,
+      `http://localhost:${String(DEV_WEB_PORT)}`,
+      `http://127.0.0.1:${String(DEV_WEB_PORT)}`,
       `http://${tailnet.dnsName}:${String(DEV_WEB_PORT)}`,
       `http://${tailnet.address}:${String(DEV_WEB_PORT)}`,
     ]);

@@ -107,7 +107,8 @@ bun run dev
 ```
 
 The client listens on `:5173` and the API on `:4133`. The client proxies `/api` and
-`/v1` to the API port.
+`/v1` to the API port. With `server.tailscale: true` the API binds the tailnet address, and
+the client still opens on `http://localhost:5173`.
 
 A run from source is a development environment. Its databases land in `~/.bandar_dev`,
 so they stay clear of an installed copy, which keeps using `~/.bandar`. Set
@@ -235,10 +236,11 @@ and `http://127.0.0.1:5173`.
 `server.tailscale: true` asks `tailscale status --json` for this machine's tailnet address
 and MagicDNS name. The API binds that address instead of `server.host`, the auth URL
 defaults to `http://<magicdns>:<port>`, and the trusted origins become the MagicDNS name
-and the tailnet address. A development run also trusts both names on port 5173, for the Vite
-dev server. If Tailscale is missing, stopped, or logged out, the boot fails and names the
-reason, because a fallback bind would listen somewhere you did not ask for. A tailnet bind
-has no loopback listener.
+and the tailnet address. A development run also trusts port 5173 on the loopback names
+and the tailnet names, since Vite serves `http://localhost:5173` and the MagicDNS URL, and
+proxies both to the tailnet-bound API. If Tailscale is missing, stopped, or logged out, the
+boot fails and names the reason, because a fallback bind would listen somewhere you did not
+ask for. A tailnet bind has no loopback listener.
 
 A `server.port` of 0 asks the OS for an ephemeral port. The server binds one, but the
 derived auth URL and trusted origins name port 0 and reach nothing, so set

@@ -497,8 +497,9 @@ function parseOrigins(value: string): readonly string[] {
 /**
  * The origins a browser reaches a fresh install from: the auth URL's own origin first, since that is
  * the public face, then the address this run listens on. A loopback run adds the loopback names on
- * the API port, a tailnet run the MagicDNS name, and a development run the dev server's names,
- * because the browser sends its origin unchanged through the proxy.
+ * the API port, a tailnet run the MagicDNS name. A development run adds the dev server's names, the
+ * loopback ones Vite always serves plus the tailnet ones, because the browser sends its origin
+ * unchanged through the proxy.
  */
 function defaultTrustedOrigins(endpoint: Endpoint, mode: RunMode): readonly string[] {
   const { authUrl, host, port, tailnet } = endpoint;
@@ -510,8 +511,9 @@ function defaultTrustedOrigins(endpoint: Endpoint, mode: RunMode): readonly stri
   if (!isWildcardHost(host.value)) origins.push(httpOrigin(host.value, port.value));
 
   if (mode === "development") {
-    const webHosts =
-      tailnet === null ? ["localhost", "127.0.0.1"] : [tailnet.dnsName, tailnet.address];
+    const webHosts = ["localhost", "127.0.0.1"];
+
+    if (tailnet !== null) webHosts.push(tailnet.dnsName, tailnet.address);
 
     for (const webHost of webHosts) origins.push(httpOrigin(webHost, DEV_WEB_PORT));
   }

@@ -186,6 +186,18 @@ expect_stdout_empty() {
   fi
 }
 
+expect_stdout_lines() {
+  local name="$1" expected="$2" lines
+
+  lines="$(wc -l <"$work/logs/$name.out")"
+
+  if [ "$lines" -eq "$expected" ]; then
+    ok "$name: stdout holds $expected line"
+  else
+    fail "$name" "stdout holds $lines lines; got: $(tr '\n' '|' <"$work/logs/$name.out")"
+  fi
+}
+
 expect_stderr() {
   local name="$1" text="$2"
 
@@ -205,6 +217,40 @@ expect_stderr_lines() {
     ok "$name: stderr holds $expected line"
   else
     fail "$name" "stderr holds $lines lines; got: $(tr '\n' '|' <"$work/logs/$name.err")"
+  fi
+}
+
+expect_capture() {
+  local name="$1" text="$2"
+
+  if grep -qF -- "$text" "$work/logs/$name.capture"; then
+    ok "$name: the terminal shows $text"
+  else
+    fail "$name" "the capture never shows '$text'; got: $(tr '\r' '|' <"$work/logs/$name.capture")"
+  fi
+}
+
+expect_carriage_returns() {
+  local name="$1"
+
+  if grep -q $'\r' "$work/logs/$name.capture"; then
+    ok "$name: the terminal rewrites one row in place"
+  else
+    fail "$name" "the capture holds no carriage return: $(cat "$work/logs/$name.capture")"
+  fi
+}
+
+expect_last_line() {
+  local name="$1" text="$2" last
+
+  # A frame is a carriage return and no newline, so the rows only become lines once every \r
+  # turns into one.
+  last="$(tr '\r' '\n' <"$work/logs/$name.capture" | grep -v '^$' | tail -n 1)"
+
+  if [ "$last" = "$text" ]; then
+    ok "$name: ends with $text"
+  else
+    fail "$name" "the last line is '$last', wanted '$text'"
   fi
 }
 
@@ -357,6 +403,40 @@ if grep -qF -- "$STUB_TOKEN" "$work/logs/happy.out" "$work/logs/happy.err"; then
   fail happy "a token was printed"
 else
   ok "happy: no token in the output"
+fi
+
+echo
+echo "case: a pipe on stderr"
+case_dir pipe install-script
+stage_release "$newer" 'piped payload'
+public pipe
+expect_exit pipe 0
+expect_stdout_lines pipe 1
+expect_stdout pipe "bandar $newer installed at $CASE_DIR/bin/bandar"
+expect_stderr_lines pipe 0
+expect_same "$CASE_DIR/bin/bandar" "$work/site/rel/v$newer/bandar-$newer-linux-x64" "pipe: the binary is the release asset"
+
+echo
+echo "case: a terminal on stderr"
+
+if ! command -v script >/dev/null 2>&1; then
+  echo "skip: script is not installed, so no pty can be opened for the progress row"
+else
+  case_dir tty install-script
+  stage_release "$newer" 'terminal payload'
+  set +e
+  script -qec "env BANDAR_HOME=$CASE_DIR BANDAR_CONFIG_DIR=$CASE_DIR/config BANDAR_RELEASE_WEB_URL=$API bun src/server/main.ts update" \
+    "$work/logs/tty.typescript" >"$work/logs/tty.capture" 2>"$work/logs/tty.err"
+  status=$?
+  set -e
+  expect_exit tty 0
+  expect_carriage_returns tty
+  expect_capture tty "checking the latest release"
+  expect_capture tty "downloading bandar-$newer-linux-x64"
+  expect_capture tty "verifying sha256"
+  expect_capture tty "installing $CASE_DIR/bin/bandar"
+  expect_last_line tty "bandar $newer installed at $CASE_DIR/bin/bandar"
+  expect_same "$CASE_DIR/bin/bandar" "$work/site/rel/v$newer/bandar-$newer-linux-x64" "tty: the binary is the release asset"
 fi
 
 echo

@@ -176,7 +176,17 @@ function view(args: readonly string[]) {
     stderr: "pipe",
   });
 
-  return { ok: result.exitCode === 0, text: result.stdout.toString().trim() };
+  return {
+    ok: result.exitCode === 0,
+    text: result.stdout.toString().trim(),
+    error: result.stderr.toString().trim(),
+  };
+}
+
+function viewFailure(text: string): string {
+  const code = /npm (?:error|ERR!) code (\S+)/u.exec(text)?.[1];
+
+  return code ?? text.split("\n").find((line) => line !== "") ?? "npm view printed nothing";
 }
 
 function reportedVersion(): VersionReport {
@@ -231,8 +241,16 @@ async function preflight(staged: readonly string[]): Promise<void> {
 
   const owner = view([LOADER_NAME, "repository.url"]);
 
-  if (owner.ok && !owner.text.includes("falentio/bandar")) {
-    problems.push(`the npm name ${LOADER_NAME} belongs to ${owner.text}`);
+  if (owner.ok) {
+    if (owner.text === "") {
+      problems.push(`the npm name ${LOADER_NAME} records no repository.url`);
+    } else if (!owner.text.includes("falentio/bandar")) {
+      problems.push(`the npm name ${LOADER_NAME} belongs to ${owner.text}`);
+    }
+  } else {
+    const failure = viewFailure(owner.error);
+
+    if (failure !== "E404") problems.push(`could not read the npm name ${LOADER_NAME}: ${failure}`);
   }
 
   if (problems.length > 0) {

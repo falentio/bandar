@@ -55,9 +55,9 @@ The `bandar <version> installed at <path>` line stays on stdout; the row above i
 first. `--archive` skips the release check and the downloads, so it shows only the verify and
 the install.
 
-When stderr is not a terminal, a pipe, a redirect, or a CI log, the command writes nothing there
-and starts no timer. stdout is unchanged in both cases: one line for a completed update, and the
-three `--check` lines for a report.
+When stderr is a pipe, a redirect, or a CI log, the command writes nothing there and starts no
+timer. stdout is unchanged in both cases: one line for a completed update, and the three
+`--check` lines for a report.
 
 ## A private fork, with a token
 

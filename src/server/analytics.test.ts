@@ -51,6 +51,7 @@ function event(overrides: Partial<RequestEventInput>): RequestEventInput {
     model: "fast",
     reference: "fast",
     projectUrl: null,
+    sessionId: null,
     upstreamModel: "gpt-fast",
     status: "success",
     httpStatus: 200,

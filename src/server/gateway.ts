@@ -9,6 +9,7 @@ import {
   type NormalizedMessages,
 } from "../shared/messages";
 import { PROJECT_URL_HEADER, projectUrlOf } from "../shared/project";
+import { SESSION_ID_HEADER, sessionIdOf } from "../shared/session-id";
 import type { Auth, VerifiedKey } from "./auth";
 import type { CanonicalMessage, CanonicalRequest } from "./providers/types";
 import { anthropicError, anthropicWire, estimateInputTokens } from "./router/anthropic-wire";
@@ -90,6 +91,7 @@ export function createGateway(deps: GatewayDeps) {
         userId: caller.userId,
         apiKeyId: caller.keyId,
         projectUrl: projectUrlOf(request.headers.get(PROJECT_URL_HEADER)),
+        sessionId: sessionIdOf(request.headers.get(SESSION_ID_HEADER)),
         ref: input.model,
         request: canonical,
         stream: input.stream,
@@ -115,6 +117,7 @@ export function createGateway(deps: GatewayDeps) {
         userId: caller.userId,
         apiKeyId: caller.keyId,
         projectUrl: projectUrlOf(request.headers.get(PROJECT_URL_HEADER)),
+        sessionId: sessionIdOf(request.headers.get(SESSION_ID_HEADER)),
         ref: parsed.output.model,
         request: canonicalRequestOf(parsed.output, normalized.value),
         stream: parsed.output.stream ?? false,

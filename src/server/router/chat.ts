@@ -30,6 +30,7 @@ export type ChatInput = {
   readonly userId: string;
   readonly apiKeyId: string;
   readonly projectUrl: string | null;
+  readonly sessionId: string | null;
   readonly ref: string;
   readonly request: CanonicalRequest;
   readonly stream: boolean;
@@ -49,6 +50,7 @@ type EventBase = {
   outputPricePerMtok: number | null;
   reference: string;
   projectUrl: string | null;
+  sessionId: string | null;
   startedAt: Date;
 };
 
@@ -491,6 +493,7 @@ function eventBase(
     outputPricePerMtok: attempt.outputPricePerMtok,
     reference,
     projectUrl: input.projectUrl,
+    sessionId: input.sessionId,
     startedAt,
   };
 }

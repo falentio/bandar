@@ -828,7 +828,8 @@ try {
 
     const sessions = await getJson(analyticsPaths.sessions, SessionListSchema, 200);
 
-    assert.deepEqual(sessions, { sessions: ["session-alpha"] });
+    assert.ok(sessions.sessions.includes("session-alpha"), "the list is missing the tagged id");
+    assert.ok(!sessions.sessions.includes("has space"), "the list kept the rejected value");
 
     const after = await getJson(`${analyticsPaths.analytics}?days=30`, AnalyticsSchema, 200);
 

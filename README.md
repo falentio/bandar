@@ -42,9 +42,12 @@ tokens, time to first token, duration, tokens per second, the resolved address, 
 string the client sent. A client names the project of an inference with
 `x-bandar-project-url: https://app.example.com`; the row keeps that url's origin and
 path, and the Overview page filters on it. A value that is not an http or https url is
-ignored, so a typo never fails a request. The row is denormalized, so deleting a
-provider keeps its history. Each failure that flags a subject also writes one row to
-the cooldown history, which the Errors page lists.
+ignored, so a typo never fails a request. A client tags a session with
+`x-bandar-session-id: <id>`, the row keeps it, and the Overview page filters on it. The
+gateway drops spaces around the id. It ignores a value that is not 1-128 printable ascii
+characters or that holds a space inside. The row
+is denormalized, so deleting a provider keeps its history. Each failure that flags a
+subject also writes one row to the cooldown history, which the Errors page lists.
 
 **One binary at runtime.** `bun build --compile` embeds the React client, the SQLite
 migrations, the DuckDB migrations, and the DuckDB shared library. The binary serves

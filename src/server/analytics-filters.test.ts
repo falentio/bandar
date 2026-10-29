@@ -26,6 +26,7 @@ describe("filterParams", () => {
       model: [],
       tag: [],
       projectUrl: [],
+      sessionId: [],
     });
   });
 
@@ -69,10 +70,17 @@ describe("AnalyticsFiltersInputSchema", () => {
     expect(parse("projectUrl=ftp%3A%2F%2Fx%2F").success).toBe(false);
   });
 
+  test("accepts a session id and rejects a value with a space", () => {
+    expect(parse("sessionId=session-alpha").success).toBe(true);
+    expect(parse("sessionId=has%20space").success).toBe(false);
+  });
+
   test("accepts a blank value as no filter in every dimension", () => {
     const filters = v.parse(
       AnalyticsFiltersInputSchema,
-      filterParams(new URLSearchParams("providerKind=&providerId=&model=&tag=&projectUrl=")),
+      filterParams(
+        new URLSearchParams("providerKind=&providerId=&model=&tag=&projectUrl=&sessionId="),
+      ),
     );
 
     expect(filters).toEqual({
@@ -81,6 +89,7 @@ describe("AnalyticsFiltersInputSchema", () => {
       model: [],
       tag: [],
       projectUrl: [],
+      sessionId: [],
     });
   });
 
@@ -98,6 +107,7 @@ describe("AnalyticsFiltersInputSchema", () => {
       model: ["fast"],
       tag: ["failover"],
       projectUrl: [],
+      sessionId: [],
     });
   });
 

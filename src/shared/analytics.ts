@@ -1,5 +1,6 @@
 import * as v from "valibot";
 import { ProjectUrlSchema } from "./project";
+import { SessionIdSchema } from "./session-id";
 import { MAX_MODEL_REF_LENGTH, SlugSchema } from "./slugs";
 
 export const ANALYTICS_FILTER_DIMENSIONS = [
@@ -8,6 +9,7 @@ export const ANALYTICS_FILTER_DIMENSIONS = [
   "model",
   "tag",
   "projectUrl",
+  "sessionId",
 ] as const;
 
 export const MAX_ANALYTICS_FILTER_VALUES = 50;
@@ -27,12 +29,18 @@ const AnalyticsFilterProjectUrlsSchema = v.pipe(
   v.maxLength(MAX_ANALYTICS_FILTER_VALUES),
 );
 
+const AnalyticsFilterSessionIdsSchema = v.pipe(
+  v.array(SessionIdSchema),
+  v.maxLength(MAX_ANALYTICS_FILTER_VALUES),
+);
+
 export const AnalyticsFiltersSchema = v.object({
   providerKind: AnalyticsFilterValuesSchema,
   providerId: AnalyticsFilterValuesSchema,
   model: AnalyticsFilterValuesSchema,
   tag: AnalyticsFilterTagsSchema,
   projectUrl: AnalyticsFilterProjectUrlsSchema,
+  sessionId: AnalyticsFilterSessionIdsSchema,
 });
 
 export const AnalyticsSummarySchema = v.object({
@@ -117,9 +125,14 @@ export const ProjectListSchema = v.object({
   projects: v.array(v.string()),
 });
 
+export const SessionListSchema = v.object({
+  sessions: v.array(v.string()),
+});
+
 export const analyticsPaths = {
   analytics: "/api/analytics",
   projects: "/api/analytics/projects",
+  sessions: "/api/analytics/sessions",
   requests: "/api/requests",
 };
 
@@ -143,12 +156,15 @@ export type RequestList = v.InferOutput<typeof RequestListSchema>;
 
 export type ProjectList = v.InferOutput<typeof ProjectListSchema>;
 
+export type SessionList = v.InferOutput<typeof SessionListSchema>;
+
 export const EMPTY_ANALYTICS_FILTERS: AnalyticsFilters = {
   providerKind: [],
   providerId: [],
   model: [],
   tag: [],
   projectUrl: [],
+  sessionId: [],
 };
 
 export function hasAnalyticsFilters(filters: AnalyticsFilters): boolean {

@@ -510,13 +510,55 @@ describe("runChat recording", () => {
     expect(response.status).toBe(200);
     expect(projectUrls(harness.deps.duck)).toEqual([null]);
   });
+
+  test("stores the session id the client sent", async () => {
+    const harness = await freshHarness(() => openAiSuccess());
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, chatInput("fast", false, null, "session-alpha"));
+
+    expect(response.status).toBe(200);
+    expect(sessionIds(harness.deps.duck)).toEqual(["session-alpha"]);
+  });
+
+  test("leaves the session id null when the client sends none", async () => {
+    const harness = await freshHarness(() => openAiSuccess());
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, chatInput("fast"));
+
+    expect(response.status).toBe(200);
+    expect(sessionIds(harness.deps.duck)).toEqual([null]);
+  });
 });
 
-function chatInput(ref: string, stream = false, projectUrl: string | null = null): ChatInput {
+function chatInput(
+  ref: string,
+  stream = false,
+  projectUrl: string | null = null,
+  sessionId: string | null = null,
+): ChatInput {
   return {
     userId: "user-1",
     apiKeyId: "key-1",
     projectUrl,
+    sessionId,
     ref,
     request: { messages: [{ role: "user" as const, content: "hello" }] },
     stream,
@@ -639,6 +681,14 @@ function projectUrls(duck: DuckDb): readonly (string | null)[] {
     .query("SELECT project_url FROM request_events ORDER BY started_at")
     .map((row) =>
       row.project_url === null || row.project_url === undefined ? null : String(row.project_url),
+    );
+}
+
+function sessionIds(duck: DuckDb): readonly (string | null)[] {
+  return duck
+    .query("SELECT session_id FROM request_events ORDER BY started_at")
+    .map((row) =>
+      row.session_id === null || row.session_id === undefined ? null : String(row.session_id),
     );
 }
 

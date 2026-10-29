@@ -4,15 +4,22 @@ import { describeError, isError } from "./errors";
 
 type Status = "loading" | "ready" | "error";
 
-export type Projects = {
+export type AnalyticsValueKind = "projectUrl" | "sessionId";
+
+export type AnalyticsValues = {
   readonly status: Status;
-  readonly projects: readonly string[];
+  readonly values: readonly string[];
   readonly error: string | null;
   readonly refresh: () => void;
 };
 
-export function useProjects(): Projects {
-  const [projects, setProjects] = useState<readonly string[]>([]);
+const LOAD: Record<AnalyticsValueKind, () => Promise<readonly string[]>> = {
+  projectUrl: async () => (await analyticsApi.projects()).projects,
+  sessionId: async () => (await analyticsApi.sessions()).sessions,
+};
+
+export function useAnalyticsValues(kind: AnalyticsValueKind): AnalyticsValues {
+  const [values, setValues] = useState<readonly string[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -25,11 +32,11 @@ export function useProjects(): Projects {
       setError(null);
 
       try {
-        const list = await analyticsApi.projects();
+        const list = await LOAD[kind]();
 
         if (!live) return;
 
-        setProjects(list.projects);
+        setValues(list);
         setStatus("ready");
       } catch (error) {
         if (!live) return;
@@ -44,9 +51,9 @@ export function useProjects(): Projects {
     return () => {
       live = false;
     };
-  }, [reload]);
+  }, [kind, reload]);
 
   const refresh = useCallback(() => setReload((value) => value + 1), []);
 
-  return { status, projects, error, refresh };
+  return { status, values, error, refresh };
 }

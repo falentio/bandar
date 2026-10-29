@@ -5,6 +5,7 @@ import {
   type AnalyticsFilters,
 } from "../shared/analytics";
 import { projectUrlOf } from "../shared/project";
+import { sessionIdOf } from "../shared/session-id";
 import { tagRefOf } from "../shared/slugs";
 import type { DuckDb, QueryRow } from "./duck/client";
 import { SQL_NULL, sqlInt, sqlText, type SqlValue } from "./duck/client";
@@ -118,6 +119,7 @@ const FILTER_SPECS: Record<AnalyticsFilterDimension, FilterSpec> = {
   model: { column: "model", value: identity },
   tag: { column: "reference", value: tagRefOf },
   projectUrl: { column: "project_url", value: projectUrlOf },
+  sessionId: { column: "session_id", value: sessionIdOf },
 };
 
 export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
@@ -265,11 +267,11 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
   };
 }
 
-export type ProjectUrlsQuery = {
+export type FilterValuesQuery = {
   readonly userId: string;
 };
 
-export function readProjectUrls(db: DuckDb, query: ProjectUrlsQuery): readonly string[] {
+export function readProjectUrls(db: DuckDb, query: FilterValuesQuery): readonly string[] {
   const rows = db.query(
     `SELECT project_url
      FROM request_events
@@ -281,6 +283,20 @@ export function readProjectUrls(db: DuckDb, query: ProjectUrlsQuery): readonly s
   );
 
   return rows.map((row) => string(row, "project_url"));
+}
+
+export function readSessionIds(db: DuckDb, query: FilterValuesQuery): readonly string[] {
+  const rows = db.query(
+    `SELECT session_id
+     FROM request_events
+     WHERE user_id = ? AND session_id IS NOT NULL
+     GROUP BY session_id
+     ORDER BY max(started_at) DESC, session_id ASC
+     LIMIT ?`,
+    [sqlText(query.userId), sqlInt(MAX_ANALYTICS_FILTER_VALUES)],
+  );
+
+  return rows.map((row) => string(row, "session_id"));
 }
 
 export function readProviderUsage(db: DuckDb, query: ProviderUsageQuery): ProviderUsage {

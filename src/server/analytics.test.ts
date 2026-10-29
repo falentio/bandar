@@ -10,7 +10,7 @@ import {
   type AnalyticsFilters,
 } from "../shared/analytics";
 import { tagRefOf } from "../shared/slugs";
-import { readAnalytics, readProjectUrls, readRequests } from "./analytics";
+import { readAnalytics, readProjectUrls, readRequests, readSessionIds } from "./analytics";
 import { DuckDb } from "./duck/client";
 import { applyDuckMigrations } from "./duck/migrate";
 import { recordRequest, type RequestEventInput } from "./router/record";
@@ -51,6 +51,7 @@ function event(overrides: Partial<RequestEventInput>): RequestEventInput {
     model: "fast",
     reference: "fast",
     projectUrl: null,
+    sessionId: null,
     upstreamModel: "gpt-fast",
     status: "success",
     httpStatus: 200,
@@ -176,7 +177,7 @@ function filters(overrides: Partial<AnalyticsFilters>): AnalyticsFilters {
 function filterSeeded(): DuckDb {
   const db = seeded();
 
-  recordRequest(db, event({}));
+  recordRequest(db, event({ sessionId: "session-alpha" }));
   recordRequest(
     db,
     event({
@@ -186,6 +187,7 @@ function filterSeeded(): DuckDb {
       reference: "smart",
       upstreamModel: "gemini-smart",
       projectUrl: "https://dash.acme.test",
+      sessionId: "session-beta",
       inputTokens: 200,
       outputTokens: 100,
       startedAt: new Date("2026-10-26T09:00:00.000Z"),
@@ -196,12 +198,16 @@ function filterSeeded(): DuckDb {
     event({
       reference: tagRefOf("failover"),
       projectUrl: "https://acme.test/app",
+      sessionId: "session-alpha",
       inputTokens: 300,
       outputTokens: 150,
       startedAt: new Date("2026-10-25T09:00:00.000Z"),
     }),
   );
-  recordRequest(db, event({ userId: "user-2", inputTokens: 900, outputTokens: 900 }));
+  recordRequest(
+    db,
+    event({ userId: "user-2", sessionId: "session-gamma", inputTokens: 900, outputTokens: 900 }),
+  );
 
   return db;
 }
@@ -212,6 +218,7 @@ const PROBE_VALUE: Record<AnalyticsFilterDimension, string> = {
   model: "absent",
   tag: "absent",
   projectUrl: "https://absent.test",
+  sessionId: "absent",
 };
 
 function readFiltered(db: DuckDb, values: Partial<AnalyticsFilters>) {
@@ -300,6 +307,34 @@ describe("readAnalytics filters", () => {
     expect(analytics.summary.requests).toBe(0);
     expect(analytics.daily).toHaveLength(30);
     expect(analytics.daily.every((day) => day.requests === 0)).toBe(true);
+  });
+
+  test("filters by session id", () => {
+    const analytics = readFiltered(filterSeeded(), { sessionId: ["session-alpha"] });
+
+    expect(analytics.summary.requests).toBe(2);
+    expect(analytics.summary.totalTokens).toBe(600);
+  });
+
+  test("trims the session filter value before it reaches the column", () => {
+    const analytics = readFiltered(filterSeeded(), { sessionId: ["  session-alpha  "] });
+
+    expect(analytics.summary.requests).toBe(2);
+  });
+
+  test("matches any session id within one dimension", () => {
+    const analytics = readFiltered(filterSeeded(), {
+      sessionId: ["session-alpha", "session-beta"],
+    });
+
+    expect(analytics.summary.requests).toBe(3);
+  });
+
+  test("keeps every day when the session filter is not usable", () => {
+    const analytics = readFiltered(filterSeeded(), { sessionId: ["has space"] });
+
+    expect(analytics.summary.requests).toBe(0);
+    expect(analytics.daily).toHaveLength(30);
   });
 
   test("every filter dimension names a column that exists", () => {
@@ -442,6 +477,76 @@ describe("readProjectUrls", () => {
     expect(urls).toHaveLength(MAX_ANALYTICS_FILTER_VALUES);
     expect(urls[0]).toBe("https://p50.test");
     expect(urls).not.toContain("https://p00.test");
+  });
+});
+
+describe("readSessionIds", () => {
+  test("lists each id once, most recently used first", () => {
+    const db = seeded();
+
+    recordRequest(
+      db,
+      event({
+        sessionId: "session-beta",
+        startedAt: new Date("2026-10-25T09:00:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        sessionId: "session-gamma",
+        startedAt: new Date("2026-10-26T09:00:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        sessionId: "session-beta",
+        startedAt: new Date("2026-10-27T09:00:00.000Z"),
+      }),
+    );
+    recordRequest(db, event({ sessionId: null }));
+
+    expect(readSessionIds(db, { userId: "user-1" })).toEqual(["session-beta", "session-gamma"]);
+  });
+
+  test("orders ids used at the same time by name", () => {
+    const db = seeded();
+    const startedAt = new Date("2026-10-27T09:00:00.000Z");
+
+    recordRequest(db, event({ sessionId: "session-gamma", startedAt }));
+    recordRequest(db, event({ sessionId: "session-beta", startedAt }));
+
+    expect(readSessionIds(db, { userId: "user-1" })).toEqual(["session-beta", "session-gamma"]);
+  });
+
+  test("never returns another user's ids", () => {
+    const db = seeded();
+
+    recordRequest(db, event({ sessionId: "session-alpha" }));
+    recordRequest(db, event({ userId: "user-2", sessionId: "session-other" }));
+
+    expect(readSessionIds(db, { userId: "user-1" })).toEqual(["session-alpha"]);
+  });
+
+  test("caps the list at the values a filter accepts", () => {
+    const db = seeded();
+
+    for (let index = 0; index <= MAX_ANALYTICS_FILTER_VALUES; index += 1) {
+      recordRequest(
+        db,
+        event({
+          sessionId: "s" + String(index).padStart(2, "0"),
+          startedAt: new Date(Date.UTC(2026, 9, 1, 0, index)),
+        }),
+      );
+    }
+
+    const ids = readSessionIds(db, { userId: "user-1" });
+
+    expect(ids).toHaveLength(MAX_ANALYTICS_FILTER_VALUES);
+    expect(ids[0]).toBe("s50");
+    expect(ids).not.toContain("s00");
   });
 });
 

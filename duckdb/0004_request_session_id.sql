@@ -1,0 +1,1 @@
+ALTER TABLE request_events ADD COLUMN IF NOT EXISTS session_id VARCHAR;

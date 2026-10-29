@@ -1,4 +1,4 @@
-export type ProjectUrlCatalog = { list(userId: string): readonly string[] };
+export type ValueCatalog = { list(userId: string): readonly string[] };
 
 type CatalogOptions = {
   readonly ttlMs?: number;
@@ -6,16 +6,16 @@ type CatalogOptions = {
 };
 
 type Entry = {
-  readonly urls: readonly string[];
+  readonly values: readonly string[];
   readonly readAt: number;
 };
 
 const DEFAULT_TTL_MS = 5 * 60_000;
 
-export function createProjectUrlCatalog(
+export function createValueCatalog(
   read: (userId: string) => readonly string[],
   options: CatalogOptions = {},
-): ProjectUrlCatalog {
+): ValueCatalog {
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   const now = options.now ?? Date.now;
   const entries = new Map<string, Entry>();
@@ -25,15 +25,15 @@ export function createProjectUrlCatalog(
       const at = now();
       const entry = entries.get(userId);
 
-      if (entry !== undefined && at - entry.readAt < ttlMs) return entry.urls;
+      if (entry !== undefined && at - entry.readAt < ttlMs) return entry.values;
 
       dropExpired(entries, at, ttlMs);
 
-      const urls = read(userId);
+      const values = read(userId);
 
-      entries.set(userId, { urls, readAt: at });
+      entries.set(userId, { values, readAt: at });
 
-      return urls;
+      return values;
     },
   };
 }

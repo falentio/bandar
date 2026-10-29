@@ -306,5 +306,28 @@ else
   fail "a platform package at another version said: $(cat "$WORK/mismatch.err")"
 fi
 
+# actions/download-artifact drops the exec bit, so preflight meets the release asset mode 644, and a
+# registry it cannot reach must still report rather than crash.
+NOEXEC=$WORK/noexec
+mkdir -p "$NOEXEC/release"
+{
+  printf '#!/bin/sh\n'
+  printf 'if [ "$1" = "--version" ]; then printf "%%s\\n" "0.0.0"; exit 0; fi\n'
+  printf 'exit 2\n'
+} >"$NOEXEC/release/bandar-$VERSION-linux-x64"
+chmod 644 "$NOEXEC/release/bandar-$VERSION-linux-x64"
+
+status=0
+NPM_CONFIG_REGISTRY=http://127.0.0.1:1/ NPM_CONFIG_FETCH_RETRIES=0 bun "$ROOT/scripts/npm.ts" --preflight \
+  --release "$NOEXEC/release" --output "$STAGED" >"$WORK/noexec.log" 2>&1 || status=$?
+
+if [ "$status" = 1 ] && ! grep -q 'EACCES' "$WORK/noexec.log" &&
+  grep -q 'the release binary reports 0.0.0' "$WORK/noexec.log" &&
+  grep -q 'could not ask npm about' "$WORK/noexec.log"; then
+  pass "a preflight reads a release asset that arrived without the exec bit"
+else
+  fail "a preflight on a non-executable asset said: $(head -3 "$WORK/noexec.log" | tr '\n' ' ')"
+fi
+
 printf 'npm-test: %s checks, %s failures\n' "$checks" "$failures"
 [ "$failures" -eq 0 ]

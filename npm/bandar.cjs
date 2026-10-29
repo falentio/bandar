@@ -6,8 +6,11 @@ const { existsSync, readFileSync } = require("node:fs");
 const { dirname, join } = require("node:path");
 
 const PACKAGES = new Map([
-  ["linux-x64", { name: "bandar-linux-x64", asset: "linux", file: "bin/bandar", libc: "glibc" }],
-  ["win32-x64", { name: "bandar-windows-x64", asset: "windows", file: "bin/bandar.exe" }],
+  [
+    "linux-x64",
+    { name: "@falentio/bandar-linux-x64", asset: "linux", file: "bin/bandar", libc: "glibc" },
+  ],
+  ["win32-x64", { name: "@falentio/bandar-windows-x64", asset: "windows", file: "bin/bandar.exe" }],
 ]);
 
 const INSTALLER =
@@ -49,7 +52,7 @@ function resolveBinary(platform, arch, resolve = require.resolve) {
 
     return {
       kind: "absent",
-      reason: `npm did not install ${entry.name} for ${key}; run "npm install -g bandar@latest", or install with ${INSTALLER}`,
+      reason: `npm did not install ${entry.name} for ${key}; run "npm install -g @falentio/bandar@latest", or install with ${INSTALLER}`,
     };
   }
 
@@ -59,7 +62,7 @@ function resolveBinary(platform, arch, resolve = require.resolve) {
   if (version !== own) {
     return {
       kind: "mismatch",
-      reason: `${entry.name} is ${version}, but this loader is ${own}; run "npm install -g bandar@latest"`,
+      reason: `${entry.name} is ${version}, but this loader is ${own}; run "npm install -g @falentio/bandar@latest"`,
     };
   }
 

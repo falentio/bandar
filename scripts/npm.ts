@@ -12,13 +12,19 @@ import {
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 
-import type { Manifest, Platform, RegistryReport, VersionReport } from "./npm-manifest";
+import {
+  flatName,
+  type Manifest,
+  type Platform,
+  type RegistryReport,
+  type VersionReport,
+} from "./npm-manifest";
 
 const ROOT = join(import.meta.dir, "..");
 const LOADER = join(ROOT, "npm", "bandar.cjs");
 const MANIFEST = join(ROOT, "package.json");
 const REPOSITORY = "https://github.com/falentio/bandar";
-const LOADER_NAME = "bandar";
+const LOADER_NAME = "@falentio/bandar";
 const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 const TRUSTED_PUBLISHING_NPM = "11.5.1";
 const VERSION_TEXT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
@@ -143,7 +149,7 @@ async function stage(): Promise<void> {
 
     if ((await digest(artifact)) !== expected) fail(`${artifact} does not match its sha256 file`);
 
-    const directory = join(OUTPUT, platform.name);
+    const directory = join(OUTPUT, flatName(platform.name));
 
     mkdirSync(join(directory, "bin"), { recursive: true });
     copyFileSync(artifact, join(directory, platform.file));
@@ -153,7 +159,7 @@ async function stage(): Promise<void> {
     console.log(`npm: staged ${platform.name} from ${artifact}`);
   }
 
-  const directory = join(OUTPUT, LOADER_NAME);
+  const directory = join(OUTPUT, flatName(LOADER_NAME));
 
   mkdirSync(join(directory, "bin"), { recursive: true });
   copyFileSync(LOADER, join(directory, "bin", "bandar.cjs"));
@@ -167,7 +173,14 @@ function stagedOnDisk(): readonly string[] {
 
   return readdirSync(OUTPUT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
+    .map((entry) => {
+      // SAFETY: --stage wrote every package.json under OUTPUT through writeManifest, so it is a Manifest.
+      const manifest = JSON.parse(
+        readFileSync(join(OUTPUT, entry.name, "package.json"), "utf8"),
+      ) as Manifest;
+
+      return manifest.name;
+    });
 }
 
 function view(args: readonly string[]) {
@@ -282,7 +295,7 @@ async function preflight(staged: readonly string[]): Promise<void> {
   for (const name of staged) {
     // SAFETY: --stage wrote this package.json through writeManifest, so it is a Manifest.
     const manifest = JSON.parse(
-      readFileSync(join(OUTPUT, name, "package.json"), "utf8"),
+      readFileSync(join(OUTPUT, flatName(name), "package.json"), "utf8"),
     ) as Manifest;
 
     if (manifest.version !== version)
@@ -341,7 +354,7 @@ async function publish(staged: readonly string[]): Promise<void> {
 
     const result = Bun.spawnSync({
       cmd: [NPM, "publish", "--provenance", "--access", "public", "--tag", "latest"],
-      cwd: join(OUTPUT, name),
+      cwd: join(OUTPUT, flatName(name)),
       stdout: "inherit",
       stderr: "inherit",
     });

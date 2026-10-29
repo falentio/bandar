@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Manifest } from "./npm-manifest";
+import { flatName, type Manifest } from "./npm-manifest";
 
 const packages = value("--packages");
 const tarballs = value("--tarballs");
@@ -29,7 +29,7 @@ for (const directory of readdirSync(packages, { withFileTypes: true })) {
     name: manifest.name,
     version: manifest.version,
     manifest,
-    tarball: join(tarballs, `${manifest.name}-${manifest.version}.tgz`),
+    tarball: join(tarballs, `${flatName(manifest.name)}-${manifest.version}.tgz`),
   });
 }
 
@@ -47,14 +47,14 @@ const server = Bun.serve({
 
     if (url.pathname === "/-/npm/v1/security/advisories/bulk") return Response.json({});
 
-    const tarball = /^\/(?<name>[^/]+)\/-\/(?<file>[^/]+)\.tgz$/u.exec(url.pathname);
+    const tarball = /^\/(?<name>@[^/]+\/[^/]+|[^/]+)\/-\/(?<file>[^/]+)\.tgz$/u.exec(url.pathname);
     const name = tarball?.groups?.name;
     const file = tarball?.groups?.file;
 
     if (name !== undefined && file !== undefined) {
       const entry = entries.get(name);
 
-      if (entry === undefined || `${entry.name}-${entry.version}` !== file) {
+      if (entry === undefined || `${flatName(entry.name)}-${entry.version}` !== file) {
         return new Response(null, { status: 404 });
       }
 
@@ -76,7 +76,7 @@ const server = Bun.serve({
         [entry.version]: {
           ...entry.manifest,
           dist: {
-            tarball: `${origin}/${entry.name}/-/${entry.name}-${entry.version}.tgz`,
+            tarball: `${origin}/${entry.name}/-/${flatName(entry.name)}-${entry.version}.tgz`,
             shasum: createHash("sha1").update(bytes).digest("hex"),
             integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
           },

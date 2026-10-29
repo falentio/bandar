@@ -245,24 +245,24 @@ binary is installed.
 ## Install from npm
 
 ```sh
-npm install -g bandar
+npm install -g @falentio/bandar
 ```
 
-npm publishes two layers per release. A package named `bandar` holds the loader, under 4 KB,
-and no server code. One package per platform, `bandar-linux-x64` and `bandar-windows-x64`, carries
-the release asset for that platform, byte for byte.
+npm publishes two layers per release. A package named `@falentio/bandar` holds the loader, under
+4 KB, and no server code. One package per platform, `@falentio/bandar-linux-x64` and
+`@falentio/bandar-windows-x64`, carries the release asset for that platform, byte for byte.
 
 The loader package lists the platform packages as `optionalDependencies`, and npm installs the one
 that matches the machine. A global install holds three things under the npm prefix
 (`npm prefix -g`):
 
 ```text
-lib/node_modules/bandar/                  the loader
-lib/node_modules/bandar/node_modules/…    the platform package npm picked
-bin/bandar                                the command, a shim to the loader
+lib/node_modules/@falentio/bandar/                the loader
+lib/node_modules/@falentio/bandar/node_modules/…  the platform package npm picked
+bin/bandar                                        the command, a shim to the loader
 ```
 
-npm may hoist the platform package beside `bandar` instead; the loader resolves it either way.
+npm may hoist the platform package beside the loader instead; the loader resolves it either way.
 
 Nothing runs at install time. No package declares `postinstall`, `prepare`, or any other lifecycle
 script, and nothing is downloaded on the first run either, because the binary is already inside the
@@ -281,11 +281,11 @@ That line names the platforms npm ships when bandar has no build for this one:
 bandar: bandar has no npm build for darwin-arm64; npm ships linux-x64, win32-x64
 ```
 
-On a musl system such as Alpine, npm drops `bandar-linux-x64` because the package declares
+On a musl system such as Alpine, npm drops `@falentio/bandar-linux-x64` because the package declares
 `libc: ["glibc"]`, and the line names the mismatch:
 
 ```text
-bandar: bandar-linux-x64 links glibc and this Linux uses musl, so bandar has no build for it; neither npm nor install.sh can install one
+bandar: @falentio/bandar-linux-x64 links glibc and this Linux uses musl, so bandar has no build for it; neither npm nor install.sh can install one
 ```
 
 An npm copy belongs to npm's tree, which owns the path and the recorded version. Replacing the
@@ -294,8 +294,8 @@ and names the npm command; [update.md](./update.md#an-npm-install) prints the li
 remove it with npm:
 
 ```sh
-npm install -g bandar@latest
-npm uninstall -g bandar
+npm install -g @falentio/bandar@latest
+npm uninstall -g @falentio/bandar
 ```
 
 `bandar update --check` still reports the installed and latest versions for an npm copy, because a

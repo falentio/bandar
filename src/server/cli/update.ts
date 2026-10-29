@@ -340,7 +340,7 @@ async function update(run: UpdateRun, archive: string | null): Promise<number> {
 
   if (state.kind === "unknown") {
     run.stderr(
-      `bandar: ${state.reason}; an npm install updates with "npm install -g bandar@latest"; otherwise reinstall with ${INSTALLER} to let bandar update itself`,
+      `bandar: ${state.reason}; an npm install updates with "npm install -g @falentio/bandar@latest"; otherwise reinstall with ${INSTALLER} to let bandar update itself`,
     );
 
     return 1;

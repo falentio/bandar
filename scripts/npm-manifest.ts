@@ -1,3 +1,9 @@
+// npm stores a staged package and its tarball under a flattened name: @scope/name becomes
+// scope-name, which is the file name npm pack gives it too.
+export function flatName(name: string): string {
+  return name.startsWith("@") ? name.slice(1).replace("/", "-") : name;
+}
+
 export type Platform = {
   readonly name: string;
   readonly asset: string;

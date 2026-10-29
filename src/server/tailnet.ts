@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import * as v from "valibot";
 
 const STATUS_TIMEOUT_MS = 2000;
@@ -29,24 +30,22 @@ type StatusRun = () => {
   readonly stderr: string;
 };
 
+/**
+ * `node:child_process` rather than `Bun.spawnSync`, because Vite loads this module in Node when it
+ * reads `vite.config.ts`. A spawn that never starts — the CLI absent, the timeout reached — arrives
+ * in `error` beside an empty stream, so nothing here turns a thrown bug into a missing tailnet.
+ */
 const runStatus: StatusRun = () => {
-  try {
-    const status = Bun.spawnSync(["tailscale", "status", "--json"], {
-      timeout: STATUS_TIMEOUT_MS,
-    });
+  const result = spawnSync("tailscale", ["status", "--json"], {
+    timeout: STATUS_TIMEOUT_MS,
+    encoding: "utf8",
+  });
 
-    return {
-      ok: status.success,
-      stdout: status.stdout.toString(),
-      stderr: status.stderr.toString(),
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      stdout: "",
-      stderr: error instanceof Error ? error.message : "tailscale could not be started",
-    };
-  }
+  return {
+    ok: result.status === 0,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr || (result.error?.message ?? ""),
+  };
 };
 
 const missing = (reason: string): TailnetResolution => ({ kind: "missing", reason });

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Manifest } from "./npm";
+import type { Manifest } from "./npm-manifest";
 
 const packages = value("--packages");
 const tarballs = value("--tarballs");

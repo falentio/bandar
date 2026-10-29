@@ -12,6 +12,8 @@ import {
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 
+import type { Manifest, Platform, VersionReport } from "./npm-manifest";
+
 const ROOT = join(import.meta.dir, "..");
 const OUTPUT = join(ROOT, "dist", "npm");
 const LOADER = join(ROOT, "npm", "bandar.cjs");
@@ -22,36 +24,6 @@ const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 const VERSION_TEXT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const VISIBILITY_TIMEOUT = 60_000;
 const VISIBILITY_INTERVAL = 3_000;
-
-type Platform = {
-  readonly name: string;
-  readonly asset: string;
-  readonly file: string;
-  readonly libc?: string;
-};
-
-export type Manifest = {
-  readonly name: string;
-  readonly version: string;
-  readonly description: string;
-  readonly license: string;
-  readonly repository: { readonly type: string; readonly url: string };
-  readonly homepage: string;
-  readonly bugs: { readonly url: string };
-  readonly publishConfig: { readonly access: string; readonly provenance: boolean };
-  readonly files: readonly string[];
-  readonly os?: readonly string[];
-  readonly cpu?: readonly string[];
-  readonly libc?: readonly string[];
-  readonly bin?: { readonly bandar: string };
-  readonly engines?: { readonly node: string };
-  readonly optionalDependencies?: Readonly<Record<string, string>>;
-};
-
-type VersionReport =
-  | { readonly kind: "ok"; readonly value: string }
-  | { readonly kind: "skipped" }
-  | { readonly kind: "unreadable" };
 
 const require = createRequire(LOADER);
 

@@ -270,14 +270,22 @@ tarball npm resolved. `--ignore-scripts` changes nothing, and neither does a pac
 skips lifecycle scripts by default.
 
 npm does the platform selection itself. Each platform package declares `os`, `cpu`, and, on Linux,
-`libc: ["glibc"]`, so npm installs one of them and drops the other, and a musl system such as
-Alpine gets an unsupported platform instead of a binary that cannot start. The loader package
+`libc: ["glibc"]`, so npm installs one of them and drops the other. The loader package
 deliberately carries no `os` field: npm would otherwise refuse the whole install with a bare
 `EBADPLATFORM`, before anything could explain it. The install succeeds instead, and the first run
-refuses in one line:
+refuses in one line.
+
+That line names the platforms npm ships when bandar has no build for this one:
 
 ```text
 bandar: bandar has no npm build for darwin-arm64; npm ships linux-x64, win32-x64
+```
+
+On a musl system such as Alpine, npm drops `bandar-linux-x64` because the package declares
+`libc: ["glibc"]`, and the line names the mismatch:
+
+```text
+bandar: bandar-linux-x64 links glibc and this Linux uses musl, so bandar has no build for it; neither npm nor install.sh can install one
 ```
 
 An npm copy belongs to npm's tree, which owns the path and the recorded version. Replacing the

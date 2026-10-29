@@ -15,6 +15,13 @@ const INSTALLER =
 
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
+function isMusl() {
+  return (
+    process.platform === "linux" &&
+    process.report?.getReport?.()?.header?.glibcVersionRuntime === undefined
+  );
+}
+
 function resolveBinary(platform, arch, resolve = require.resolve) {
   const key = `${platform}-${arch}`;
   const entry = PACKAGES.get(key);
@@ -32,6 +39,13 @@ function resolveBinary(platform, arch, resolve = require.resolve) {
     manifest = resolve(`${entry.name}/package.json`);
   } catch (error) {
     if (error.code !== "MODULE_NOT_FOUND") throw error;
+
+    if (entry.libc === "glibc" && isMusl()) {
+      return {
+        kind: "unsupported",
+        reason: `${entry.name} links glibc and this Linux uses musl, so bandar has no build for it; neither npm nor install.sh can install one`,
+      };
+    }
 
     return {
       kind: "absent",

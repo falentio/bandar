@@ -207,9 +207,22 @@ else
   fail "an unsupported platform said: $(cat "$WORK/unsupported.err")"
 fi
 
+cat >"$WORK/fake-musl.cjs" <<'PRELOAD'
+const report = process.report.getReport();
+
+Object.defineProperty(process, "report", {
+  value: {
+    getReport: () => ({ ...report, header: { ...report.header, glibcVersionRuntime: undefined } }),
+  },
+});
+PRELOAD
+
 mv "$platform_dir" "$WORK/hidden"
 status=0
 "$bin" --version >"$WORK/absent.out" 2>"$WORK/absent.err" || status=$?
+musl=0
+node --require "$WORK/fake-musl.cjs" "$loader" --version >"$WORK/musl.out" 2>"$WORK/musl.err" ||
+  musl=$?
 mv "$WORK/hidden" "$platform_dir"
 
 if [ "$status" = 1 ] && [ ! -s "$WORK/absent.out" ] &&
@@ -220,6 +233,16 @@ if [ "$status" = 1 ] && [ ! -s "$WORK/absent.out" ] &&
   pass "a missing platform package refuses in one line"
 else
   fail "a missing platform package said: $(cat "$WORK/absent.err")"
+fi
+
+if [ "$musl" = 1 ] && [ ! -s "$WORK/musl.out" ] &&
+  [ "$(wc -l <"$WORK/musl.err")" -eq 1 ] &&
+  grep -q 'links glibc' "$WORK/musl.err" &&
+  grep -q 'this Linux uses musl' "$WORK/musl.err" &&
+  grep -q 'neither npm nor install.sh can install one' "$WORK/musl.err"; then
+  pass "a musl Linux with only the glibc package installed is refused as unsupported"
+else
+  fail "a musl Linux said: $(cat "$WORK/musl.err")"
 fi
 
 cp -R "$PREFIX" "$WORK/mixed"

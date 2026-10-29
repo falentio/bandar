@@ -1,45 +1,70 @@
+import { Bar, BarChart, XAxis, YAxis } from "recharts";
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
 import type { DailyUsage } from "../../shared/analytics";
-import { formatDay, formatExactTokens } from "../format";
+import { formatDay, formatExactTokens, formatTokens } from "../format";
+
+const chartConfig = {
+  inputTokens: { label: "Input", color: "var(--chart-2)" },
+  outputTokens: { label: "Output", color: "var(--chart-5)" },
+} satisfies ChartConfig;
 
 export function TokenChart({ daily }: { daily: readonly DailyUsage[] }) {
-  const max = Math.max(...daily.map((day) => day.inputTokens + day.outputTokens), 1);
-  const first = daily[0];
-  const last = daily.at(-1);
+  const requestsByDate = new Map(daily.map((day): [string, number] => [day.date, day.requests]));
 
   return (
-    <div>
-      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1">
-          <span className="size-2 rounded-sm bg-primary/40" /> input
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="size-2 rounded-sm bg-primary" /> output
-        </span>
-      </div>
-      <div className="mt-3 flex h-40 items-end gap-[2px]">
-        {daily.map((day) => (
-          <div
-            key={day.date}
-            className="flex h-full flex-1 flex-col justify-end"
-            title={`${day.date}: ${formatExactTokens(day.inputTokens)} in, ${formatExactTokens(
-              day.outputTokens,
-            )} out, ${day.requests} requests`}
-          >
-            <div
-              className="w-full bg-primary"
-              style={{ height: `${(day.outputTokens / max) * 100}%` }}
+    <ChartContainer config={chartConfig} className="aspect-auto h-56 w-full">
+      <BarChart accessibilityLayer data={[...daily]}>
+        <XAxis
+          dataKey="date"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={8}
+          minTickGap={32}
+          tickFormatter={formatDay}
+        />
+        <YAxis
+          width={44}
+          tickLine={false}
+          axisLine={false}
+          tickCount={4}
+          tickFormatter={formatTokens}
+        />
+        <ChartTooltip
+          content={
+            <ChartTooltipContent
+              labelFormatter={(label) => {
+                const date = String(label);
+                const requests = requestsByDate.get(date);
+
+                return requests === undefined
+                  ? formatDay(date)
+                  : `${formatDay(date)} · ${formatExactTokens(requests)} requests`;
+              }}
             />
-            <div
-              className="w-full bg-primary/40"
-              style={{ height: `${(day.inputTokens / max) * 100}%` }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-        <span>{first === undefined ? "" : formatDay(first.date)}</span>
-        <span>{last === undefined ? "" : formatDay(last.date)}</span>
-      </div>
-    </div>
+          }
+        />
+        <ChartLegend content={<ChartLegendContent />} />
+        <Bar
+          dataKey="inputTokens"
+          stackId="a"
+          fill="var(--color-inputTokens)"
+          isAnimationActive={false}
+        />
+        <Bar
+          dataKey="outputTokens"
+          stackId="a"
+          fill="var(--color-outputTokens)"
+          radius={[3, 3, 0, 0]}
+          isAnimationActive={false}
+        />
+      </BarChart>
+    </ChartContainer>
   );
 }

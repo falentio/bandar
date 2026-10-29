@@ -140,6 +140,38 @@ else
   pass "npm installed only bandar-linux-x64"
 fi
 
+windows=$(node -e '
+const path = require("node:path");
+const { resolveBinary } = require(process.argv[1]);
+
+process.stdout.write(
+  JSON.stringify(resolveBinary("win32", "x64", (request) => path.join(process.argv[2], request))),
+);
+' "$loader" "$STAGED")
+
+case "$windows" in
+*'"kind":"ready"'*'"path":"'*'bandar-windows-x64/bin/bandar.exe"'*)
+  pass "resolveBinary picks bandar-windows-x64/bin/bandar.exe for win32-x64"
+  ;;
+*)
+  fail "resolveBinary for win32-x64 said: $windows"
+  ;;
+esac
+
+windows_manifest=$(node -e '
+const manifest = require(process.argv[1]);
+
+process.stdout.write(
+  JSON.stringify({ os: manifest.os, libc: manifest.libc, files: manifest.files }),
+);
+' "$STAGED/bandar-windows-x64/package.json")
+
+if [ "$windows_manifest" = '{"os":["win32"],"files":["bin/bandar.exe"]}' ]; then
+  pass "the windows manifest declares win32, no libc, and bin/bandar.exe"
+else
+  fail "the windows manifest declares $windows_manifest"
+fi
+
 if [ -f "$installed" ] && cmp -s "$installed" "$ASSET"; then
   pass "the installed binary is byte-identical to $(basename "$ASSET")"
 else

@@ -655,6 +655,15 @@ describe("the tailnet bind", () => {
     ).toThrow(/server\.tailscale: tailscale backend is NeedsLogin/u);
   });
 
+  test("a failure the settings file caused names the file", () => {
+    expect(() =>
+      reportOf({}, "production", withTailscale({}), () => ({
+        kind: "missing",
+        reason: "tailscale is not running",
+      })),
+    ).toThrow(/^invalid configuration:\n {2}server\.tailscale: tailscale is not running$/u);
+  });
+
   test("the flag off never asks for the tailnet", () => {
     expect(() => reportOf()).not.toThrow();
   });

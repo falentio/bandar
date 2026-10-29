@@ -358,7 +358,10 @@ function localEndpoint(
   };
 }
 
-/** server.tailscale reads only the settings file, and an unset flag never asks for the tailnet. */
+/**
+ * server.tailscale reads only the settings file, so a failure it causes is the file's fault and the
+ * summary says so. An unset flag never asks for the tailnet.
+ */
 function resolveEndpoint(
   tailscale: boolean,
   server: Settings["server"],
@@ -368,7 +371,8 @@ function resolveEndpoint(
   const port = resolve(server?.port, environment.BANDAR_PORT, DEFAULT_API_PORT);
   const tailnet = tailscale ? lookup() : null;
 
-  if (tailnet?.kind === "missing") throw new ConfigError([`server.tailscale: ${tailnet.reason}`]);
+  if (tailnet?.kind === "missing")
+    throw new ConfigError([`server.tailscale: ${tailnet.reason}`], "invalid configuration");
 
   return tailnet?.kind === "found"
     ? tailnetEndpoint(tailnet.identity, port, server, environment)

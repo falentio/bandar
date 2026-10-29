@@ -46,11 +46,13 @@ const server = Bun.serve({
     if (url.pathname === "/-/npm/v1/security/advisories/bulk") return Response.json({});
 
     const tarball = /^\/(?<name>[^/]+)\/-\/(?<file>[^/]+)\.tgz$/u.exec(url.pathname);
+    const name = tarball?.groups?.name;
+    const file = tarball?.groups?.file;
 
-    if (tarball?.groups !== undefined) {
-      const entry = entries.get(tarball.groups.name);
+    if (name !== undefined && file !== undefined) {
+      const entry = entries.get(name);
 
-      if (entry === undefined || `${entry.name}-${entry.version}` !== tarball.groups.file) {
+      if (entry === undefined || `${entry.name}-${entry.version}` !== file) {
         return new Response(null, { status: 404 });
       }
 

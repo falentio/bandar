@@ -28,8 +28,13 @@ const LOADER_NAME = "@falentio/bandar";
 const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 const TRUSTED_PUBLISHING_NPM = "11.5.1";
 const VERSION_TEXT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
-const VISIBILITY_TIMEOUT = 60_000;
-const VISIBILITY_INTERVAL = 3_000;
+const VISIBILITY_TIMEOUT = 300_000;
+const VISIBILITY_INTERVAL = 5_000;
+
+const REGISTRY = (process.env.NPM_CONFIG_REGISTRY ?? "https://registry.npmjs.org").replace(
+  /\/$/u,
+  "",
+);
 
 const require = createRequire(LOADER);
 
@@ -343,11 +348,21 @@ async function preflight(staged: readonly string[]): Promise<void> {
   console.log(`npm: preflight passed for ${staged.join(", ")} at ${version}`);
 }
 
+// npm view reads a packument the CDN may still serve from before the publish, and a package of
+// 161 MB takes minutes to appear in it, so ask the version endpoint, which answers for the version.
+async function published(name: string): Promise<boolean> {
+  const response = await fetch(`${REGISTRY}/${name.replace("/", "%2f")}/${version}`, {
+    headers: { "cache-control": "no-cache" },
+  });
+
+  return response.status === 200;
+}
+
 async function publish(staged: readonly string[]): Promise<void> {
-  const order = [...staged.filter((name) => name !== LOADER_NAME), LOADER_NAME];
+  const order = [...staged.filter((name) => name !== LOADER_NAME).sort(), LOADER_NAME];
 
   for (const name of order) {
-    if (view([`${name}@${version}`, "version"]).ok) {
+    if (await published(name)) {
       console.log(`npm: ${name}@${version} is already published, skipping`);
       continue;
     }
@@ -359,7 +374,14 @@ async function publish(staged: readonly string[]): Promise<void> {
       stderr: "inherit",
     });
 
-    if (result.exitCode !== 0) fail(`npm publish failed for ${name}`);
+    if (result.exitCode !== 0) {
+      if (await published(name)) {
+        console.log(`npm: ${name}@${version} is already published, continuing`);
+        continue;
+      }
+
+      fail(`npm publish failed for ${name}`);
+    }
 
     await visible(name);
     console.log(`npm: published ${name}@${version}`);
@@ -372,8 +394,10 @@ async function visible(name: string): Promise<void> {
   while (Date.now() < deadline) {
     await Bun.sleep(VISIBILITY_INTERVAL);
 
-    if (view([`${name}@${version}`, "version"]).ok) return;
+    if (await published(name)) return;
   }
 
-  fail(`${name}@${version} is not readable after 60s; the rest of the release was not published`);
+  fail(
+    `${name}@${version} is not readable after ${VISIBILITY_TIMEOUT / 1000}s; the rest of the release was not published`,
+  );
 }

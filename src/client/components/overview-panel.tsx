@@ -1,23 +1,19 @@
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { EMPTY_ANALYTICS_FILTERS, hasAnalyticsFilters } from "../../shared/analytics";
 import {
-  formatExactTokens,
-  formatMs,
-  formatPercent,
-  formatTokens,
-  formatTps,
-  formatUsd,
-} from "../format";
+  ANALYTICS_RANGES,
+  EMPTY_ANALYTICS_FILTERS,
+  hasAnalyticsFilters,
+} from "../../shared/analytics";
+import { formatExactTokens, formatTokens, formatTps, formatUsd } from "../format";
 import { modelLabels } from "../model-labels";
 import { ModelName } from "../model-name";
 import { useAnalytics } from "../use-analytics";
 import { useProviders } from "../use-providers";
 import { AnalyticsFilterBar } from "./analytics-filters";
+import { OverviewStats } from "./overview-stats";
 import { TokenChart } from "./token-chart";
-
-const RANGES = [7, 30, 90] as const;
 
 export function OverviewPanel() {
   const analytics = useAnalytics();
@@ -35,7 +31,7 @@ export function OverviewPanel() {
           </p>
         </div>
         <div className="flex items-center gap-1">
-          {RANGES.map((days) => (
+          {ANALYTICS_RANGES.map((days) => (
             <Button
               key={days}
               variant={analytics.days === days ? "default" : "outline"}
@@ -69,29 +65,7 @@ export function OverviewPanel() {
           aria-busy={analytics.status === "loading"}
           className={analytics.status === "loading" ? "space-y-4 opacity-60" : "space-y-4"}
         >
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="Requests" value={formatTokens(data.summary.requests)} />
-            <Stat
-              label="Tokens"
-              value={formatTokens(data.summary.totalTokens)}
-              hint={`${formatTokens(data.summary.inputTokens)} in · ${formatTokens(
-                data.summary.outputTokens,
-              )} out`}
-            />
-            <Stat label="Avg speed" value={formatTps(data.summary.avgTps)} hint="generation only" />
-            <Stat label="Avg TTFT" value={formatMs(data.summary.avgTtftMs)} hint="first token" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat
-              label="Avg / day"
-              value={formatTokens(data.summary.avgTokensPerDay)}
-              hint={`over ${data.days} days`}
-            />
-            <Stat label="Error rate" value={formatPercent(data.summary.errorRate)} />
-            <Stat label="p95 latency" value={formatMs(data.summary.p95DurationMs)} />
-            <Stat label="Cost" value={formatUsd(data.summary.costUsd)} hint="priced models only" />
-          </div>
+          <OverviewStats summary={data.summary} daily={data.daily} days={data.days} />
 
           <Card>
             <CardHeader>
@@ -178,18 +152,6 @@ function EmptyAnalytics({ filtered, onClear }: { filtered: boolean; onClear: () 
             <Link to="/providers">Add a custom provider</Link>
           </Button>
         )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
-        {hint === undefined ? null : <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>
   );

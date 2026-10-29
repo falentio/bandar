@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { ProviderUsage } from "../../shared/analytics";
+import { ANALYTICS_RANGES, type ProviderUsage } from "../../shared/analytics";
 import { type Tag } from "../../shared/tags";
 import {
   BUILT_IN_PROVIDERS,
@@ -53,8 +53,6 @@ import { CredentialsCard } from "./credentials-card";
 import { HealthBadge } from "./health-badge";
 import { EditModelDialog } from "./model-edit-dialog";
 import { ProviderLogo } from "./provider-logo";
-
-const RANGES = [7, 30, 90] as const;
 
 export const PROVIDER_TABS = ["overview", "settings", "models", "credentials"] as const;
 
@@ -155,7 +153,7 @@ export function ProviderPage({
             </div>
             {tab === "overview" ? (
               <div className="flex items-center gap-1">
-                {RANGES.map((days) => (
+                {ANALYTICS_RANGES.map((days) => (
                   <Button
                     key={days}
                     variant={detail.days === days ? "default" : "outline"}

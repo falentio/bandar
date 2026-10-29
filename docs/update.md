@@ -33,6 +33,32 @@ with no `Authorization` header. GitHub redirects the asset to
 page means the repository has no published release, which `--check` reports as `unknown` with
 exit 0.
 
+## What it shows while it works
+
+On a terminal, `bandar update` rewrites one row on stderr while it works:
+
+```text
+| checking the latest release
+/ downloading bandar-0.3.1-linux-x64 61.2/240.0 MB 25%
+- verifying sha256 240.0 MB
+| installing /usr/local/bin/bandar
+bandar 0.3.1 installed at /usr/local/bin/bandar
+```
+
+The frames are `|`, `/`, `-`, and `\`, drawn every 80 ms. The byte count is cumulative, and the
+second number with its percentage appears only when the server declares a `Content-Length`; a
+response that declares none counts bytes alone, as in
+`/ downloading bandar-0.3.1-linux-x64 61.2 MB`. A row narrower than the terminal is padded to
+the widest row drawn so far, so a shorter line leaves no tail of the longer one behind.
+
+The `bandar <version> installed at <path>` line stays on stdout; the row above it is erased
+first. `--archive` skips the release check and the downloads, so it shows only the verify and
+the install.
+
+When stderr is not a terminal, a pipe, a redirect, or a CI log, the command writes nothing there
+and starts no timer. stdout is unchanged in both cases: one line for a completed update, and the
+three `--check` lines for a report.
+
 ## A private fork, with a token
 
 Set `update.apiUrl` in `config.json` to the latest-release JSON of the fork, and set a token in

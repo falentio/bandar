@@ -11,6 +11,7 @@ import {
 } from "@/shared/cli-tools";
 import { modelChoices } from "../model-options";
 import { ModelCombobox } from "./model-combobox";
+import { ModelSelect } from "./model-select";
 import { useApiKeys } from "../use-api-keys";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
@@ -97,13 +98,21 @@ export function KeyAndModelsCard({
               />
             </label>
             <div className="flex flex-col gap-1">
-              <ModelCombobox
-                capacity={tool.modelCapacity}
-                choices={choices}
-                selected={models}
-                disabled={busy}
-                onChange={setModels}
-              />
+              {single ? (
+                <ModelSelect
+                  choices={choices}
+                  selected={models}
+                  disabled={busy}
+                  onChange={setModels}
+                />
+              ) : (
+                <ModelCombobox
+                  choices={choices}
+                  selected={models}
+                  disabled={busy}
+                  onChange={setModels}
+                />
+              )}
               {empty ? (
                 <p className="text-xs text-muted-foreground">
                   No models yet.{" "}

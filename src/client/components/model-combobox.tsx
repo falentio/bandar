@@ -5,20 +5,13 @@ import { Input } from "@/components/ui/input";
 import type { ModelChoiceGroup, ModelChoices, ModelOption } from "../model-options";
 
 type ModelComboboxProps = {
-  readonly capacity: "one" | "many";
   readonly choices: ModelChoices;
   readonly selected: readonly string[];
   readonly disabled: boolean;
   readonly onChange: (models: readonly string[]) => void;
 };
 
-export function ModelCombobox({
-  capacity,
-  choices,
-  selected,
-  disabled,
-  onChange,
-}: ModelComboboxProps) {
+export function ModelCombobox({ choices, selected, disabled, onChange }: ModelComboboxProps) {
   const id = useId();
   const container = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -31,7 +24,6 @@ export function ModelCombobox({
     ? active
     : (options[0]?.value ?? null);
 
-  const single = capacity === "one";
   const listboxId = `${id}-listbox`;
 
   useEffect(() => {
@@ -53,13 +45,6 @@ export function ModelCombobox({
   const choose = (value: string): void => {
     setQuery("");
     setActive(value);
-
-    if (single) {
-      onChange([value]);
-      setOpen(false);
-
-      return;
-    }
 
     setOpen(true);
     onChange(
@@ -95,7 +80,7 @@ export function ModelCombobox({
       return;
     }
 
-    if (event.key === "Backspace" && query === "" && !single && selected.length > 0) {
+    if (event.key === "Backspace" && query === "" && selected.length > 0) {
       event.preventDefault();
       onChange(selected.slice(0, -1));
     }
@@ -104,7 +89,7 @@ export function ModelCombobox({
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="text-xs text-muted-foreground">
-        {single ? "Model ref" : "Models"}
+        Models
       </label>
       <div ref={container} className="relative">
         <Input
@@ -133,7 +118,7 @@ export function ModelCombobox({
           <div
             id={listboxId}
             role="listbox"
-            aria-multiselectable={!single}
+            aria-multiselectable
             className="absolute inset-x-0 top-full z-50 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
           >
             {options.length === 0 ? (

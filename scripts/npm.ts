@@ -136,13 +136,14 @@ function shared(name: string, description: string) {
 function platformManifest(key: string, platform: Platform): Manifest {
   const { os, arch } = split(key);
 
-  return {
+  const manifest: Manifest = {
     ...shared(platform.name, `The bandar binary for ${platform.os} ${arch}. Install bandar instead.`),
     os: [os],
     cpu: [arch],
-    ...(platform.libc === undefined ? {} : { libc: [platform.libc] }),
     files: [platform.file],
   };
+
+  return platform.libc === undefined ? manifest : { ...manifest, libc: [platform.libc] };
 }
 
 function loaderManifest(staged: readonly string[]): Manifest {

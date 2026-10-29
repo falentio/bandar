@@ -4,10 +4,11 @@ export function openAiError(
   status: number,
   message: string,
   code: string,
+  param: string | null = null,
   type = "invalid_request_error",
 ): Response {
   return Response.json(
-    { error: { message, type, param: null, code } },
+    { error: { message, type, param, code } },
     { status, headers: { "cache-control": "no-store" } },
   );
 }
@@ -99,7 +100,7 @@ export type ChatWire = {
 };
 
 export const openAiWire: ChatWire = {
-  error: openAiError,
+  error: (status, message, code, type) => openAiError(status, message, code, null, type),
   complete: (input) => completionResponse({ ...input, id: `chatcmpl-${input.id}` }),
   stream: openAiStream,
 };

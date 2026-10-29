@@ -16,6 +16,7 @@ import { anthropicError, anthropicWire, estimateInputTokens } from "./router/ant
 import { runChat, type ChatDeps } from "./router/chat";
 import { listModelRefs } from "./router/resolve";
 import { openAiError } from "./router/wire";
+import { issueText } from "./validation";
 
 const MESSAGES_PATH = "/v1/messages";
 
@@ -37,7 +38,7 @@ export function createGateway(deps: GatewayDeps) {
 
       return anthropic
         ? anthropicError(500, "unexpected server error")
-        : openAiError(500, "unexpected server error", "internal", "server_error");
+        : openAiError(500, "unexpected server error", "internal", null, "server_error");
     })
     .get("/models", async ({ request }) => {
       const caller = await callerOf(deps.auth, request);
@@ -65,11 +66,13 @@ export function createGateway(deps: GatewayDeps) {
 
       if (!parsed.success) {
         const issue = parsed.issues[0];
+        const note = issue === undefined ? null : issueText(issue);
 
         return openAiError(
           422,
-          issue === undefined ? "request did not match the schema" : issue.message,
+          note?.message ?? "request did not match the schema",
           "validation",
+          note?.param ?? null,
         );
       }
 
@@ -101,8 +104,14 @@ export function createGateway(deps: GatewayDeps) {
     .post("/messages", async ({ body, request }) => {
       const parsed = v.safeParse(MessagesRequestSchema, body);
 
-      if (!parsed.success)
-        return anthropicError(422, parsed.issues[0]?.message ?? "request did not match the schema");
+      if (!parsed.success) {
+        const issue = parsed.issues[0];
+
+        return anthropicError(
+          422,
+          issue === undefined ? "request did not match the schema" : issueText(issue).message,
+        );
+      }
 
       const caller = await callerOf(deps.auth, request);
 
@@ -128,8 +137,14 @@ export function createGateway(deps: GatewayDeps) {
     .post("/messages/count_tokens", async ({ body, request }) => {
       const parsed = v.safeParse(MessagesRequestSchema, body);
 
-      if (!parsed.success)
-        return anthropicError(422, parsed.issues[0]?.message ?? "request did not match the schema");
+      if (!parsed.success) {
+        const issue = parsed.issues[0];
+
+        return anthropicError(
+          422,
+          issue === undefined ? "request did not match the schema" : issueText(issue).message,
+        );
+      }
 
       const caller = await callerOf(deps.auth, request);
 
@@ -196,6 +211,7 @@ function unauthorized(): Response {
     401,
     "send an API key as Authorization: Bearer <key> or x-api-key",
     "unauthorized",
+    null,
     "authentication_error",
   );
 }

@@ -9,6 +9,11 @@ export type ParseableInput =
   | readonly ParseableInput[]
   | { readonly [key: string]: ParseableInput };
 
+export type IssueText = {
+  readonly param: string | null;
+  readonly message: string;
+};
+
 export class InputError extends Error {
   readonly issues: readonly string[];
 
@@ -19,6 +24,18 @@ export class InputError extends Error {
   }
 }
 
+export function issueText(issue: v.BaseIssue<unknown>): IssueText {
+  const param = issueParam(issue);
+
+  return { param, message: param === null ? issue.message : `${param}: ${issue.message}` };
+}
+
+function issueParam(issue: v.BaseIssue<unknown>): string | null {
+  const path = issue.path?.map((item) => String(item.key)).join(".");
+
+  return path === undefined || path === "" ? null : path;
+}
+
 export function parseInput<
   const TSchema extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>,
 >(schema: TSchema, value: ParseableInput): v.InferOutput<TSchema> {
@@ -26,11 +43,5 @@ export function parseInput<
 
   if (parsed.success) return parsed.output;
 
-  throw new InputError(
-    parsed.issues.map((issue) => {
-      const path = issue.path?.map((item) => String(item.key)).join(".") ?? "";
-
-      return path === "" ? issue.message : `${path}: ${issue.message}`;
-    }),
-  );
+  throw new InputError(parsed.issues.map((issue) => issueText(issue).message));
 }

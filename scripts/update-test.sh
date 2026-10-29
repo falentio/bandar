@@ -573,6 +573,27 @@ expect_stdout check "latest $newer"
 expect_stdout check "update-available"
 
 echo
+echo "case: --check on a terminal on stderr"
+
+if ! command -v script >/dev/null 2>&1; then
+  echo "skip: script is not installed, so no pty can be opened for the progress row"
+else
+  case_dir tty-check install-script
+  stage_release "$newer" 'terminal check payload'
+  set +e
+  script -qec "env BANDAR_HOME=$CASE_DIR BANDAR_CONFIG_DIR=$CASE_DIR/config BANDAR_RELEASE_WEB_URL=$API bun src/server/main.ts update --check >$work/logs/tty-check.out" \
+    "$work/logs/tty-check.typescript" >"$work/logs/tty-check.capture" 2>"$work/logs/tty-check.err"
+  status=$?
+  set -e
+  expect_exit tty-check 0
+  expect_stdout_lines tty-check 3
+  expect_stdout tty-check "installed $installed"
+  expect_stdout tty-check "latest $newer"
+  expect_stdout tty-check "update-available"
+  expect_capture tty-check "checking the latest release"
+fi
+
+echo
 echo "case: --check with no published release"
 case_dir norelease install-script
 rm -rf "$work/site"

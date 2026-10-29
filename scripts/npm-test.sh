@@ -79,6 +79,17 @@ else
   fail "a lifecycle script survived staging:$lifecycle"
 fi
 
+provenance=
+for name in bandar-linux-x64 bandar-windows-x64 bandar; do
+  if grep -q '"provenance"' "$STAGED/$name/package.json"; then provenance="$provenance $name"; fi
+done
+
+if [ -z "$provenance" ]; then
+  pass "no staged manifest asks npm to sign provenance"
+else
+  fail "a staged manifest asks for provenance, which a publish outside the workflow cannot sign:$provenance"
+fi
+
 mkdir -p "$TARBALLS"
 
 for name in bandar-linux-x64 bandar-windows-x64 bandar; do

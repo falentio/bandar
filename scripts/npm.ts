@@ -50,8 +50,11 @@ export type Manifest = {
 };
 
 const require = createRequire(LOADER);
+
+// SAFETY: npm/bandar.cjs exports the PACKAGES map, and it is the only platform list the design has.
 const { PACKAGES } = require(LOADER) as { readonly PACKAGES: ReadonlyMap<string, Platform> };
 
+// SAFETY: package.json is this repo's own npm manifest, and npm requires its version to be a string.
 const version = (JSON.parse(readFileSync(MANIFEST, "utf8")) as { version: string }).version;
 
 const argv = process.argv.slice(2);
@@ -242,7 +245,8 @@ async function preflight(staged: readonly string[]): Promise<void> {
   if (tag !== `v${version}`) problems.push(`tag ${tag || "(unset)"} does not name package.json version v${version}`);
 
   for (const name of staged) {
-    const manifest = JSON.parse(readFileSync(join(OUTPUT, name, "package.json"), "utf8")) as { version: string };
+    // SAFETY: --stage wrote this package.json through writeManifest, so it is a Manifest.
+    const manifest = JSON.parse(readFileSync(join(OUTPUT, name, "package.json"), "utf8")) as Manifest;
 
     if (manifest.version !== version) problems.push(`${name} staged at ${manifest.version}, not ${version}`);
   }

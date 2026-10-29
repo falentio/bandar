@@ -7,12 +7,52 @@ import {
   renderInput,
   toolById,
   toolStatus,
+  type CliRenderInput,
+  type CliSnippet,
+  type CliTool,
+  type CliToolId,
 } from "./cli-tools";
 
 const ORIGIN = "https://gw.example";
 const KEY = "bandar_livekey000000000000";
+const CODING = "tags/coding";
+const KILO = "kilocode/anthropic/claude-sonnet-4.5";
+const CHEAP = "tags/cheap";
 
-const input = renderInput(ORIGIN, "sonnet", KEY);
+const input = renderInput(ORIGIN, ["sonnet"], KEY);
+
+const CAPACITY: Record<CliToolId, CliTool["modelCapacity"]> = {
+  "opencode-v1": "many",
+  "opencode-v2": "many",
+  codex: "many",
+  pi: "many",
+  "claude-code": "one",
+};
+
+type FileSnippet = Extract<CliSnippet, { kind: "file" }>;
+
+function fileSnippets(tool: CliTool, render: CliRenderInput): readonly FileSnippet[] {
+  const files: FileSnippet[] = [];
+
+  for (const snippet of tool.snippets(render)) {
+    if (snippet.kind === "file") files.push(snippet);
+  }
+
+  return files;
+}
+
+function fileCode(tool: CliTool, render: CliRenderInput): string {
+  return fileSnippets(tool, render)
+    .map((snippet) => snippet.code)
+    .join("\n");
+}
+
+function allCode(tool: CliTool, render: CliRenderInput): string {
+  return tool
+    .snippets(render)
+    .map((snippet) => snippet.code)
+    .join("\n");
+}
 
 describe("secrets", () => {
   test("no file snippet carries the key", () => {
@@ -27,23 +67,17 @@ describe("secrets", () => {
 
   test("every tool names the variable that supplies the key", () => {
     for (const tool of CLI_TOOLS) {
-      const code = tool
-        .snippets(input)
-        .map((snippet) => snippet.code)
-        .join("\n");
-
-      expect(code, `${tool.id} never mentions ${tool.keyVariable}`).toContain(tool.keyVariable);
+      expect(allCode(tool, input), `${tool.id} never mentions ${tool.keyVariable}`).toContain(
+        tool.keyVariable,
+      );
     }
   });
 
   test("a missing key stays a placeholder", () => {
-    const blank = renderInput(ORIGIN, "", "");
+    const blank = renderInput(ORIGIN, [], "");
 
     for (const tool of CLI_TOOLS) {
-      const code = tool
-        .snippets(blank)
-        .map((snippet) => snippet.code)
-        .join("\n");
+      const code = allCode(tool, blank);
 
       expect(code).not.toContain(KEY);
       expect(code).toContain(MODEL_PLACEHOLDER);
@@ -68,17 +102,101 @@ describe("base urls", () => {
 
   test("the snippets agree with the declared base url", () => {
     for (const tool of CLI_TOOLS) {
-      const code = tool
-        .snippets(input)
-        .map((snippet) => snippet.code)
-        .join("\n");
-
-      expect(code, tool.id).toContain(tool.baseUrl(ORIGIN));
+      expect(allCode(tool, input), tool.id).toContain(tool.baseUrl(ORIGIN));
     }
   });
 
   test("a trailing slash on the origin is dropped", () => {
-    expect(renderInput(`${ORIGIN}/`, "", "").origin).toBe(ORIGIN);
+    expect(renderInput(`${ORIGIN}/`, [], "").origin).toBe(ORIGIN);
+  });
+});
+
+describe("models", () => {
+  test("every picked ref reaches a file snippet", () => {
+    const two = renderInput(ORIGIN, [CODING, KILO], KEY);
+
+    for (const tool of CLI_TOOLS) {
+      const code = fileCode(tool, two);
+
+      expect(code, tool.id).toContain(CODING);
+
+      if (tool.id === "claude-code") {
+        expect(code).not.toContain(KILO);
+        continue;
+      }
+
+      expect(code, tool.id).toContain(KILO);
+    }
+  });
+
+  test("the first ref is the default", () => {
+    const two = renderInput(ORIGIN, [CODING, KILO], KEY);
+
+    for (const id of ["opencode-v1", "opencode-v2"] as const) {
+      const config: unknown = JSON.parse(fileCode(toolById(id), two));
+
+      expect(config, id).toMatchObject({ model: "bandar/" + CODING });
+    }
+
+    const [defaultLine] = fileCode(toolById("codex"), two).split("\n");
+
+    expect(defaultLine).toBe('model = "' + CODING + '"');
+  });
+
+  test("pi lists one entry per ref", () => {
+    const two = renderInput(ORIGIN, [CODING, KILO], KEY);
+    const pi = fileCode(toolById("pi"), two);
+
+    expect(pi.match(/"id":/gu), "pi").toHaveLength(2);
+  });
+
+  test("codex writes one profile file per ref after the first", () => {
+    const three = renderInput(ORIGIN, [CODING, KILO, CHEAP], KEY);
+    const codex = toolById("codex");
+    const [config, ...profiles] = fileSnippets(codex, three);
+
+    expect(config?.path).toBe("~/.codex/config.toml");
+    expect(config?.code.split("\n")[0]).toBe(`model = "${CODING}"`);
+    expect(profiles.map((snippet) => snippet.path)).toEqual([
+      "~/.codex/bandar-kilocode-anthropic-claude-sonnet-4-5.config.toml",
+      "~/.codex/bandar-tags-cheap.config.toml",
+    ]);
+    expect(profiles.map((snippet) => snippet.code)).toEqual([
+      `model = "${KILO}"`,
+      `model = "${CHEAP}"`,
+    ]);
+    expect(fileSnippets(codex, input)).toHaveLength(1);
+    expect(allCode(codex, three)).not.toContain("[profiles.");
+  });
+
+  test("Claude Code pins only the first of three refs", () => {
+    const three = renderInput(ORIGIN, [CODING, KILO, CHEAP], KEY);
+    const code = fileCode(toolById("claude-code"), three);
+
+    expect(code).toContain(`"ANTHROPIC_MODEL": "${CODING}"`);
+    expect(code).not.toContain(KILO);
+    expect(code).not.toContain(CHEAP);
+    expect(code).not.toContain("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY");
+  });
+
+  test("an empty pick renders the placeholder in every tool", () => {
+    const blank = renderInput(ORIGIN, [], KEY);
+
+    for (const tool of CLI_TOOLS) {
+      expect(fileCode(tool, blank), tool.id).toContain(MODEL_PLACEHOLDER);
+    }
+  });
+
+  test("renderInput trims, drops blanks, and dedupes in pick order", () => {
+    expect(renderInput(ORIGIN, ["  ", " sonnet ", "sonnet"], KEY).models).toEqual(["sonnet"]);
+    expect(renderInput(ORIGIN, [" beta ", "alpha", "beta"], KEY).models).toEqual(["beta", "alpha"]);
+  });
+
+  test("every tool declares the capacity it implements", () => {
+    for (const tool of CLI_TOOLS) {
+      expect(["one", "many"], tool.id).toContain(tool.modelCapacity);
+      expect(tool.modelCapacity, tool.id).toBe(CAPACITY[tool.id]);
+    }
   });
 });
 

@@ -6,10 +6,11 @@ import { Input } from "@/components/ui/input";
 import {
   renderInput,
   type CliRenderInput,
-  type CliToolId,
+  type CliTool,
   type CliToolStatus,
 } from "@/shared/cli-tools";
 import { modelChoices } from "../model-options";
+import { ModelPicker, ModelSelect } from "./model-picker";
 import { useApiKeys } from "../use-api-keys";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
@@ -44,12 +45,12 @@ export function CliToolStatusChip({ status }: { status: CliToolStatus["status"] 
   );
 }
 
-export function KeyAndModelCard({
-  toolId,
+export function KeyAndModelsCard({
+  tool,
   origin,
   children,
 }: {
-  toolId: CliToolId;
+  tool: CliTool;
   origin: string;
   children: (input: CliRenderInput) => ReactNode;
 }) {
@@ -57,11 +58,13 @@ export function KeyAndModelCard({
   const providers = useProviders();
   const tags = useTags();
   const [pastedKey, setPastedKey] = useState("");
-  const [model, setModel] = useState("");
+  const [models, setModels] = useState<readonly string[]>([]);
+  const busy = providers.pending || tags.pending;
 
   const key = apiKeys.created ?? pastedKey;
-  const input = renderInput(origin, model, key);
+  const input = renderInput(origin, models, key);
   const choices = modelChoices(providers.providers, tags.tags);
+  const single = tool.modelCapacity === "one";
 
   const empty =
     providers.status === "ready" &&
@@ -73,10 +76,11 @@ export function KeyAndModelCard({
     <>
       <Card>
         <CardHeader>
-          <CardTitle>Key and model</CardTitle>
+          <CardTitle>{single ? "Key and model" : "Key and models"}</CardTitle>
           <CardDescription>
-            Create a key for this tool, or paste one you already have. Pick a tag or a model. Its
-            ref goes into the config.
+            {single
+              ? "Create a key for this tool, or paste one you already have. Pick the model this tool starts on. Its ref goes into the config."
+              : "Create a key for this tool, or paste one you already have. Pick the models this tool should offer; the first one is its default."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -93,35 +97,21 @@ export function KeyAndModelCard({
               />
             </label>
             <div className="flex flex-col gap-1">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">Model ref</span>
-                <select
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  disabled={providers.pending || tags.pending}
-                  className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm transition-colors duration-150 ease-out focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                >
-                  <option value="">Select a model</option>
-                  {choices.tags.length === 0 ? null : (
-                    <optgroup label="Tags">
-                      {choices.tags.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {choices.providers.map((group) => (
-                    <optgroup key={group.label} label={group.label}>
-                      {group.options.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
+              {single ? (
+                <ModelSelect
+                  choices={choices}
+                  selected={models}
+                  disabled={busy}
+                  onChange={setModels}
+                />
+              ) : (
+                <ModelPicker
+                  choices={choices}
+                  selected={models}
+                  disabled={busy}
+                  onChange={setModels}
+                />
+              )}
               {empty ? (
                 <p className="text-xs text-muted-foreground">
                   No models yet.{" "}
@@ -142,7 +132,7 @@ export function KeyAndModelCard({
             <Button
               type="button"
               disabled={apiKeys.pending}
-              onClick={() => void apiKeys.create(`cli-${toolId}`)}
+              onClick={() => void apiKeys.create(`cli-${tool.id}`)}
             >
               Create key
             </Button>

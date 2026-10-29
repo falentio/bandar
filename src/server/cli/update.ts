@@ -33,6 +33,7 @@ const TRUSTED_ASSET_HOSTS = [
 
 const TOKEN_VARIABLES = ["BANDAR_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
 const CHECKSUM_PREFIX = /^([0-9a-fA-F]{64})(?:\s|$)/u;
+const COLLECT_STEP = 4 * 1024 * 1024;
 const VERSION_TEXT = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
 const TAG_PATH = /\/releases\/tag\/([^/]+)\/?$/u;
 
@@ -753,36 +754,62 @@ async function sendRequest(
 
   if (reader === undefined) return { status: response.status, body: new Uint8Array(), location };
 
-  const chunks: Uint8Array[] = [];
-  let received = 0;
+  const body = createByteBuffer(total);
+  let collectAfter = COLLECT_STEP;
 
   for (;;) {
     const { done, value } = await reader.read();
 
     if (done) break;
 
-    chunks.push(value);
-    received += value.length;
+    const received = body.write(value);
+
+    // Bun's response reader allocates a chunk per read and leaves each one to the collector, so a
+    // large body keeps a second copy of itself until a collection happens.
+    if (received >= collectAfter) {
+      collectAfter = received + COLLECT_STEP;
+      Bun.gc(true);
+    }
+
     onBytes(received, total);
   }
 
-  return { status: response.status, body: concatChunks(chunks, received), location };
+  return { status: response.status, body: body.bytes(), location };
 }
 
 function assetProgress(run: UpdateRun, asset: string): ByteProgress {
   return (received, total) => run.report({ kind: "downloading", asset, received, total });
 }
 
-function concatChunks(chunks: readonly Uint8Array[], length: number): Uint8Array {
-  const body = new Uint8Array(length);
-  let offset = 0;
+type ByteBuffer = {
+  /** Copies a chunk in and reports the cumulative bytes held. */
+  write(chunk: Uint8Array): number;
+  bytes(): Uint8Array;
+};
 
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.length;
-  }
+/** One buffer for the whole body: sized to the declared length, doubled when the body outgrows it. */
+export function createByteBuffer(total: number | null): ByteBuffer {
+  let buffer = new Uint8Array(total ?? 0);
+  let received = 0;
 
-  return body;
+  return {
+    write: (chunk) => {
+      if (received + chunk.length > buffer.length) {
+        const grown = new Uint8Array(Math.max(received + chunk.length, buffer.length * 2));
+
+        grown.set(buffer.subarray(0, received));
+
+        buffer = grown;
+      }
+
+      buffer.set(chunk, received);
+
+      received += chunk.length;
+
+      return received;
+    },
+    bytes: () => buffer.subarray(0, received),
+  };
 }
 
 function trimTrailingSlashes(url: string): string {

@@ -16,6 +16,7 @@ import { detectInstall } from "./install-source";
 import {
   assetHostAllowed,
   compareVersions,
+  createByteBuffer,
   githubToken,
   latestTagUrl,
   parseChecksum,
@@ -433,6 +434,35 @@ describe("versions and assets", () => {
   test("a checksum line is its first token, lowercased", () => {
     expect(parseChecksum(`${"A".repeat(64)}  bandar-0.1.0-linux-x64\n`)).toBe("a".repeat(64));
     expect(parseChecksum("not a digest")).toBeNull();
+  });
+});
+
+describe("the streamed body", () => {
+  test("a declared length holds every chunk in one buffer of that size", () => {
+    const body = createByteBuffer(4);
+
+    body.write(Uint8Array.of(1, 2));
+    body.write(Uint8Array.of(3, 4));
+
+    expect(Array.from(body.bytes())).toEqual([1, 2, 3, 4]);
+    expect(body.bytes().buffer.byteLength).toBe(4);
+  });
+
+  test("an undeclared length grows instead of dropping a chunk", () => {
+    const body = createByteBuffer(null);
+
+    body.write(Uint8Array.of(1, 2));
+    body.write(Uint8Array.of(3, 4, 5));
+
+    expect(Array.from(body.bytes())).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  test("a body longer than its declared length grows past it", () => {
+    const body = createByteBuffer(2);
+
+    body.write(Uint8Array.of(1, 2, 3, 4));
+
+    expect(Array.from(body.bytes())).toEqual([1, 2, 3, 4]);
   });
 });
 

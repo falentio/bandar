@@ -339,7 +339,9 @@ async function update(run: UpdateRun, archive: string | null): Promise<number> {
   const state = detectInstall(run.configDir, (path) => readFileSync(path, "utf8"));
 
   if (state.kind === "unknown") {
-    run.stderr(`bandar: ${state.reason}; reinstall with ${INSTALLER} to let bandar update itself`);
+    run.stderr(
+      `bandar: ${state.reason}; update an npm install with "npm install -g bandar@latest", or reinstall with ${INSTALLER} to let bandar update itself`,
+    );
 
     return 1;
   }

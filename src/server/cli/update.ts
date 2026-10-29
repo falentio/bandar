@@ -15,6 +15,7 @@ import { version as installedVersion } from "../generated/version";
 import { settingsIo } from "../settings-io";
 import type { Commands, Env } from "./command";
 import { detectInstall } from "./install-source";
+import { createProgress, type ByteProgress, type ReportUpdate } from "./update-progress";
 
 const COMMAND = "update";
 const REPOSITORY = "falentio/bandar";
@@ -32,6 +33,7 @@ const TRUSTED_ASSET_HOSTS = [
 
 const TOKEN_VARIABLES = ["BANDAR_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
 const CHECKSUM_PREFIX = /^([0-9a-fA-F]{64})(?:\s|$)/u;
+const COLLECT_STEP = 4 * 1024 * 1024;
 const VERSION_TEXT = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u;
 const TAG_PATH = /\/releases\/tag\/([^/]+)\/?$/u;
 
@@ -68,6 +70,7 @@ export type HttpSend = (
   url: string,
   headers: Readonly<Record<string, string>>,
   redirect?: "follow" | "manual",
+  onBytes?: ByteProgress,
 ) => Promise<HttpResponse>;
 
 export type UpdateFlags = {
@@ -91,6 +94,7 @@ export type UpdateRun = {
   readonly stderr: (line: string) => void;
   readonly send: HttpSend;
   readonly canWrite: (directory: string) => boolean;
+  readonly report: ReportUpdate;
 };
 
 export type VersionRelation = "newer" | "same" | "older" | "unknown";
@@ -112,7 +116,7 @@ type Download =
 /** One published release, and the only two things an installer needs from it. */
 type LatestRelease = {
   readonly version: string;
-  readonly fetchAsset: (name: string) => Promise<Download>;
+  readonly fetchAsset: (name: string, onBytes?: ByteProgress) => Promise<Download>;
 };
 
 type LatestLookup =
@@ -279,19 +283,26 @@ export async function run(args: readonly string[], env: Env): Promise<number> {
     return 1;
   }
 
-  return runUpdate({
-    configDir: config.configDir,
-    update: config.update,
-    env,
-    argv: args,
-    installed: installedVersion,
-    platform: process.platform,
-    arch: process.arch,
-    stdout: (line) => console.log(line),
-    stderr: (line) => console.error(line),
-    send: sendRequest,
-    canWrite: canWriteDirectory,
-  });
+  const progress = createProgress(process.stderr);
+
+  try {
+    return await runUpdate({
+      configDir: config.configDir,
+      update: config.update,
+      env,
+      argv: args,
+      installed: installedVersion,
+      platform: process.platform,
+      arch: process.arch,
+      stdout: progress.sink((line) => console.log(line)),
+      stderr: progress.sink((line) => console.error(line)),
+      send: sendRequest,
+      canWrite: canWriteDirectory,
+      report: progress.report,
+    });
+  } finally {
+    progress.finish();
+  }
 }
 
 export function register(commands: Commands): void {
@@ -372,6 +383,8 @@ async function update(run: UpdateRun, archive: string | null): Promise<number> {
     return 1;
   }
 
+  run.report({ kind: "verifying", bytes: prepared.bytes.length });
+
   const actual = sha256(prepared.bytes);
 
   if (actual !== prepared.expected) {
@@ -381,6 +394,8 @@ async function update(run: UpdateRun, archive: string | null): Promise<number> {
 
     return 1;
   }
+
+  run.report({ kind: "installing", target });
 
   const replaced = replaceBinary(run, target, prepared.bytes);
 
@@ -440,7 +455,7 @@ async function installLatest(
     };
   }
 
-  const binary = await release.fetchAsset(names.asset);
+  const binary = await release.fetchAsset(names.asset, assetProgress(run, names.asset));
 
   if (binary.kind === "failed")
     return { kind: "failed", reason: `could not download ${names.asset}: ${binary.reason}` };
@@ -465,6 +480,8 @@ async function installLatest(
 
 /** Reads the latest version without a credential, or through the API feed when one is configured. */
 async function lookupLatest(run: UpdateRun): Promise<LatestLookup> {
+  run.report({ kind: "checking" });
+
   const api = run.update.apiUrl;
 
   if (api !== null) {
@@ -511,7 +528,10 @@ async function lookupPublicLatest(send: HttpSend, web: string): Promise<LatestLo
 
   return {
     kind: "latest",
-    release: { version, fetchAsset: (name) => downloadPublic(send, web, version, name) },
+    release: {
+      version,
+      fetchAsset: (name, onBytes) => downloadPublic(send, web, version, name, onBytes),
+    },
   };
 }
 
@@ -546,7 +566,7 @@ async function lookupApiLatest(send: HttpSend, token: string, feed: string): Pro
     kind: "latest",
     release: {
       version,
-      fetchAsset: (name) => downloadApi(send, token, assets, version, name, feed),
+      fetchAsset: (name, onBytes) => downloadApi(send, token, assets, version, name, feed, onBytes),
     },
   };
 }
@@ -580,13 +600,17 @@ async function downloadPublic(
   web: string,
   version: string,
   name: string,
+  onBytes?: ByteProgress,
 ): Promise<Download> {
   try {
     // github.com answers the asset with a redirect to release-assets.githubusercontent.com, which
     // fetch follows; the bytes land here with no credential anywhere in the request.
-    const response = await send(releaseAssetUrl(web, version, name), {
-      "User-Agent": "bandar-update",
-    });
+    const response = await send(
+      releaseAssetUrl(web, version, name),
+      { "User-Agent": "bandar-update" },
+      "follow",
+      onBytes,
+    );
 
     if (response.status !== 200)
       return { kind: "failed", reason: `HTTP ${String(response.status)}` };
@@ -607,6 +631,7 @@ async function downloadApi(
   version: string,
   name: string,
   feed: string,
+  onBytes?: ByteProgress,
 ): Promise<Download> {
   const asset = assets.find((candidate) => candidate.name === name);
 
@@ -621,11 +646,16 @@ async function downloadApi(
 
   try {
     // The API asset url answers JSON unless the request asks for the octet stream.
-    const response = await send(asset.url, {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/octet-stream",
-      "User-Agent": "bandar-update",
-    });
+    const response = await send(
+      asset.url,
+      {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/octet-stream",
+        "User-Agent": "bandar-update",
+      },
+      "follow",
+      onBytes,
+    );
 
     if (response.status !== 200)
       return { kind: "failed", reason: `HTTP ${String(response.status)}` };
@@ -710,17 +740,83 @@ export function assetHostAllowed(url: string, base: string): boolean {
   return TRUSTED_ASSET_HOSTS.includes(host) || host === hostOf(base);
 }
 
+export function declaredLengthOf(headers: Headers): number | null {
+  // An encoded body's length counts wire bytes, while the reader hands back the expanded ones.
+  if (headers.get("content-encoding") !== null) return null;
+
+  const declared = Number(headers.get("content-length"));
+
+  return Number.isFinite(declared) && declared > 0 ? declared : null;
+}
+
 async function sendRequest(
   url: string,
   headers: Readonly<Record<string, string>>,
   redirect: "follow" | "manual" = "follow",
+  onBytes: ByteProgress = () => undefined,
 ): Promise<HttpResponse> {
   const response = await fetch(url, { headers, redirect });
+  const location = response.headers.get("location");
+  const total = declaredLengthOf(response.headers);
+  const reader = response.body?.getReader();
+
+  if (reader === undefined) return { status: response.status, body: new Uint8Array(), location };
+
+  const body = createByteBuffer(total);
+  let collectAfter = COLLECT_STEP;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+
+    if (done) break;
+
+    const received = body.write(value);
+
+    // Bun's response reader allocates a chunk per read and leaves each one to the collector, so a
+    // large body keeps a second copy of itself until a collection happens.
+    if (received >= collectAfter) {
+      collectAfter = received + COLLECT_STEP;
+      Bun.gc(true);
+    }
+
+    onBytes(received, total);
+  }
+
+  return { status: response.status, body: body.bytes(), location };
+}
+
+function assetProgress(run: UpdateRun, asset: string): ByteProgress {
+  return (received, total) => run.report({ kind: "downloading", asset, received, total });
+}
+
+type ByteBuffer = {
+  /** Copies a chunk in and reports the cumulative bytes held. */
+  write(chunk: Uint8Array): number;
+  bytes(): Uint8Array;
+};
+
+/** One buffer for the whole body: sized to the declared length, doubled when the body outgrows it. */
+export function createByteBuffer(total: number | null): ByteBuffer {
+  let buffer = new Uint8Array(total ?? 0);
+  let received = 0;
 
   return {
-    status: response.status,
-    body: new Uint8Array(await response.arrayBuffer()),
-    location: response.headers.get("location"),
+    write: (chunk) => {
+      if (received + chunk.length > buffer.length) {
+        const grown = new Uint8Array(Math.max(received + chunk.length, buffer.length * 2));
+
+        grown.set(buffer.subarray(0, received));
+
+        buffer = grown;
+      }
+
+      buffer.set(chunk, received);
+
+      received += chunk.length;
+
+      return received;
+    },
+    bytes: () => buffer.subarray(0, received),
   };
 }
 

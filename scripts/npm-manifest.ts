@@ -23,6 +23,11 @@ export type Manifest = {
   readonly optionalDependencies?: Readonly<Record<string, string>>;
 };
 
+export type RegistryReport =
+  | { readonly kind: "present" }
+  | { readonly kind: "absent" }
+  | { readonly kind: "unreadable"; readonly reason: string };
+
 export type VersionReport =
   | { readonly kind: "ok"; readonly value: string }
   | { readonly kind: "skipped" }

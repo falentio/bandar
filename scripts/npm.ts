@@ -12,7 +12,7 @@ import {
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 
-import type { Manifest, Platform, VersionReport } from "./npm-manifest";
+import type { Manifest, Platform, RegistryReport, VersionReport } from "./npm-manifest";
 
 const ROOT = join(import.meta.dir, "..");
 const LOADER = join(ROOT, "npm", "bandar.cjs");
@@ -211,6 +211,16 @@ function reaches(actual: string, floor: string): boolean {
   return true;
 }
 
+function registryReport(name: string): RegistryReport {
+  const result = view([name, "version"]);
+
+  if (result.ok) return { kind: "present" };
+
+  const reason = viewFailure(result.error);
+
+  return reason === "E404" ? { kind: "absent" } : { kind: "unreadable", reason };
+}
+
 function reportedVersion(): VersionReport {
   if (process.platform !== "linux") return { kind: "skipped" };
 
@@ -273,18 +283,28 @@ async function preflight(staged: readonly string[]): Promise<void> {
     problems.push(`the release binary reports ${reported.value}, not ${version}`);
   }
 
-  const owner = view([LOADER_NAME, "repository.url"]);
+  const registry = new Map(staged.map((name) => [name, registryReport(name)]));
 
-  if (owner.ok) {
-    if (owner.text === "") {
+  for (const [name, report] of registry) {
+    if (report.kind === "absent") {
+      problems.push(
+        `${name} is not on npm yet; a human publishes it once before its trusted publisher can be configured at https://www.npmjs.com/package/${name}/access`,
+      );
+    } else if (report.kind === "unreadable") {
+      problems.push(`could not ask npm about ${name}: ${report.reason}`);
+    }
+  }
+
+  if (registry.get(LOADER_NAME)?.kind === "present") {
+    const owner = view([LOADER_NAME, "repository.url"]);
+
+    if (!owner.ok) {
+      problems.push(`could not read the npm name ${LOADER_NAME}: ${viewFailure(owner.error)}`);
+    } else if (owner.text === "") {
       problems.push(`the npm name ${LOADER_NAME} records no repository.url`);
     } else if (!owner.text.includes("falentio/bandar")) {
       problems.push(`the npm name ${LOADER_NAME} belongs to ${owner.text}`);
     }
-  } else {
-    const failure = viewFailure(owner.error);
-
-    if (failure !== "E404") problems.push(`could not read the npm name ${LOADER_NAME}: ${failure}`);
   }
 
   if (problems.length > 0) {

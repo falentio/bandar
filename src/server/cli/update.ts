@@ -740,6 +740,15 @@ export function assetHostAllowed(url: string, base: string): boolean {
   return TRUSTED_ASSET_HOSTS.includes(host) || host === hostOf(base);
 }
 
+export function declaredLengthOf(headers: Headers): number | null {
+  // An encoded body's length counts wire bytes, while the reader hands back the expanded ones.
+  if (headers.get("content-encoding") !== null) return null;
+
+  const declared = Number(headers.get("content-length"));
+
+  return Number.isFinite(declared) && declared > 0 ? declared : null;
+}
+
 async function sendRequest(
   url: string,
   headers: Readonly<Record<string, string>>,
@@ -748,8 +757,7 @@ async function sendRequest(
 ): Promise<HttpResponse> {
   const response = await fetch(url, { headers, redirect });
   const location = response.headers.get("location");
-  const declared = Number(response.headers.get("content-length"));
-  const total = Number.isFinite(declared) && declared > 0 ? declared : null;
+  const total = declaredLengthOf(response.headers);
   const reader = response.body?.getReader();
 
   if (reader === undefined) return { status: response.status, body: new Uint8Array(), location };

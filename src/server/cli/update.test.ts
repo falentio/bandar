@@ -17,6 +17,7 @@ import {
   assetHostAllowed,
   compareVersions,
   createByteBuffer,
+  declaredLengthOf,
   githubToken,
   latestTagUrl,
   parseChecksum,
@@ -463,6 +464,24 @@ describe("the streamed body", () => {
     body.write(Uint8Array.of(1, 2, 3, 4));
 
     expect(Array.from(body.bytes())).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("the declared body length", () => {
+  test("a plain response reports its length", () => {
+    expect(declaredLengthOf(new Headers({ "content-length": "2048" }))).toBe(2048);
+  });
+
+  test("an encoded response declares wire bytes, so it reports no length", () => {
+    expect(
+      declaredLengthOf(new Headers({ "content-length": "1024", "content-encoding": "gzip" })),
+    ).toBeNull();
+  });
+
+  test("a missing, zero, or malformed length is no length", () => {
+    expect(declaredLengthOf(new Headers())).toBeNull();
+    expect(declaredLengthOf(new Headers({ "content-length": "0" }))).toBeNull();
+    expect(declaredLengthOf(new Headers({ "content-length": "none" }))).toBeNull();
   });
 });
 

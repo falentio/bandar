@@ -158,9 +158,8 @@ rm -rf ~/.config/bandar ~/.bandar ~/.bandar_dev
 An npm copy belongs to npm, so npm replaces it and removes it:
 
 ```sh
-npm install -g bandar@latest
-npm uninstall -g bandar
 bandar uninstall-service --scope user
+npm uninstall -g bandar
 rm -rf ~/.config/bandar ~/.bandar ~/.bandar_dev
 ```
 

@@ -21,7 +21,9 @@ for (const directory of readdirSync(packages, { withFileTypes: true })) {
   if (!directory.isDirectory()) continue;
 
   // SAFETY: npm pack staged this package.json from a Manifest, so every field of the contract is there.
-  const manifest = JSON.parse(readFileSync(join(packages, directory.name, "package.json"), "utf8")) as Manifest;
+  const manifest = JSON.parse(
+    readFileSync(join(packages, directory.name, "package.json"), "utf8"),
+  ) as Manifest;
 
   entries.set(manifest.name, {
     name: manifest.name,

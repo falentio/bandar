@@ -118,7 +118,8 @@ function platforms(args: readonly string[]): readonly string[] {
 
     const key = args[index + 1];
 
-    if (key === undefined || !PACKAGES.has(key)) fail(`--platform needs one of ${[...PACKAGES.keys()].join(", ")}`);
+    if (key === undefined || !PACKAGES.has(key))
+      fail(`--platform needs one of ${[...PACKAGES.keys()].join(", ")}`);
 
     keys.push(key);
   }
@@ -143,7 +144,10 @@ function platformManifest(key: string, platform: Platform): Manifest {
   const { os, arch } = split(key);
 
   const manifest: Manifest = {
-    ...shared(platform.name, `The bandar binary for ${platform.os} ${arch}. Install bandar instead.`),
+    ...shared(
+      platform.name,
+      `The bandar binary for ${platform.os} ${arch}. Install bandar instead.`,
+    ),
     os: [os],
     cpu: [arch],
     files: [platform.file],
@@ -183,7 +187,9 @@ async function stage(only: readonly string[]): Promise<void> {
 
     if (!existsSync(artifact)) fail(`${artifact} is missing; run bun scripts/release.ts first`);
 
-    const expected = (readFileSync(`${artifact}.sha256`, "utf8").trim().split(/\s+/u)[0] ?? "").toLowerCase();
+    const expected = (
+      readFileSync(`${artifact}.sha256`, "utf8").trim().split(/\s+/u)[0] ?? ""
+    ).toLowerCase();
 
     if ((await digest(artifact)) !== expected) fail(`${artifact} does not match its sha256 file`);
 
@@ -207,7 +213,8 @@ async function stage(only: readonly string[]): Promise<void> {
 }
 
 function stagedOnDisk(): readonly string[] {
-  if (!existsSync(OUTPUT)) fail(`${OUTPUT.slice(ROOT.length + 1)} is missing; run bun scripts/npm.ts --stage first`);
+  if (!existsSync(OUTPUT))
+    fail(`${OUTPUT.slice(ROOT.length + 1)} is missing; run bun scripts/npm.ts --stage first`);
 
   return readdirSync(OUTPUT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -215,7 +222,11 @@ function stagedOnDisk(): readonly string[] {
 }
 
 function view(args: readonly string[]) {
-  const result = Bun.spawnSync({ cmd: [NPM, "view", ...args, "--json"], stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync({
+    cmd: [NPM, "view", ...args, "--json"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 
   return { ok: result.exitCode === 0, text: result.stdout.toString().trim() };
 }
@@ -245,22 +256,28 @@ function reportedVersion(): VersionReport {
 async function preflight(staged: readonly string[]): Promise<void> {
   const problems: string[] = [];
 
-  if (!VERSION_TEXT.test(version)) problems.push(`package.json version ${version} is not a release version`);
+  if (!VERSION_TEXT.test(version))
+    problems.push(`package.json version ${version} is not a release version`);
 
   const tag = process.env.GITHUB_REF_NAME ?? "";
 
-  if (tag !== `v${version}`) problems.push(`tag ${tag || "(unset)"} does not name package.json version v${version}`);
+  if (tag !== `v${version}`)
+    problems.push(`tag ${tag || "(unset)"} does not name package.json version v${version}`);
 
   for (const name of staged) {
     // SAFETY: --stage wrote this package.json through writeManifest, so it is a Manifest.
-    const manifest = JSON.parse(readFileSync(join(OUTPUT, name, "package.json"), "utf8")) as Manifest;
+    const manifest = JSON.parse(
+      readFileSync(join(OUTPUT, name, "package.json"), "utf8"),
+    ) as Manifest;
 
-    if (manifest.version !== version) problems.push(`${name} staged at ${manifest.version}, not ${version}`);
+    if (manifest.version !== version)
+      problems.push(`${name} staged at ${manifest.version}, not ${version}`);
   }
 
   const reported = reportedVersion();
 
-  if (reported.kind === "unreadable") problems.push("the linux release binary would not report its version");
+  if (reported.kind === "unreadable")
+    problems.push("the linux release binary would not report its version");
 
   if (reported.kind === "ok" && reported.value !== version) {
     problems.push(`the release binary reports ${reported.value}, not ${version}`);

@@ -15,7 +15,6 @@ import { join, resolve } from "node:path";
 import type { Manifest, Platform, VersionReport } from "./npm-manifest";
 
 const ROOT = join(import.meta.dir, "..");
-const OUTPUT = join(ROOT, "dist", "npm");
 const LOADER = join(ROOT, "npm", "bandar.cjs");
 const MANIFEST = join(ROOT, "package.json");
 const REPOSITORY = "https://github.com/falentio/bandar";
@@ -34,7 +33,8 @@ const { PACKAGES } = require(LOADER) as { readonly PACKAGES: ReadonlyMap<string,
 const version = (JSON.parse(readFileSync(MANIFEST, "utf8")) as { version: string }).version;
 
 const argv = process.argv.slice(2);
-const RELEASE = releaseDirectory(argv);
+const RELEASE = flag(argv, "--release", join(ROOT, "dist", "release"));
+const OUTPUT = flag(argv, "--output", join(ROOT, "dist", "npm"));
 
 if (argv.includes("--stage")) {
   await stage();
@@ -72,11 +72,11 @@ async function digest(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-function releaseDirectory(args: readonly string[]): string {
-  const index = args.indexOf("--release");
+function flag(args: readonly string[], name: string, fallback: string): string {
+  const index = args.indexOf(name);
   const path = index === -1 ? undefined : args[index + 1];
 
-  return path === undefined ? join(ROOT, "dist", "release") : resolve(path);
+  return path === undefined ? fallback : resolve(path);
 }
 
 function shared(name: string, description: string) {
@@ -149,7 +149,7 @@ async function stage(): Promise<void> {
     chmodSync(join(directory, platform.file), 0o755);
     writeManifest(directory, platformManifest(key, platform));
     staged.push(platform.name);
-    console.log(`npm: staged ${platform.name} from ${artifact.slice(ROOT.length + 1)}`);
+    console.log(`npm: staged ${platform.name} from ${artifact}`);
   }
 
   const directory = join(OUTPUT, LOADER_NAME);
@@ -162,8 +162,7 @@ async function stage(): Promise<void> {
 }
 
 function stagedOnDisk(): readonly string[] {
-  if (!existsSync(OUTPUT))
-    fail(`${OUTPUT.slice(ROOT.length + 1)} is missing; run bun scripts/npm.ts --stage first`);
+  if (!existsSync(OUTPUT)) fail(`${OUTPUT} is missing; run bun scripts/npm.ts --stage first`);
 
   return readdirSync(OUTPUT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())

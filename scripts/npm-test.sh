@@ -7,6 +7,7 @@ PREFIX=$WORK/prefix
 SCRIPTS_OFF=$WORK/scripts-off
 TARBALLS=$WORK/tarballs
 RELEASE_DIR=$WORK/release
+STAGED=$WORK/npm
 PORT_FILE=$WORK/port
 checks=0
 failures=0
@@ -15,7 +16,10 @@ stub=
 pass() { checks=$((checks + 1)); printf 'ok   %s\n' "$*"; }
 fail() { checks=$((checks + 1)); failures=$((failures + 1)); printf 'FAIL %s\n' "$*"; }
 die() { printf 'npm-test: %s\n' "$*" >&2; exit 1; }
-cleanup() { [ -z "$stub" ] || kill "$stub" 2>/dev/null || true; }
+cleanup() {
+  [ -z "$stub" ] || kill "$stub" 2>/dev/null || true
+  rm -rf "$WORK"
+}
 trap cleanup EXIT INT TERM
 
 command -v bun >/dev/null 2>&1 || die "bun is required to serve the registry stub"
@@ -49,14 +53,14 @@ write_asset "$ASSET"
 
 write_asset "$RELEASE_DIR/bandar-$VERSION-windows-x64.exe"
 
-bun "$ROOT/scripts/npm.ts" --stage --release "$RELEASE_DIR" >"$WORK/stage.log" 2>&1 ||
+bun "$ROOT/scripts/npm.ts" --stage --release "$RELEASE_DIR" --output "$STAGED" >"$WORK/stage.log" 2>&1 ||
   die "scripts/npm.ts --stage failed: $(cat "$WORK/stage.log")"
 
 for name in bandar-linux-x64 bandar-windows-x64 bandar; do
-  [ -f "$ROOT/dist/npm/$name/package.json" ] || die "scripts/npm.ts --stage left $name unstaged"
+  [ -f "$STAGED/$name/package.json" ] || die "scripts/npm.ts --stage left $name unstaged"
 done
 
-loader_manifest=$ROOT/dist/npm/bandar/package.json
+loader_manifest=$STAGED/bandar/package.json
 
 if grep -q '"os"' "$loader_manifest"; then
   fail "the loader manifest carries an os field, so npm would refuse an unsupported platform"
@@ -66,7 +70,7 @@ fi
 
 lifecycle=
 for name in bandar-linux-x64 bandar-windows-x64 bandar; do
-  if grep -q '"scripts"' "$ROOT/dist/npm/$name/package.json"; then lifecycle="$lifecycle $name"; fi
+  if grep -q '"scripts"' "$STAGED/$name/package.json"; then lifecycle="$lifecycle $name"; fi
 done
 
 if [ -z "$lifecycle" ]; then
@@ -78,11 +82,11 @@ fi
 mkdir -p "$TARBALLS"
 
 for name in bandar-linux-x64 bandar-windows-x64 bandar; do
-  (cd "$ROOT/dist/npm/$name" && npm pack --pack-destination "$TARBALLS" >/dev/null 2>&1) ||
+  (cd "$STAGED/$name" && npm pack --pack-destination "$TARBALLS" >/dev/null 2>&1) ||
     die "npm pack failed for $name"
 done
 
-bun "$ROOT/scripts/registry-stub.ts" --packages "$ROOT/dist/npm" --tarballs "$TARBALLS" \
+bun "$ROOT/scripts/registry-stub.ts" --packages "$STAGED" --tarballs "$TARBALLS" \
   --port-file "$PORT_FILE" >"$WORK/registry.log" 2>&1 &
 stub=$!
 

@@ -49,6 +49,12 @@ export type Manifest = {
   readonly optionalDependencies?: Readonly<Record<string, string>>;
 };
 
+/** What the released linux binary reports its version to be, or why this run could not ask it. */
+type VersionReport =
+  | { readonly kind: "ok"; readonly value: string }
+  | { readonly kind: "skipped" }
+  | { readonly kind: "unreadable" };
+
 const require = createRequire(LOADER);
 
 // SAFETY: npm/bandar.cjs exports the PACKAGES map, and it is the only platform list the design has.
@@ -215,7 +221,7 @@ function view(args: readonly string[]) {
 }
 
 /** Compares the version the release binary reports with the one npm is about to publish. */
-function reportedVersion(): { readonly kind: "ok"; readonly value: string } | { readonly kind: string } {
+function reportedVersion(): VersionReport {
   if (process.platform !== "linux") return { kind: "skipped" };
 
   for (const [key, platform] of PACKAGES) {

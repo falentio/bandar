@@ -12,6 +12,7 @@ import {
 import { PROVIDER_KIND_LABELS, PROVIDER_KINDS, type Provider } from "../../shared/providers";
 import type { Tag } from "../../shared/tags";
 import { modelLabelOf } from "../model-labels";
+import { useProjects } from "../use-projects";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
 
@@ -33,12 +34,15 @@ type FilterMenuProps = {
   readonly options: readonly FilterOption[];
   readonly selected: readonly string[];
   readonly onChange: (values: readonly string[]) => void;
+  readonly onOpen?: () => void;
+  readonly emptyLabel?: string;
 };
 
 export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProps) {
   const providers = useProviders();
   const tags = useTags();
-  const error = providers.error ?? tags.error;
+  const projects = useProjects();
+  const error = providers.error ?? tags.error ?? projects.error;
 
   const update = (dimension: AnalyticsFilterDimension, values: readonly string[]): void => {
     onChange({ ...filters, [dimension]: [...values] });
@@ -70,6 +74,14 @@ export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProp
         selected={filters.tag}
         onChange={(values) => update("tag", values)}
       />
+      <FilterMenu
+        label="Project"
+        options={projectOptions(projects.projects)}
+        selected={filters.projectUrl}
+        onChange={(values) => update("projectUrl", values)}
+        onOpen={projects.refresh}
+        emptyLabel="No projects yet"
+      />
       {hasAnalyticsFilters(filters) ? (
         <Button variant="ghost" size="sm" onClick={() => onChange(EMPTY_ANALYTICS_FILTERS)}>
           Clear
@@ -80,9 +92,17 @@ export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProp
   );
 }
 
-function FilterMenu({ label, options, selected, onChange }: FilterMenuProps) {
+function FilterMenu({
+  label: name,
+  options,
+  selected,
+  onChange,
+  onOpen,
+  emptyLabel,
+}: FilterMenuProps) {
   const [query, setQuery] = useState("");
   const rows = visibleOptions(options, selected, query);
+  const label = triggerLabel(name, options, selected);
 
   const toggle = (value: string): void => {
     onChange(
@@ -95,12 +115,15 @@ function FilterMenu({ label, options, selected, onChange }: FilterMenuProps) {
   return (
     <Popover
       onOpenChange={(open) => {
-        if (!open) setQuery("");
+        if (open) onOpen?.();
+        else setQuery("");
       }}
     >
       <PopoverTrigger asChild>
         <Button variant={selected.length === 0 ? "outline" : "default"} size="sm">
-          {triggerLabel(label, options, selected)}
+          <span className="max-w-48 truncate" title={label}>
+            {label}
+          </span>
           <ChevronDownIcon data-icon="inline-end" className="opacity-60" />
         </Button>
       </PopoverTrigger>
@@ -109,14 +132,16 @@ function FilterMenu({ label, options, selected, onChange }: FilterMenuProps) {
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={`Search ${label.toLowerCase()}s`}
-            aria-label={`Search ${label.toLowerCase()}`}
+            placeholder={`Search ${name.toLowerCase()}s`}
+            aria-label={`Search ${name.toLowerCase()}`}
             className="h-7"
           />
         ) : null}
         <div className="max-h-64 space-y-0.5 overflow-y-auto">
           {rows.length === 0 ? (
-            <p className="px-1.5 py-2 text-xs text-muted-foreground">No matches</p>
+            <p className="px-1.5 py-2 text-xs text-muted-foreground">
+              {query === "" && emptyLabel !== undefined ? emptyLabel : "No matches"}
+            </p>
           ) : null}
           {rows.map((row) => (
             <label
@@ -173,6 +198,10 @@ function modelOptions(providers: readonly Provider[]): readonly FilterOption[] {
 
 function tagOptions(tags: readonly Tag[]): readonly FilterOption[] {
   return tags.map((tag) => ({ value: tag.slug, label: tag.ref }));
+}
+
+function projectOptions(projects: readonly string[]): readonly FilterOption[] {
+  return projects.map((url) => ({ value: url, label: url }));
 }
 
 function triggerLabel(

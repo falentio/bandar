@@ -17,6 +17,7 @@ import * as v from "valibot";
 import { BINARY } from "./binary";
 import {
   AnalyticsSchema,
+  ProjectListSchema,
   RequestListSchema,
   analyticsPaths,
   type Analytics,
@@ -739,6 +740,10 @@ try {
     });
 
     assert.equal(untagged.status, 200);
+
+    const projects = await getJson(analyticsPaths.projects, ProjectListSchema, 200);
+
+    assert.deepEqual(projects, { projects: ["https://example.com/app"] });
 
     const after = await getJson(`${analyticsPaths.analytics}?days=30`, AnalyticsSchema, 200);
 

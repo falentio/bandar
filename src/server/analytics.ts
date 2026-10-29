@@ -1,5 +1,6 @@
 import {
   ANALYTICS_FILTER_DIMENSIONS,
+  MAX_ANALYTICS_FILTER_VALUES,
   type AnalyticsFilterDimension,
   type AnalyticsFilters,
 } from "../shared/analytics";
@@ -262,6 +263,24 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
       startedAt: new Date(number(row, "started_at_ms")).toISOString(),
     })),
   };
+}
+
+export type ProjectUrlsQuery = {
+  readonly userId: string;
+};
+
+export function readProjectUrls(db: DuckDb, query: ProjectUrlsQuery): readonly string[] {
+  const rows = db.query(
+    `SELECT project_url
+     FROM request_events
+     WHERE user_id = ? AND project_url IS NOT NULL
+     GROUP BY project_url
+     ORDER BY max(started_at) DESC, project_url ASC
+     LIMIT ?`,
+    [sqlText(query.userId), sqlInt(MAX_ANALYTICS_FILTER_VALUES)],
+  );
+
+  return rows.map((row) => string(row, "project_url"));
 }
 
 export function readProviderUsage(db: DuckDb, query: ProviderUsageQuery): ProviderUsage {

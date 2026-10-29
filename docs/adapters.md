@@ -193,6 +193,7 @@ const builtInDefinitions = {
   nous,
   hyper,
   opencode,
+  zro,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {
@@ -294,9 +295,9 @@ A built-in provider takes its name, slug, and default base URL from
 `BUILT_IN_PROVIDERS` and its kind from `BUILT_IN_PROVIDER_KINDS` in
 `src/shared/providers.ts`. Its behavior comes from the definition in
 `src/server/providers/<kind>/`. Its row has `origin = "builtin"` and is seeded
-for every account by `ensureBuiltInProviders`. There are seven: Kilo Code,
-Token Harbor, Yeta, River, Nous Portal, Hyper, and OpenCode Go. Each `index.ts`
-bundles its adapter with whatever else the provider has: a catalog for all seven,
+for every account by `ensureBuiltInProviders`. There are eight: Kilo Code,
+Token Harbor, Yeta, River, Nous Portal, Hyper, OpenCode Go, and Zro. Each `index.ts`
+bundles its adapter with whatever else the provider has: a catalog for all eight,
 an `OAuthConnector` for Kilo Code and Nous Portal, and a `CredentialRenewer` for
 Nous Portal. The endpoints are not part of the definition: seeding reads the
 resolved config's `baseUrl` for the kind and updates the row in place when it
@@ -316,6 +317,9 @@ The distinction is about existence, not wire shape. Token Harbor, Yeta, River,
 Nous Portal, and Hyper build the shared OpenAI adapter, and their `index.ts` adds
 only the catalog, the login, or the renewal that is theirs. Kilo Code needs its
 own adapter headers, and OpenCode Go is the one built-in that serves four wires.
+Zro speaks chat on the shared OpenAI adapter and messages on the Anthropic one,
+both at its one base URL and both under a bearer key, so neither route needs a
+mount and `defaultCompat` sends every model to chat.
 
 ## Endpoints
 
@@ -336,6 +340,7 @@ generated schema shows:
 | `nous`        | `authUrl`    | `BANDAR_NOUS_PORTAL`         | none              |
 | `hyper`       | `baseUrl`    | `BANDAR_HYPER_API`           | `/v1`             |
 | `opencode`    | `baseUrl`    | `BANDAR_OPENCODE_API`        | `/inference`      |
+| `zro`         | `baseUrl`    | `BANDAR_ZRO_API`             | `/v1`             |
 
 The config resolver reads `config.json` first, then the variable, then the
 default. A file value is the full URL and is used as written. A variable is an
@@ -400,6 +405,7 @@ leaves the models unpriced rather than failing the import:
 | Kilo Code    | keyed gateway catalog              | `pricing.prompt`/`completion` per token, times 1e6                             |
 | Hyper        | public `/models`                   | `pricing.input`/`output` already USD/Mtok, so no scaling                       |
 | OpenCode Go  | public `/go/v1/models`, ids only   | the table's base-tier prices; a listed id the table cannot route never imports |
+| Zro          | keyed `/v1/models`                 | the prices on its pricing page; an unknown id imports unpriced                 |
 
 Yeta is a New API gateway: one ratio unit is $0.002 per 1K tokens, so a ratio is
 worth $2 per million and the output price is the input price times
@@ -542,6 +548,26 @@ Two rules keep a multi-wire catalog honest:
 A single-wire gateway is the opposite policy: Hyper imports every id its public
 list returns, because its one wire cannot list a model it cannot serve.
 
+### Two wires at one base URL
+
+Zro is the model-independent case. Both wires sit at its base URL — `POST
+{base}/chat/completions` and `POST {base}/messages` — and every model it serves
+answers on both, so `zro/index.ts` declares the two routes inline: no `mount`,
+no per-model table, and no `compat.ts` record. The default is `always("chat")`,
+the documented primary and the wire an OpenAI-shaped client speaks; a model moves
+to Messages through the per-model override.
+
+A `compat.ts` record earns its place when each model needs a different wire, as
+on OpenCode Go. Where one default covers every model, the routes belong in
+`index.ts` and the catalog takes its prices from a table rather than gating the
+import on one.
+
+Zro's catalog also folds ids: its `/v1/models` lists one model as both
+`glm-5.3-flash` and `zro/glm-5.3-flash`, and both answer the same weights, so
+`fetchZroCatalog` keeps the bare id its docs name and drops the prefixed twin. An
+id listed only with the prefix imports as listed, and its address carries the prefix
+twice, because an address prefixes the id the vendor answers to.
+
 ## Per-model compatibility
 
 A provider row fixes the kind; a model row may fix its wire. The override lives in
@@ -603,7 +629,13 @@ not measure time, and non-streaming requests have no TTFT.
 1. For a generic wire, add the literal to `GENERIC_PROVIDER_KINDS` in
    `src/shared/providers.ts`. For a built-in, add it to
    `BUILT_IN_PROVIDER_KINDS`, add its name, slug, and base URL to
-   `BUILT_IN_PROVIDERS`, and add its label to `PROVIDER_KIND_LABELS`.
+   `BUILT_IN_PROVIDERS`, and add its label to `PROVIDER_KIND_LABELS`. A built-in
+   also needs its three entries in `src/server/providers/endpoints.ts`
+   (`PROVIDER_ENDPOINT_SPECS`, `PROVIDER_MOUNTS`, `DEFAULT_PROVIDER_ENDPOINTS`),
+   its `endpoint("<kind>")` row in `resolveProviders` in `src/server/config.ts`,
+   and its settings schema in `src/server/settings.ts`. Each is a
+   `Record<BuiltInProviderKind, ...>` or a slice of one, so the type checker names
+   the ones you skip.
 2. Create `src/server/providers/<kind>/index.ts` with the definition, annotated
    with its own kind, and declare one route per wire it speaks. An
    OpenAI-compatible kind builds its chat adapter with `bearerAdapter("<kind>")`,
@@ -722,17 +754,18 @@ fails the same way.
 
 The smoke run is the adapter conformance suite. It boots the compiled binary,
 points one custom provider of each generic wire at a local fake upstream, checks
-that the seven built-in rows were seeded with their auth modes and catalogs, drives
+that the eight built-in rows were seeded with their auth modes and catalogs, drives
 the gateway with a gateway key, and reads the analytics row back. That covers key
 decryption, header construction, request translation, non-stream parsing, SSE
 parsing, usage extraction, finish normalization, TTFT, and tokens-per-second.
 
 The built-in checks go through fake catalog, pricing, and device-auth servers.
 They import each catalog: one keyed with null prices, one keyed with a ratio join,
-one public with per-token prices, one public with per-million-token prices, and one
-public id list that must intersect a built-in table. OpenCode Go answers one chat
-on each of its four wires, and a hand-added undocumented model is a 400 with no
-upstream request. They approve both device logins, prove Nous
+one keyed with a published price table, one public with per-token prices, one
+public with per-million-token prices, and one public id list that must intersect a
+built-in table. OpenCode Go answers one chat on each of its four wires, Zro one on
+each of its two, and a hand-added undocumented model is a 400 with no upstream
+request. They approve both device logins, prove Nous
 Portal rejects an API key, call the gateway with each credential, renew a Nous
 token under two concurrent chats and assert exactly one refresh with no replayed
 refresh token, prove a spent refresh token and a credential without one are

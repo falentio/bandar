@@ -38,7 +38,7 @@ export function createGateway(deps: GatewayDeps) {
 
       return anthropic
         ? anthropicError(500, "unexpected server error")
-        : openAiError(500, "unexpected server error", "internal", null, "server_error");
+        : openAiError(500, "unexpected server error", "internal", "server_error");
     })
     .get("/models", async ({ request }) => {
       const caller = await callerOf(deps.auth, request);
@@ -72,6 +72,7 @@ export function createGateway(deps: GatewayDeps) {
           422,
           note?.message ?? "request did not match the schema",
           "validation",
+          "invalid_request_error",
           note?.param ?? null,
         );
       }
@@ -211,7 +212,6 @@ function unauthorized(): Response {
     401,
     "send an API key as Authorization: Bearer <key> or x-api-key",
     "unauthorized",
-    null,
     "authentication_error",
   );
 }

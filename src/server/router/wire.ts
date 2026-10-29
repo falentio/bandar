@@ -4,8 +4,8 @@ export function openAiError(
   status: number,
   message: string,
   code: string,
-  param: string | null = null,
   type = "invalid_request_error",
+  param: string | null = null,
 ): Response {
   return Response.json(
     { error: { message, type, param, code } },
@@ -100,7 +100,7 @@ export type ChatWire = {
 };
 
 export const openAiWire: ChatWire = {
-  error: (status, message, code, type) => openAiError(status, message, code, null, type),
+  error: openAiError,
   complete: (input) => completionResponse({ ...input, id: `chatcmpl-${input.id}` }),
   stream: openAiStream,
 };

@@ -11,10 +11,12 @@ import {
 import {
   ANALYTICS_FILTER_DIMENSIONS,
   AnalyticsSchema,
+  ProjectListSchema,
   RequestListSchema,
   analyticsPaths,
   type Analytics,
   type AnalyticsFilters,
+  type ProjectList,
   type RequestList,
 } from "../shared/analytics";
 import { CooldownListSchema, cooldownPaths, type CooldownList } from "../shared/cooldowns";
@@ -161,6 +163,7 @@ export const analyticsApi = {
 
     return request(`${analyticsPaths.analytics}?${params.toString()}`, AnalyticsSchema);
   },
+  projects: (): Promise<ProjectList> => request(analyticsPaths.projects, ProjectListSchema),
   requests: (limit = 50, providerId?: string): Promise<RequestList> =>
     request(
       providerId === undefined

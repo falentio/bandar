@@ -1,20 +1,38 @@
 import * as v from "valibot";
+import { ProjectUrlSchema } from "./project";
 import { MAX_MODEL_REF_LENGTH, SlugSchema } from "./slugs";
 
-export const ANALYTICS_FILTER_DIMENSIONS = ["providerKind", "providerId", "model", "tag"] as const;
+export const ANALYTICS_FILTER_DIMENSIONS = [
+  "providerKind",
+  "providerId",
+  "model",
+  "tag",
+  "projectUrl",
+] as const;
+
+export const MAX_ANALYTICS_FILTER_VALUES = 50;
 
 const AnalyticsFilterValuesSchema = v.pipe(
   v.array(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH))),
-  v.maxLength(50),
+  v.maxLength(MAX_ANALYTICS_FILTER_VALUES),
 );
 
-const AnalyticsFilterTagsSchema = v.pipe(v.array(SlugSchema), v.maxLength(50));
+const AnalyticsFilterTagsSchema = v.pipe(
+  v.array(SlugSchema),
+  v.maxLength(MAX_ANALYTICS_FILTER_VALUES),
+);
+
+const AnalyticsFilterProjectUrlsSchema = v.pipe(
+  v.array(ProjectUrlSchema),
+  v.maxLength(MAX_ANALYTICS_FILTER_VALUES),
+);
 
 export const AnalyticsFiltersSchema = v.object({
   providerKind: AnalyticsFilterValuesSchema,
   providerId: AnalyticsFilterValuesSchema,
   model: AnalyticsFilterValuesSchema,
   tag: AnalyticsFilterTagsSchema,
+  projectUrl: AnalyticsFilterProjectUrlsSchema,
 });
 
 export const AnalyticsSummarySchema = v.object({
@@ -95,8 +113,13 @@ export const RequestListSchema = v.object({
   requests: v.array(RequestEventSchema),
 });
 
+export const ProjectListSchema = v.object({
+  projects: v.array(v.string()),
+});
+
 export const analyticsPaths = {
   analytics: "/api/analytics",
+  projects: "/api/analytics/projects",
   requests: "/api/requests",
 };
 
@@ -118,11 +141,14 @@ export type RequestEvent = v.InferOutput<typeof RequestEventSchema>;
 
 export type RequestList = v.InferOutput<typeof RequestListSchema>;
 
+export type ProjectList = v.InferOutput<typeof ProjectListSchema>;
+
 export const EMPTY_ANALYTICS_FILTERS: AnalyticsFilters = {
   providerKind: [],
   providerId: [],
   model: [],
   tag: [],
+  projectUrl: [],
 };
 
 export function hasAnalyticsFilters(filters: AnalyticsFilters): boolean {

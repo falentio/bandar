@@ -471,10 +471,52 @@ describe("runChat cooldowns", () => {
   });
 });
 
-function chatInput(ref: string, stream = false): ChatInput {
+describe("runChat recording", () => {
+  test("stores the project url the client sent", async () => {
+    const harness = await freshHarness(() => openAiSuccess());
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(
+      harness.deps,
+      chatInput("fast", false, "https://example.com/app"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(projectUrls(harness.deps.duck)).toEqual(["https://example.com/app"]);
+  });
+
+  test("leaves the project null when the client sends none", async () => {
+    const harness = await freshHarness(() => openAiSuccess());
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, chatInput("fast"));
+
+    expect(response.status).toBe(200);
+    expect(projectUrls(harness.deps.duck)).toEqual([null]);
+  });
+});
+
+function chatInput(ref: string, stream = false, projectUrl: string | null = null): ChatInput {
   return {
     userId: "user-1",
     apiKeyId: "key-1",
+    projectUrl,
     ref,
     request: { messages: [{ role: "user" as const, content: "hello" }] },
     stream,
@@ -588,8 +630,16 @@ type Seeded = { readonly providerId: string; readonly modelId: string };
 
 function requestEvents(duck: DuckDb): readonly QueryRow[] {
   return duck.query(
-    "SELECT status, error_kind, http_status, reference, model FROM request_events ORDER BY started_at",
+    "SELECT status, error_kind, http_status, reference, model, project_url FROM request_events ORDER BY started_at",
   );
+}
+
+function projectUrls(duck: DuckDb): readonly (string | null)[] {
+  return duck
+    .query("SELECT project_url FROM request_events ORDER BY started_at")
+    .map((row) =>
+      row.project_url === null || row.project_url === undefined ? null : String(row.project_url),
+    );
 }
 
 describe("built-in provider endpoints", () => {

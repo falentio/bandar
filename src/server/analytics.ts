@@ -1,8 +1,10 @@
 import {
   ANALYTICS_FILTER_DIMENSIONS,
+  MAX_ANALYTICS_FILTER_VALUES,
   type AnalyticsFilterDimension,
   type AnalyticsFilters,
 } from "../shared/analytics";
+import { projectUrlOf } from "../shared/project";
 import { tagRefOf } from "../shared/slugs";
 import type { DuckDb, QueryRow } from "./duck/client";
 import { SQL_NULL, sqlInt, sqlText, type SqlValue } from "./duck/client";
@@ -103,11 +105,19 @@ type FilterClause = {
   readonly params: readonly SqlValue[];
 };
 
-const FILTER_COLUMNS: Record<AnalyticsFilterDimension, string> = {
-  providerKind: "provider_kind",
-  providerId: "provider_id",
-  model: "model",
-  tag: "reference",
+type FilterSpec = {
+  readonly column: string;
+  readonly value: (raw: string) => string | null;
+};
+
+const identity = (raw: string): string => raw;
+
+const FILTER_SPECS: Record<AnalyticsFilterDimension, FilterSpec> = {
+  providerKind: { column: "provider_kind", value: identity },
+  providerId: { column: "provider_id", value: identity },
+  model: { column: "model", value: identity },
+  tag: { column: "reference", value: tagRefOf },
+  projectUrl: { column: "project_url", value: projectUrlOf },
 };
 
 export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
@@ -255,6 +265,24 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
   };
 }
 
+export type ProjectUrlsQuery = {
+  readonly userId: string;
+};
+
+export function readProjectUrls(db: DuckDb, query: ProjectUrlsQuery): readonly string[] {
+  const rows = db.query(
+    `SELECT project_url
+     FROM request_events
+     WHERE user_id = ? AND project_url IS NOT NULL
+     GROUP BY project_url
+     ORDER BY max(started_at) DESC, project_url ASC
+     LIMIT ?`,
+    [sqlText(query.userId), sqlInt(MAX_ANALYTICS_FILTER_VALUES)],
+  );
+
+  return rows.map((row) => string(row, "project_url"));
+}
+
 export function readProviderUsage(db: DuckDb, query: ProviderUsageQuery): ProviderUsage {
   const end = startOfUtcDay(query.now ?? new Date());
   const start = new Date(end);
@@ -303,18 +331,25 @@ function filterClause(filters: AnalyticsFilters): FilterClause {
   const params: SqlValue[] = [];
 
   for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
-    const values = filters[dimension];
+    const requested = filters[dimension];
 
-    if (values.length === 0) continue;
+    if (requested.length === 0) continue;
 
+    const spec = FILTER_SPECS[dimension];
     const placeholders: string[] = [];
 
-    for (const value of values) {
+    for (const raw of requested) {
+      const value = spec.value(raw);
+
+      if (value === null) continue;
+
       placeholders.push("?");
-      params.push(sqlText(dimension === "tag" ? tagRefOf(value) : value));
+      params.push(sqlText(value));
     }
 
-    clauses.push(`${FILTER_COLUMNS[dimension]} IN (${placeholders.join(", ")})`);
+    clauses.push(
+      placeholders.length === 0 ? "FALSE" : `${spec.column} IN (${placeholders.join(", ")})`,
+    );
   }
 
   return { clauses, params };

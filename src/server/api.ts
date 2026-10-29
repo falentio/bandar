@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { Elysia } from "elysia";
 import * as v from "valibot";
-import { AnalyticsSchema, RequestListSchema } from "../shared/analytics";
+import { AnalyticsSchema, ProjectListSchema, RequestListSchema } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
 import { API_KEY_HEADER } from "../shared/api-keys";
 import { CooldownListSchema } from "../shared/cooldowns";
@@ -23,7 +23,7 @@ import {
   ProviderParamsSchema,
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
-import { readAnalytics, readProviderUsage, readRequests } from "./analytics";
+import { readAnalytics, readProjectUrls, readProviderUsage, readRequests } from "./analytics";
 import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import { createBackup } from "./backup";
@@ -31,6 +31,7 @@ import { isUniqueViolation } from "./db/client";
 import type { MigrationResult } from "./db/migrate";
 import { readCooldowns } from "./cooldowns";
 import type { DuckDb } from "./duck/client";
+import { createProjectUrlCatalog } from "./project-urls";
 import {
   addProviderCredential,
   addProviderCredentials,
@@ -95,6 +96,7 @@ const RequestsQuerySchema = v.object({
 
 export function createApi(deps: ApiDeps) {
   const pendingLogins = new Map<string, { code: string; expiresAt: number }>();
+  const projectUrls = createProjectUrlCatalog((userId) => readProjectUrls(deps.duck, { userId }));
 
   const app = new Elysia({ prefix: "/api" })
     .onError(({ code, error, path, set }) => {
@@ -677,6 +679,13 @@ export function createApi(deps: ApiDeps) {
       const analytics = readAnalytics(deps.duck, { userId: caller.userId, days, filters });
 
       return v.parse(AnalyticsSchema, analytics);
+    })
+    .get("/analytics/projects", async ({ request }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      return v.parse(ProjectListSchema, { projects: projectUrls.list(caller.userId) });
     })
     .get("/requests", async ({ query, request }) => {
       const caller = await authenticate(deps.auth, request);

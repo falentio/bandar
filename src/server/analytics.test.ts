@@ -2,9 +2,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vite-plus/test";
-import { EMPTY_ANALYTICS_FILTERS, type AnalyticsFilters } from "../shared/analytics";
+import {
+  ANALYTICS_FILTER_DIMENSIONS,
+  EMPTY_ANALYTICS_FILTERS,
+  MAX_ANALYTICS_FILTER_VALUES,
+  type AnalyticsFilterDimension,
+  type AnalyticsFilters,
+} from "../shared/analytics";
 import { tagRefOf } from "../shared/slugs";
-import { readAnalytics, readRequests } from "./analytics";
+import { readAnalytics, readProjectUrls, readRequests } from "./analytics";
 import { DuckDb } from "./duck/client";
 import { applyDuckMigrations } from "./duck/migrate";
 import { recordRequest, type RequestEventInput } from "./router/record";
@@ -44,6 +50,7 @@ function event(overrides: Partial<RequestEventInput>): RequestEventInput {
     providerKind: "openai",
     model: "fast",
     reference: "fast",
+    projectUrl: null,
     upstreamModel: "gpt-fast",
     status: "success",
     httpStatus: 200,
@@ -178,6 +185,7 @@ function filterSeeded(): DuckDb {
       model: "smart",
       reference: "smart",
       upstreamModel: "gemini-smart",
+      projectUrl: "https://dash.acme.test",
       inputTokens: 200,
       outputTokens: 100,
       startedAt: new Date("2026-10-26T09:00:00.000Z"),
@@ -187,6 +195,7 @@ function filterSeeded(): DuckDb {
     db,
     event({
       reference: tagRefOf("failover"),
+      projectUrl: "https://acme.test/app",
       inputTokens: 300,
       outputTokens: 150,
       startedAt: new Date("2026-10-25T09:00:00.000Z"),
@@ -196,6 +205,14 @@ function filterSeeded(): DuckDb {
 
   return db;
 }
+
+const PROBE_VALUE: Record<AnalyticsFilterDimension, string> = {
+  providerKind: "absent",
+  providerId: "absent",
+  model: "absent",
+  tag: "absent",
+  projectUrl: "https://absent.test",
+};
 
 function readFiltered(db: DuckDb, values: Partial<AnalyticsFilters>) {
   return readAnalytics(db, {
@@ -236,6 +253,75 @@ describe("readAnalytics filters", () => {
 
     expect(analytics.summary.requests).toBe(1);
     expect(analytics.summary.totalTokens).toBe(450);
+  });
+
+  test("filters by project url", () => {
+    const analytics = readFiltered(filterSeeded(), { projectUrl: ["https://acme.test/app"] });
+
+    expect(analytics.summary.requests).toBe(1);
+    expect(analytics.summary.totalTokens).toBe(450);
+    expect(analytics.models).toHaveLength(1);
+    expect(analytics.models[0]?.model).toBe("fast");
+  });
+
+  test("normalizes the project filter value before it reaches the column", () => {
+    const analytics = readFiltered(filterSeeded(), { projectUrl: ["https://ACME.test/app/"] });
+
+    expect(analytics.summary.requests).toBe(1);
+  });
+
+  test("matches any project url within one dimension", () => {
+    const analytics = readFiltered(filterSeeded(), {
+      projectUrl: ["https://acme.test/app", "https://dash.acme.test"],
+    });
+
+    expect(analytics.summary.requests).toBe(2);
+  });
+
+  test("intersects the project filter with another dimension", () => {
+    const both = readFiltered(filterSeeded(), {
+      tag: ["failover"],
+      projectUrl: ["https://acme.test/app"],
+    });
+
+    const disjoint = readFiltered(filterSeeded(), {
+      model: ["fast"],
+      projectUrl: ["https://dash.acme.test"],
+    });
+
+    expect(both.summary.requests).toBe(1);
+    expect(both.summary.totalTokens).toBe(450);
+    expect(disjoint.summary.requests).toBe(0);
+  });
+
+  test("keeps every day when the project filter matches nothing", () => {
+    const analytics = readFiltered(filterSeeded(), { projectUrl: ["https://other.test"] });
+
+    expect(analytics.summary.requests).toBe(0);
+    expect(analytics.daily).toHaveLength(30);
+    expect(analytics.daily.every((day) => day.requests === 0)).toBe(true);
+  });
+
+  test("every filter dimension names a column that exists", () => {
+    const db = filterSeeded();
+
+    for (const dimension of ANALYTICS_FILTER_DIMENSIONS) {
+      const analytics = readAnalytics(db, {
+        userId: "user-1",
+        days: 30,
+        filters: { ...EMPTY_ANALYTICS_FILTERS, [dimension]: [PROBE_VALUE[dimension]] },
+        now: NOW,
+      });
+
+      expect(analytics.daily).toHaveLength(30);
+    }
+  });
+
+  test("matches nothing when a dimension has no usable value", () => {
+    const analytics = readFiltered(filterSeeded(), { projectUrl: ["not a url"] });
+
+    expect(analytics.summary.requests).toBe(0);
+    expect(analytics.daily).toHaveLength(30);
   });
 
   test("intersects two dimensions", () => {
@@ -280,6 +366,82 @@ describe("readAnalytics filters", () => {
     expect(analytics.models).toHaveLength(1);
     expect(analytics.models[0]?.model).toBe("fast");
     expect(analytics.models[0]?.requests).toBe(1);
+  });
+});
+
+describe("readProjectUrls", () => {
+  test("lists each url once, most recently used first", () => {
+    const db = seeded();
+
+    recordRequest(
+      db,
+      event({
+        projectUrl: "https://acme.test/app",
+        startedAt: new Date("2026-10-25T09:00:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        projectUrl: "https://dash.acme.test",
+        startedAt: new Date("2026-10-26T09:00:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        projectUrl: "https://acme.test/app",
+        startedAt: new Date("2026-10-27T09:00:00.000Z"),
+      }),
+    );
+    recordRequest(db, event({ projectUrl: null }));
+
+    expect(readProjectUrls(db, { userId: "user-1" })).toEqual([
+      "https://acme.test/app",
+      "https://dash.acme.test",
+    ]);
+  });
+
+  test("orders urls used at the same time by name", () => {
+    const db = seeded();
+    const startedAt = new Date("2026-10-27T09:00:00.000Z");
+
+    recordRequest(db, event({ projectUrl: "https://dash.acme.test", startedAt }));
+    recordRequest(db, event({ projectUrl: "https://acme.test/app", startedAt }));
+
+    expect(readProjectUrls(db, { userId: "user-1" })).toEqual([
+      "https://acme.test/app",
+      "https://dash.acme.test",
+    ]);
+  });
+
+  test("never returns another user's urls", () => {
+    const db = seeded();
+
+    recordRequest(db, event({ projectUrl: "https://acme.test/app" }));
+    recordRequest(db, event({ userId: "user-2", projectUrl: "https://other.test" }));
+
+    expect(readProjectUrls(db, { userId: "user-1" })).toEqual(["https://acme.test/app"]);
+  });
+
+  test("caps the list at the values a filter accepts", () => {
+    const db = seeded();
+
+    for (let index = 0; index <= MAX_ANALYTICS_FILTER_VALUES; index += 1) {
+      recordRequest(
+        db,
+        event({
+          projectUrl: "https://p" + String(index).padStart(2, "0") + ".test",
+          startedAt: new Date(Date.UTC(2026, 9, 1, 0, index)),
+        }),
+      );
+    }
+
+    const urls = readProjectUrls(db, { userId: "user-1" });
+
+    expect(urls).toHaveLength(MAX_ANALYTICS_FILTER_VALUES);
+    expect(urls[0]).toBe("https://p50.test");
+    expect(urls).not.toContain("https://p00.test");
   });
 });
 

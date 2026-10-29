@@ -17,6 +17,7 @@ import * as v from "valibot";
 import { BINARY } from "./binary";
 import {
   AnalyticsSchema,
+  ProjectListSchema,
   RequestListSchema,
   analyticsPaths,
   type Analytics,
@@ -45,6 +46,7 @@ import {
   type ProviderModelEditInput,
 } from "../src/shared/providers";
 import { CHARS_PER_TOKEN } from "../src/server/router/anthropic-wire";
+import { PROJECT_URL_HEADER } from "../src/shared/project";
 import { TagListSchema, tagPaths } from "../src/shared/tags";
 
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
@@ -725,6 +727,57 @@ try {
     assert.equal(none.summary.requests, 0);
     assert.equal(none.daily.length, 30);
   });
+  await check("GET /api/analytics filters by the project url header", async () => {
+    const before = await getJson(`${analyticsPaths.analytics}?days=30`, AnalyticsSchema, 200);
+
+    const tagged = await fetch(new URL("/v1/chat/completions", origin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [PROJECT_URL_HEADER]: "https://Example.com/app/?utm_source=smoke#top",
+        ...bearer(),
+      },
+      body: JSON.stringify(chat("fast", false, "project")),
+    });
+
+    assert.equal(tagged.status, 200);
+
+    const untagged = await fetch(new URL("/v1/chat/completions", origin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [PROJECT_URL_HEADER]: "not a url",
+        ...bearer(),
+      },
+      body: JSON.stringify(chat("fast", false, "garbage")),
+    });
+
+    assert.equal(untagged.status, 200);
+
+    const projects = await getJson(analyticsPaths.projects, ProjectListSchema, 200);
+
+    assert.deepEqual(projects, { projects: ["https://example.com/app"] });
+
+    const after = await getJson(`${analyticsPaths.analytics}?days=30`, AnalyticsSchema, 200);
+
+    assert.equal(after.summary.requests, before.summary.requests + 2);
+
+    const filtered = await getJson(
+      `${analyticsPaths.analytics}?days=30&projectUrl=${encodeURIComponent("https://example.com/app")}`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(filtered.summary.requests, 1);
+
+    const rejected = await fetch(
+      new URL(`${analyticsPaths.analytics}?days=30&projectUrl=not-a-url`, origin),
+      { headers: sessionHeaders() },
+    );
+
+    assert.equal(rejected.status, 422);
+  });
+
   await check("POST /api/providers cannot create another built-in provider", async () => {
     const response = await post(providerPaths.list, {
       name: "Another Kilo",

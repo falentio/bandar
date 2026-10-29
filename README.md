@@ -6,9 +6,8 @@ request to that provider's wire, streams the answer back, and records one analyt
 event per attempt in an embedded DuckDB database.
 
 The dashboard covers providers, model tags, requests, cooldowns, API keys, CLI setup, and usage:
-tokens, time to first token, tokens per second, error rate, p95 latency, daily
-tokens, and a 30-day average. Provider credentials are sealed before they reach
-SQLite.
+tokens, time to first token, tokens per second, error rate, p95 latency, daily tokens, and a
+30-day average. Provider credentials are sealed before they reach SQLite.
 
 ## Why it exists
 
@@ -40,9 +39,12 @@ and `google`, cover a custom upstream added from the dashboard without changing 
 
 **Analytics that survive a deletion.** Every attempt writes one row to DuckDB:
 tokens, time to first token, duration, tokens per second, the resolved address, and the
-string the client sent. The row is denormalized, so deleting a provider keeps its
-history. Each failure that flags a subject also writes one row to the cooldown
-history, which the Errors page lists.
+string the client sent. A client names the project of an inference with
+`x-bandar-project-url: https://app.example.com`; the row keeps that url's origin and
+path, and the Overview page filters on it. A value that is not an http or https url is
+ignored, so a typo never fails a request. The row is denormalized, so deleting a
+provider keeps its history. Each failure that flags a subject also writes one row to
+the cooldown history, which the Errors page lists.
 
 **One binary at runtime.** `bun build --compile` embeds the React client, the SQLite
 migrations, the DuckDB migrations, and the DuckDB shared library. The binary serves

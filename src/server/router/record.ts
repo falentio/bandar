@@ -11,6 +11,7 @@ export type RequestEventInput = {
   readonly providerKind: string;
   readonly model: string;
   readonly reference: string;
+  readonly projectUrl: string | null;
   readonly upstreamModel: string;
   readonly status: RequestOutcome;
   readonly httpStatus: number | null;
@@ -46,10 +47,10 @@ export function recordRequest(db: DuckDb, event: RequestEventInput): void {
 
   db.run(
     `INSERT INTO request_events (
-       id, user_id, api_key_id, provider_id, provider_kind, model, reference, upstream_model,
-       status, http_status, error_kind, streamed, input_tokens, output_tokens,
+       id, user_id, api_key_id, provider_id, provider_kind, model, reference, project_url,
+       upstream_model, status, http_status, error_kind, streamed, input_tokens, output_tokens,
        total_tokens, cost_usd, ttft_ms, duration_ms, tokens_per_second, started_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP)`,
     [
       sqlText(crypto.randomUUID()),
       sqlText(event.userId),
@@ -58,6 +59,7 @@ export function recordRequest(db: DuckDb, event: RequestEventInput): void {
       sqlText(event.providerKind),
       sqlText(event.model),
       sqlText(event.reference),
+      event.projectUrl === null ? SQL_NULL : sqlText(event.projectUrl),
       sqlText(event.upstreamModel),
       sqlText(event.status),
       event.httpStatus === null ? SQL_NULL : sqlInt(event.httpStatus),

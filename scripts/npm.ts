@@ -255,6 +255,7 @@ async function preflight(staged: readonly string[]): Promise<void> {
   const reported = reportedVersion();
 
   if (reported.kind === "unreadable") problems.push("the linux release binary would not report its version");
+
   if (reported.kind === "ok" && reported.value !== version) {
     problems.push(`the release binary reports ${reported.value}, not ${version}`);
   }

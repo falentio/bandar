@@ -3,6 +3,7 @@ import { parseCompat, type Compat, type ProviderKind } from "../../shared/provid
 import { TAG_REF_PREFIX, providerRefOf, tagRefOf } from "../../shared/slugs";
 import { providerCredentials, providerModels, providers, tagModels, tags } from "../db/schema";
 import type { ProviderDeps } from "../providers";
+import { isBuiltInProviderKind, type ProviderEndpoints } from "../providers/endpoints";
 
 export type ResolvedAttempt = {
   readonly slug: string;
@@ -70,9 +71,13 @@ const attemptColumns = {
 };
 
 /** A provider with no credential row still answers, with an empty key. */
-function attemptsOf(rows: readonly AttemptRow[]): readonly ResolvedAttempt[] {
+function attemptsOf(
+  rows: readonly AttemptRow[],
+  endpoints: ProviderEndpoints,
+): readonly ResolvedAttempt[] {
   return rows.map((row) => ({
     ...row,
+    baseUrl: isBuiltInProviderKind(row.kind) ? endpoints[row.kind].baseUrl : row.baseUrl,
     compat: parseCompat(row.compat),
     credentialLabel: row.credentialLabel ?? "",
     sealedKey: row.sealedKey ?? "",
@@ -98,7 +103,8 @@ export async function resolvePlan(
     )
     .orderBy(asc(providerCredentials.priority));
 
-  if (slugRows.length > 0) return { ref, tag: null, attempts: attemptsOf(slugRows) };
+  if (slugRows.length > 0)
+    return { ref, tag: null, attempts: attemptsOf(slugRows, deps.endpoints) };
 
   if (ref.startsWith(TAG_REF_PREFIX)) {
     const slug = ref.slice(TAG_REF_PREFIX.length);
@@ -122,7 +128,7 @@ export async function resolvePlan(
       .where(and(eq(tagModels.tagId, tag.id), eq(providerModels.enabled, true)))
       .orderBy(asc(tagModels.priority), asc(providerCredentials.priority));
 
-    return { ref, tag: slug, attempts: attemptsOf(rows) };
+    return { ref, tag: slug, attempts: attemptsOf(rows, deps.endpoints) };
   }
 
   const slash = ref.indexOf("/");
@@ -144,7 +150,7 @@ export async function resolvePlan(
     )
     .orderBy(asc(providerCredentials.priority));
 
-  return { ref, tag: null, attempts: attemptsOf(rows) };
+  return { ref, tag: null, attempts: attemptsOf(rows, deps.endpoints) };
 }
 
 export async function listModelRefs(

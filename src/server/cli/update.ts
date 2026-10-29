@@ -10,18 +10,18 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import * as v from "valibot";
-import { parseConfig } from "../config";
+import { loadConfig, type Config } from "../config";
 import { version as installedVersion } from "../generated/version";
+import { settingsIo } from "../settings-io";
 import type { Commands, Env } from "./command";
 import { detectInstall } from "./install-source";
 
 const COMMAND = "update";
 const REPOSITORY = "falentio/bandar";
-const PUBLIC_WEB = `https://github.com/${REPOSITORY}`;
 const INSTALLER = "install.sh from https://github.com/falentio/bandar";
 
 const TOKEN_REQUIRED =
-  "BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN";
+  "update.apiUrl reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN";
 
 const TRUSTED_ASSET_HOSTS = [
   "api.github.com",
@@ -80,6 +80,8 @@ export type UpdateInvocation =
   | { readonly kind: "invalid"; readonly reason: string };
 
 export type UpdateRun = {
+  readonly configDir: string;
+  readonly update: Config["update"];
   readonly env: Env;
   readonly argv: readonly string[];
   readonly installed: string;
@@ -128,10 +130,6 @@ type Prepared =
   | { readonly kind: "stopped"; readonly message: string }
   | { readonly kind: "failed"; readonly reason: string };
 
-type ConfigDirectory =
-  | { readonly kind: "dir"; readonly directory: string }
-  | { readonly kind: "error"; readonly reason: string };
-
 export function parseUpdateFlags(argv: readonly string[]): UpdateInvocation {
   let check = false;
   let archive: string | null = null;
@@ -169,23 +167,6 @@ export function githubToken(env: Env): string | null {
   }
 
   return null;
-}
-
-/** The GitHub web origin the anonymous download reads. A mirror can stand in for it offline. */
-export function releaseWebUrl(env: Env): string {
-  const override = env.BANDAR_RELEASE_WEB_URL?.trim();
-
-  return override !== undefined && override !== "" ? override : PUBLIC_WEB;
-}
-
-/**
- * The latest-release API feed of a private fork. Setting it is what opts into the token flow; a
- * public download never reads it, so a public install never needs a credential.
- */
-export function releaseApiUrl(env: Env): string | null {
-  const override = env.BANDAR_RELEASE_API_URL?.trim();
-
-  return override !== undefined && override !== "" ? override : null;
 }
 
 export function latestTagUrl(web: string): string {
@@ -286,7 +267,21 @@ export async function runUpdate(run: UpdateRun): Promise<number> {
 }
 
 export async function run(args: readonly string[], env: Env): Promise<number> {
+  let config: Config;
+
+  try {
+    config = loadConfig(env, settingsIo);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "the environment could not be read";
+
+    console.error(`bandar: ${message.replace(/\s+/gu, " ")}`);
+
+    return 1;
+  }
+
   return runUpdate({
+    configDir: config.configDir,
+    update: config.update,
     env,
     argv: args,
     installed: installedVersion,
@@ -341,15 +336,7 @@ async function reportVersions(run: UpdateRun): Promise<number> {
 }
 
 async function update(run: UpdateRun, archive: string | null): Promise<number> {
-  const config = readConfigDirectory(run.env);
-
-  if (config.kind === "error") {
-    run.stderr(`bandar: ${config.reason}`);
-
-    return 1;
-  }
-
-  const state = detectInstall(config.directory, (path) => readFileSync(path, "utf8"));
+  const state = detectInstall(run.configDir, (path) => readFileSync(path, "utf8"));
 
   if (state.kind === "unknown") {
     run.stderr(`bandar: ${state.reason}; reinstall with ${INSTALLER} to let bandar update itself`);
@@ -476,7 +463,7 @@ async function installLatest(
 
 /** Reads the latest version without a credential, or through the API feed when one is configured. */
 async function lookupLatest(run: UpdateRun): Promise<LatestLookup> {
-  const api = releaseApiUrl(run.env);
+  const api = run.update.apiUrl;
 
   if (api !== null) {
     const token = githubToken(run.env);
@@ -486,7 +473,7 @@ async function lookupLatest(run: UpdateRun): Promise<LatestLookup> {
     return lookupApiLatest(run.send, token, api);
   }
 
-  return lookupPublicLatest(run.send, releaseWebUrl(run.env));
+  return lookupPublicLatest(run.send, run.update.webUrl);
 }
 
 async function lookupPublicLatest(send: HttpSend, web: string): Promise<LatestLookup> {
@@ -755,22 +742,6 @@ function sudoCommand(argv: readonly string[]): string {
 
 function quoteArgument(argument: string): string {
   return /\s/u.test(argument) ? `"${argument}"` : argument;
-}
-
-function readConfigDirectory(env: Env): ConfigDirectory {
-  try {
-    const config = parseConfig(env);
-
-    return { kind: "dir", directory: config.configDir };
-  } catch (error) {
-    return {
-      kind: "error",
-      reason: (error instanceof Error
-        ? error.message
-        : "the environment could not be read"
-      ).replace(/\s+/gu, " "),
-    };
-  }
 }
 
 function parseVersion(text: string): ParsedVersion | null {

@@ -88,6 +88,7 @@ export type ModelCatalogEntry = {
 
 export type CatalogRequest = {
   readonly baseUrl: string;
+  readonly catalogUrl: string | null;
   /** Read lazily so a public catalog never decrypts a saved credential. */
   readonly credential: () => Promise<Credential | null>;
   readonly signal: AbortSignal;
@@ -107,14 +108,20 @@ export type DevicePollResult =
   | { readonly state: "pending" }
   | { readonly state: "connected"; readonly credential: Credential };
 
+export type ConnectorInput = {
+  readonly signal: AbortSignal;
+  readonly authUrl: string;
+};
+
 export interface OAuthConnector {
-  start(signal: AbortSignal): Promise<DeviceLogin>;
-  poll(code: string, signal: AbortSignal): Promise<DevicePollResult>;
+  start(input: ConnectorInput): Promise<DeviceLogin>;
+  poll(code: string, input: ConnectorInput): Promise<DevicePollResult>;
 }
 
 export type CredentialRenewal = {
   readonly credential: OAuthCredential;
   readonly signal: AbortSignal;
+  readonly authUrl: string;
 };
 
 /** Rotates an expiring OAuth credential before the request that needs it. */
@@ -126,7 +133,6 @@ export interface CredentialRenewer {
 export type BuiltInProviderSettings = {
   readonly name: string;
   readonly slug: string;
-  readonly baseUrl: () => string;
 };
 
 export type WireRoute<K extends ProviderKind = ProviderKind> = {

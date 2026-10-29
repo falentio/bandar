@@ -30,6 +30,7 @@ import {
   updateProviderModel,
   type ProviderDeps,
 } from "./providers";
+import { DEFAULT_PROVIDER_ENDPOINTS } from "./providers/endpoints";
 import { assignProviderSlugs } from "./providers/seeding";
 import {
   addProviderCredential,
@@ -1206,5 +1207,9 @@ function freshDb(): DatabaseHandle {
 }
 
 function providerDeps(handle: DatabaseHandle): Promise<ProviderDeps> {
-  return createSealer("test-secret").then((sealer) => ({ db: handle.db, sealer }));
+  return createSealer("test-secret").then((sealer) => ({
+    db: handle.db,
+    sealer,
+    endpoints: DEFAULT_PROVIDER_ENDPOINTS,
+  }));
 }

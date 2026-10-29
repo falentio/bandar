@@ -149,6 +149,14 @@ relative or blank value exits 1 before anything is downloaded.
 The platform pair comes from `uname`. Any pair other than Linux or Windows on x64 or arm64 exits 1
 with one line before anything is downloaded.
 
+Those variables configure the installer, not the installed server. The binary reads its runtime
+settings from `config.json` under `BANDAR_HOME`, which defaults to `~/.bandar`, and writes the
+schema and the file's `$schema` key on its first read. The installer's
+`BANDAR_RELEASE_WEB_URL` and `BANDAR_RELEASE_API_URL` are not written anywhere. To point
+`bandar update` at the same mirror, set `update.webUrl` or `update.apiUrl` in that file, or
+export the variable when the command runs. Read
+[`README.md`](../README.md#configuration) for the settings.
+
 ## Verify a download by hand
 
 Assets are named `bandar-<version>-<os>-<arch>`, with `.exe` on Windows only. Each has a sibling

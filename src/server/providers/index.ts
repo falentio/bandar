@@ -18,13 +18,18 @@ import { isUniqueViolation, type Db } from "../db/client";
 import { providerCredentials, providerModels, providers } from "../db/schema";
 import type { Sealer } from "../seal";
 import { renumberTagPriorities } from "../tags";
+import type { ProviderEndpoints } from "./endpoints";
 import { compatsOf, definitionFor, reservedProviderSlugs } from "./registry";
 import { ensureBuiltInProviders } from "./seeding";
 import type { ModelCatalogEntry } from "./types";
 
 export { definitionFor };
 
-export type ProviderDeps = { readonly db: Db; readonly sealer: Sealer };
+export type ProviderDeps = {
+  readonly db: Db;
+  readonly sealer: Sealer;
+  readonly endpoints: ProviderEndpoints;
+};
 
 const BUILT_IN_RANK = new Map<string, number>(
   BUILT_IN_PROVIDER_KINDS.map((kind, index) => [kind, index] as const),
@@ -48,7 +53,7 @@ type ProviderPatch = {
 };
 
 export async function listProviders(deps: ProviderDeps, userId: string): Promise<ProviderList> {
-  await ensureBuiltInProviders(deps.db, userId);
+  await ensureBuiltInProviders(deps, userId);
 
   const providerRows = await deps.db
     .select()
@@ -176,7 +181,7 @@ export async function createProvider(
   userId: string,
   input: ProviderCreateInput,
 ): Promise<Provider> {
-  await ensureBuiltInProviders(deps.db, userId);
+  await ensureBuiltInProviders(deps, userId);
 
   const id = crypto.randomUUID();
   const now = new Date();
@@ -237,7 +242,7 @@ export async function updateProvider(
       input.baseUrl !== existing.baseUrl ||
       (input.slug !== undefined && input.slug !== existing.slug))
   ) {
-    throw new ProviderRuleError("built-in provider settings come from the code");
+    throw new ProviderRuleError("built-in provider settings come from config.json");
   }
 
   if (existing.origin === "custom" && definitionFor(input.kind).builtIn !== undefined) {

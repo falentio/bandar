@@ -3,6 +3,7 @@ import type { Credential, OAuthCredential } from "../credential";
 import { providerCredentials } from "../db/schema";
 import type { ResolvedAttempt } from "../router/resolve";
 import { readCredential, type ProviderDeps } from ".";
+import { endpointFor } from "./endpoints";
 import { definitionFor } from "./registry";
 import { UpstreamError } from "./types";
 import type { CredentialRenewer } from "./types";
@@ -22,15 +23,16 @@ export async function freshCredential(
   if (attempt.credentialId === null || stored.authMode !== "oauth") return stored;
 
   const renewer = definitionFor(attempt.kind).renew;
+  const authUrl = endpointFor(deps.endpoints, attempt.kind)?.authUrl ?? null;
 
-  if (renewer === undefined || !renewer.due(stored, Date.now())) return stored;
+  if (renewer === undefined || authUrl === null || !renewer.due(stored, Date.now())) return stored;
 
   const credentialId = attempt.credentialId;
   const pending = inFlight.get(credentialId);
 
   if (pending !== undefined) return pending;
 
-  const renewal = renewOnce(deps, attempt, credentialId, stored, renewer).finally(() => {
+  const renewal = renewOnce(deps, attempt, credentialId, stored, renewer, authUrl).finally(() => {
     inFlight.delete(credentialId);
   });
 
@@ -45,6 +47,7 @@ async function renewOnce(
   credentialId: string,
   current: OAuthCredential,
   renewer: CredentialRenewer,
+  authUrl: string,
 ): Promise<Credential> {
   const stored = await sealedCredential(deps, credentialId);
 
@@ -61,6 +64,7 @@ async function renewOnce(
     renewed = await renewer.renew({
       credential: current,
       signal: AbortSignal.timeout(RENEWAL_TIMEOUT_MS),
+      authUrl,
     });
   } catch (error) {
     // A rotating token is spent before the portal answers. If another process

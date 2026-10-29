@@ -4,7 +4,7 @@ import { createAuth } from "./auth";
 import { parseArgs } from "./cli/args";
 import type { Env } from "./cli/command";
 import { createCli, renderUsage } from "./cli/registry";
-import { loadConfig } from "./config";
+import { loadConfig, warnIfAuthSecretUnset } from "./config";
 import { openDatabase } from "./db/client";
 import { applyMigrations } from "./db/migrate";
 import { DuckDb } from "./duck/client";
@@ -42,6 +42,8 @@ export async function main(env: Env, argv: readonly string[]): Promise<number> {
 }
 
 async function startServer(env: Env): Promise<void> {
+  warnIfAuthSecretUnset(env);
+
   const config = loadConfig(env, settingsIo);
 
   const { sqlite, db } = openDatabase(config.databasePath);
@@ -59,7 +61,18 @@ async function startServer(env: Env): Promise<void> {
   const auth = createAuth(db, config);
   const sealer = await createSealer(config.authSecret);
 
-  const app = createApp({ db, sqlite, duck, sealer, client, migration, duckMigration, auth });
+  const app = createApp({
+    db,
+    sqlite,
+    duck,
+    sealer,
+    client,
+    migration,
+    duckMigration,
+    auth,
+    endpoints: config.providers,
+  });
+
   const server = Bun.serve({ hostname: config.host, port: config.port, fetch: app.handle });
 
   console.log(

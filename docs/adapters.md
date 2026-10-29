@@ -297,11 +297,13 @@ A built-in provider takes its name, slug, and default base URL from
 for every account by `ensureBuiltInProviders`. There are seven: Kilo Code,
 Token Harbor, Yeta, River, Nous Portal, Hyper, and OpenCode Go. Each `index.ts`
 bundles its adapter with whatever else the provider has: a catalog for all seven,
-an `OAuthConnector` for Kilo Code and Nous Portal, a `CredentialRenewer` for
-Nous Portal, and an env-aware `builtIn.baseUrl()`. The definition reads that function at seeding
-time, so `BANDAR_TOKENHARBOR_API` and its siblings can point the seeded rows at
-another origin. Built-in rows cannot be created through the provider API, edited
-in Settings, or removed; they reappear on the next listing if deleted directly.
+an `OAuthConnector` for Kilo Code and Nous Portal, and a `CredentialRenewer` for
+Nous Portal. The endpoints are not part of the definition: seeding reads the
+resolved config's `baseUrl` for the kind and updates the row in place when it
+changed. The gateway reads the resolved endpoint directly, so an edit reaches it
+on the next request, and the seeded row catches up on the next listing. Built-in rows
+cannot be created through the provider API, edited in Settings, or removed; they
+reappear on the next listing if deleted directly.
 
 Seeding is idempotent per kind. If a custom row already owns a slug that has
 since become reserved, the built-in takes the next free slug from
@@ -315,20 +317,67 @@ Nous Portal, and Hyper build the shared OpenAI adapter, and their `index.ts` add
 only the catalog, the login, or the renewal that is theirs. Kilo Code needs its
 own adapter headers, and OpenCode Go is the one built-in that serves four wires.
 
+## Endpoints
+
+`src/server/providers/endpoints.ts` is the one table of provider host names. Each
+built-in kind declares the fields it uses, and each field carries the environment
+variable that used to feed it, the built-in default, and the help text the
+generated schema shows:
+
+| kind          | field        | environment variable         | mount appended    |
+| ------------- | ------------ | ---------------------------- | ----------------- |
+| `kilocode`    | `baseUrl`    | `BANDAR_KILOCODE_API`        | `/api/openrouter` |
+| `kilocode`    | `catalogUrl` | `BANDAR_KILOCODE_MODELS_URL` | none              |
+| `tokenharbor` | `baseUrl`    | `BANDAR_TOKENHARBOR_API`     | `/v1`             |
+| `yeta`        | `baseUrl`    | `BANDAR_YETA_API`            | `/v1`             |
+| `river`       | `baseUrl`    | `BANDAR_RIVER_API`           | `/v1`             |
+| `river`       | `catalogUrl` | `BANDAR_RIVER_PRICING_URL`   | none              |
+| `nous`        | `baseUrl`    | `BANDAR_NOUS_API`            | `/v1`             |
+| `nous`        | `authUrl`    | `BANDAR_NOUS_PORTAL`         | none              |
+| `hyper`       | `baseUrl`    | `BANDAR_HYPER_API`           | `/v1`             |
+| `opencode`    | `baseUrl`    | `BANDAR_OPENCODE_API`        | `/inference`      |
+
+The config resolver reads `config.json` first, then the variable, then the
+default. A file value is the full URL and is used as written. A variable is an
+origin, so the mount completes it: `BANDAR_HYPER_API=http://127.0.0.1:9000/hyper`
+resolves to `http://127.0.0.1:9000/hyper/v1`. `ProviderDeps.endpoints` carries
+the result as a record of `{ baseUrl, catalogUrl, authUrl }`, with `null` for a
+field the kind does not have. `endpointFor` returns the record for a built-in kind
+and `null` for a generic one.
+
+Kilocode's `authUrl` is derived from its resolved base URL, because its login and
+its inference API share a host: the `/api/openrouter` suffix is stripped, and a
+base URL without that suffix uses its own origin.
+
+```ts
+export type ProviderEndpoint = {
+  readonly baseUrl: string;
+  readonly catalogUrl: string | null;
+  readonly authUrl: string | null;
+};
+
+export type ProviderEndpoints = Record<BuiltInProviderKind, ProviderEndpoint>;
+```
+
 ## Catalogs
 
-`ProviderCatalog` receives the base URL, an abort signal, and the credential the
-chain would try first:
+`ProviderCatalog` receives the base URL, the catalog URL, an abort signal, and the
+credential the chain would try first:
 
 ```ts
 export type CatalogRequest = {
   readonly baseUrl: string;
+  readonly catalogUrl: string | null;
   readonly credential: () => Promise<Credential | null>;
   readonly signal: AbortSignal;
 };
 
 export type ProviderCatalog = (request: CatalogRequest) => Promise<readonly ModelCatalogEntry[]>;
 ```
+
+A kind with a catalog but no separate document ignores `catalogUrl` and reads
+`{baseUrl}/models`. Kilo Code and River read the document when it is set and fall
+back to their built-in URL when the config leaves it out.
 
 The refresh route passes a function that calls `readFirstCredential`, so a keyed
 import uses the same key the first chat attempt would. A public catalog never
@@ -358,8 +407,9 @@ worth $2 per million and the output price is the input price times
 null prices. Prices are the default group's; a key in another group pays that
 group's `group_ratio`, which the import does not apply. The public pricing URL defaults to
 `https://console.river.ai/api/public/pricing` and is overridden with
-`BANDAR_RIVER_PRICING_URL`; when that document cannot be read, River falls back
-to its keyed `/models` list with null prices. Nous Portal keeps only models whose
+`providers.river.catalogUrl` in `config.json`, or with `BANDAR_RIVER_PRICING_URL`
+when the file leaves it out. When that document cannot be read, River falls back to
+its keyed `/models` list with null prices. Nous Portal keeps only models whose
 `architecture.output_modalities` includes `text`.
 
 Hyper quotes per-million-token prices and serves one wire, so its catalog imports

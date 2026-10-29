@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, describe, expect, test, vi } from "vite-plus/test";
 import { Commands } from "./command";
 import { detectInstall } from "./install-source";
 import {
@@ -21,10 +21,9 @@ import {
   parseChecksum,
   parseUpdateFlags,
   register,
-  releaseApiUrl,
   releaseAssetUrl,
   releaseNames,
-  releaseWebUrl,
+  run,
   runUpdate,
   versionFromTagLocation,
   type HttpSend,
@@ -86,7 +85,6 @@ type Fixture = {
   readonly directory: string;
   readonly configDir: string;
   readonly target: string;
-  readonly env: Record<string, string | undefined>;
 };
 
 const fixtureOf = (source: string | null): Fixture => {
@@ -100,7 +98,7 @@ const fixtureOf = (source: string | null): Fixture => {
 
   if (source !== null) writeFileSync(join(configDir, "install.json"), manifestText(source, target));
 
-  return { directory, configDir, target, env: { BANDAR_CONFIG_DIR: configDir } };
+  return { directory, configDir, target };
 };
 
 type ServeOptions = {
@@ -183,8 +181,9 @@ const apiServing = (options: ServeOptions, platform = "linux"): HttpSend => {
   };
 };
 
-const PUBLIC_ENV = { BANDAR_RELEASE_WEB_URL: WEB };
-const API_ENV = { BANDAR_RELEASE_API_URL: API_FEED, BANDAR_GITHUB_TOKEN: TOKEN };
+const PUBLIC_UPDATE = { webUrl: WEB, apiUrl: null };
+const API_UPDATE = { webUrl: WEB, apiUrl: API_FEED };
+const TOKEN_ENV = { BANDAR_GITHUB_TOKEN: TOKEN };
 
 type Request = {
   readonly url: string;
@@ -201,7 +200,8 @@ type Recorded = {
 };
 
 type RunOptions = {
-  readonly env: Record<string, string | undefined>;
+  readonly update?: UpdateRun["update"];
+  readonly env?: Record<string, string | undefined>;
   readonly argv?: readonly string[];
   readonly installed?: string;
   readonly platform?: string;
@@ -226,7 +226,9 @@ const runOf = (fixture: Fixture, options: RunOptions): Recorded => {
     errors,
     requests,
     run: {
-      env: { ...fixture.env, ...options.env },
+      configDir: fixture.configDir,
+      update: options.update ?? PUBLIC_UPDATE,
+      env: options.env ?? {},
       argv: options.argv ?? [],
       installed: options.installed ?? "0.1.0",
       platform: options.platform ?? "linux",
@@ -376,14 +378,7 @@ describe("versions and assets", () => {
     expect(githubToken({ BANDAR_GITHUB_TOKEN: "  ", GITHUB_TOKEN: "third" })).toBe("third");
   });
 
-  test("the public download reads github.com unless an override names another origin", () => {
-    expect(releaseWebUrl({})).toBe("https://github.com/falentio/bandar");
-    expect(releaseWebUrl({ BANDAR_RELEASE_WEB_URL: "" })).toBe(
-      "https://github.com/falentio/bandar",
-    );
-    expect(releaseWebUrl({ BANDAR_RELEASE_WEB_URL: ` http://127.0.0.1:8080/bandar ` })).toBe(
-      "http://127.0.0.1:8080/bandar",
-    );
+  test("the tag and asset URLs hang off the release web base", () => {
     expect(latestTagUrl("http://127.0.0.1:8080/bandar")).toBe(
       "http://127.0.0.1:8080/bandar/releases/latest",
     );
@@ -393,13 +388,6 @@ describe("versions and assets", () => {
     expect(
       releaseAssetUrl("http://127.0.0.1:8080/bandar/", "0.2.0", "bandar-0.2.0-linux-x64"),
     ).toBe("http://127.0.0.1:8080/bandar/releases/download/v0.2.0/bandar-0.2.0-linux-x64");
-  });
-
-  test("only BANDAR_RELEASE_API_URL opts into the API feed", () => {
-    expect(releaseApiUrl({})).toBeNull();
-    expect(releaseApiUrl({ BANDAR_RELEASE_API_URL: "" })).toBeNull();
-    expect(releaseApiUrl({ BANDAR_RELEASE_API_URL: "  " })).toBeNull();
-    expect(releaseApiUrl({ BANDAR_RELEASE_API_URL: API_FEED })).toBe(API_FEED);
   });
 
   test("the latest tag comes from the redirect Location", () => {
@@ -448,7 +436,6 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       argv: ["--check"],
       send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
@@ -464,7 +451,6 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       argv: ["--check"],
       send: publicServing({ version: "0.1.0", bytes: encode("new") }),
     });
@@ -477,7 +463,6 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       argv: ["--check"],
       send: publicServing({ version: "0.2.0", bytes: encode("new"), tagStatus: 500 }),
     });
@@ -493,7 +478,6 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       argv: ["--check"],
       send: publicServing({
         version: "0.2.0",
@@ -510,7 +494,6 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       argv: ["--check"],
       send: async () => {
         throw new Error("connect ECONNREFUSED");
@@ -528,7 +511,6 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       argv: ["--check"],
       send: async () => ({ status: 404, body: new Uint8Array() }),
     });
@@ -541,9 +523,8 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
+      update: API_UPDATE,
       env: {
-        BANDAR_CONFIG_DIR: fixture.configDir,
-        BANDAR_RELEASE_API_URL: API_FEED,
         BANDAR_GITHUB_TOKEN: undefined,
         GH_TOKEN: undefined,
         GITHUB_TOKEN: undefined,
@@ -555,7 +536,7 @@ describe("update --check", () => {
     expect(await runUpdate(recorded.run)).toBe(1);
     expect(recorded.lines).toEqual(["installed 0.1.0", "latest unknown", "unknown"]);
     expect(recorded.errors).toEqual([
-      "bandar: BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN",
+      "bandar: update.apiUrl reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN",
     ]);
     expect(recorded.requests).toEqual([]);
   });
@@ -564,7 +545,8 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      update: API_UPDATE,
+      env: TOKEN_ENV,
       argv: ["--check"],
       send: apiServing({ version: "0.2.0", bytes: encode("new") }),
     });
@@ -579,7 +561,8 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      update: API_UPDATE,
+      env: TOKEN_ENV,
       argv: ["--check"],
       send: async () => ({ status: 200, body: encode('{"tag_name":"v0.2.0"}') }),
     });
@@ -593,7 +576,8 @@ describe("update --check", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      update: API_UPDATE,
+      env: TOKEN_ENV,
       argv: ["--check"],
       send: async () => ({ status: 500, body: new Uint8Array() }),
     });
@@ -609,7 +593,6 @@ describe("bandar update", () => {
     const bytes = encode("new binary payload");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       send: publicServing({ version: "0.2.0", bytes }),
     });
 
@@ -631,7 +614,6 @@ describe("bandar update", () => {
     const bytes = encode("new binary payload");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       send: publicServing({ version: "0.2.0", bytes }),
     });
 
@@ -643,7 +625,6 @@ describe("bandar update", () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
@@ -660,7 +641,6 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       canWrite: false,
       send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
@@ -677,7 +657,6 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       send: publicServing({
         version: "0.2.0",
         bytes: encode("new binary payload"),
@@ -695,7 +674,6 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       send: publicServing({ version: "0.2.0", bytes: encode("new"), assetStatus: 404 }),
     });
 
@@ -716,7 +694,6 @@ describe("bandar update", () => {
     );
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       platform: "win32",
       send: publicServing({ version: "0.2.0", bytes: encode("new") }, "win32"),
     });
@@ -738,7 +715,6 @@ describe("bandar update", () => {
     );
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
 
@@ -751,7 +727,6 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       send: publicServing({ version: "0.1.0", bytes: encode("new") }),
     });
 
@@ -765,7 +740,6 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       installed: "0.3.0",
       send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
@@ -781,7 +755,6 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       send: async () => ({ status: 404, body: new Uint8Array() }),
     });
 
@@ -789,25 +762,27 @@ describe("bandar update", () => {
     expect(recorded.errors).toEqual(["bandar: falentio/bandar has no published release yet"]);
   });
 
-  test("an unusable config directory is refused with one line", async () => {
-    const fixture = fixtureOf("install-script");
+  test("an unusable environment is refused with one line", async () => {
+    const errors: string[] = [];
 
-    const recorded = runOf(fixture, {
-      env: { BANDAR_CONFIG_DIR: "relative/config" },
-      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
+    const error = vi.spyOn(console, "error").mockImplementation((line: string) => {
+      errors.push(line);
     });
 
-    expect(await runUpdate(recorded.run)).toBe(1);
-    expect(recorded.errors).toHaveLength(1);
-    expect(recorded.errors[0]).toContain("BANDAR_CONFIG_DIR");
-    expect(recorded.requests).toEqual([]);
+    try {
+      expect(await run(["--check"], { BANDAR_CONFIG_DIR: "relative/config" })).toBe(1);
+    } finally {
+      error.mockRestore();
+    }
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("BANDAR_CONFIG_DIR");
   });
 
   test("an unsupported platform is refused by name", async () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: PUBLIC_ENV,
       platform: "darwin",
       send: publicServing({ version: "0.2.0", bytes: encode("new") }),
     });
@@ -823,7 +798,8 @@ describe("bandar update", () => {
     const bytes = encode("private fork payload");
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      update: API_UPDATE,
+      env: TOKEN_ENV,
       send: apiServing({ version: "0.2.0", bytes }),
     });
 
@@ -850,7 +826,8 @@ describe("bandar update", () => {
     const fixture = fixtureOf("install-script");
 
     const recorded = runOf(fixture, {
-      env: API_ENV,
+      update: API_UPDATE,
+      env: TOKEN_ENV,
       send: apiServing({
         version: "0.2.0",
         bytes: encode("new"),
@@ -871,7 +848,8 @@ test("a foreign asset host is refused before any request, so the token stays put
   if (names === null) throw new Error("the fixture platform has no asset");
 
   const recorded = runOf(fixture, {
-    env: API_ENV,
+    update: API_UPDATE,
+    env: TOKEN_ENV,
     send: async (url) => {
       if (url === API_FEED)
         return {
@@ -913,7 +891,6 @@ describe("bandar update --archive", () => {
     const fixture = archiveFixture();
 
     const recorded = runOf(fixture, {
-      env: { BANDAR_CONFIG_DIR: fixture.configDir },
       argv: ["--archive", fixture.archive],
     });
 
@@ -929,7 +906,6 @@ describe("bandar update --archive", () => {
     writeFileSync(`${fixture.archive}.sha256`, `${"0".repeat(64)}  bandar-0.2.0-linux-x64\n`);
 
     const recorded = runOf(fixture, {
-      env: { BANDAR_CONFIG_DIR: fixture.configDir },
       argv: ["--archive", fixture.archive],
     });
 
@@ -945,7 +921,6 @@ describe("bandar update --archive", () => {
     rmSync(`${fixture.archive}.sha256`);
 
     const recorded = runOf(fixture, {
-      env: { BANDAR_CONFIG_DIR: fixture.configDir },
       argv: ["--archive", fixture.archive],
     });
 
@@ -960,7 +935,6 @@ describe("bandar update --archive", () => {
     rmSync(join(fixture.configDir, "install.json"));
 
     const recorded = runOf(fixture, {
-      env: { BANDAR_CONFIG_DIR: fixture.configDir },
       argv: ["--archive", fixture.archive],
     });
 
@@ -978,10 +952,6 @@ describe("bandar update --archive", () => {
     writeFileSync(join(databases, "bandar.duckdb"), "duckdb");
 
     const recorded = runOf(fixture, {
-      env: {
-        BANDAR_CONFIG_DIR: fixture.configDir,
-        BANDAR_HOME: databases,
-      },
       argv: ["--archive", fixture.archive],
     });
 

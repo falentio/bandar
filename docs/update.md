@@ -15,16 +15,17 @@ reads a token.
 
 ## How the latest version is resolved
 
-`bandar update` requests `https://github.com/falentio/bandar/releases/latest` without following
-the redirect, and reads the version out of the `Location` header, such as
+`bandar update` reads `update.webUrl` from `config.json`, which defaults to
+`https://github.com/falentio/bandar`, and requests `<webUrl>/releases/latest` without following
+the redirect. It reads the version out of the `Location` header, such as
 `.../releases/tag/v0.1.0`. That is a page request, not an API call, so it needs no credential and
 does not spend the 60-per-hour API rate limit.
 
 It then downloads
 
 ```text
-https://github.com/falentio/bandar/releases/download/v<version>/<asset>
-https://github.com/falentio/bandar/releases/download/v<version>/<asset>.sha256
+<webUrl>/releases/download/v<version>/<asset>
+<webUrl>/releases/download/v<version>/<asset>.sha256
 ```
 
 with no `Authorization` header. GitHub redirects the asset to
@@ -34,22 +35,31 @@ exit 0.
 
 ## A private fork, with a token
 
-Set `BANDAR_RELEASE_API_URL` to the latest-release JSON of the fork, and set a token; the API
-route replaces the anonymous one:
+Set `update.apiUrl` in `config.json` to the latest-release JSON of the fork, and set a token in
+the environment; the API route replaces the anonymous one:
+
+```json
+{
+  "update": {
+    "apiUrl": "https://api.github.com/repos/you/bandar/releases/latest"
+  }
+}
+```
 
 ```sh
-BANDAR_RELEASE_API_URL=https://api.github.com/repos/you/bandar/releases/latest \
 BANDAR_GITHUB_TOKEN="$TOKEN" bandar update
 ```
 
-Setting the API URL without a token exits 1 with
-`bandar: BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN`
+`BANDAR_RELEASE_API_URL` still stands in when the file leaves `update.apiUrl` out, the same
+way `BANDAR_RELEASE_WEB_URL` stands in for `update.webUrl`. Setting the API feed without a token
+exits 1 with
+`bandar: update.apiUrl reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN`
 and sends no request.
 
 The token is read from `BANDAR_GITHUB_TOKEN`, then `GH_TOKEN`, then `GITHUB_TOKEN`. It travels
 in an `Authorization` header and nowhere else: not in a URL, a log line, or the argument list.
 The header goes only to a host the command already trusts: `api.github.com`, `github.com`, the
-public asset hosts, or the host of `BANDAR_RELEASE_API_URL`. An asset url that names any other
+public asset hosts, or the host of `update.apiUrl`. An asset url that names any other
 host is refused, unread, so a release feed cannot redirect the token.
 
 ## Install source
@@ -113,14 +123,17 @@ bandar-<version>-<os>-<arch>[.exe].sha256
 `<os>` is `linux` or `windows`, and `<arch>` is `x64` or `arm64`. The checksum file holds one
 line, `<hex>  <filename>`. Other platforms are refused by name.
 
-## Environment
+## Configuration and environment
 
-| Variable                                          | Effect                                                                                                                                         |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BANDAR_RELEASE_WEB_URL`                          | Replaces `https://github.com/falentio/bandar` as the origin for the release page and the downloads, for a mirror or an offline stub. No token. |
-| `BANDAR_RELEASE_API_URL`                          | Latest-release JSON of a private fork. Setting it selects the API route, which needs a token.                                                  |
-| `BANDAR_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | Token for that fork, in that order. Never read by the public route.                                                                            |
-| `BANDAR_CONFIG_DIR`                               | Directory holding `install.json`. Must be absolute.                                                                                            |
+| Setting or variable                               | Effect                                                                                                                                      |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `update.webUrl`                                   | Release web base for the release page and the downloads. Defaults to `https://github.com/falentio/bandar`, for a mirror or an offline stub. |
+| `update.apiUrl`                                   | Latest-release JSON of a private fork. Setting it selects the API route, which needs a token.                                               |
+| `BANDAR_RELEASE_WEB_URL`                          | Fallback for `update.webUrl` when the file leaves it out. No token.                                                                         |
+| `BANDAR_RELEASE_API_URL`                          | Fallback for `update.apiUrl` when the file leaves it out.                                                                                   |
+| `BANDAR_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | Token for that fork, in that order. Never read by the public route. Environment only.                                                       |
+| `BANDAR_HOME`                                     | Directory holding `config.json`. Environment only.                                                                                          |
+| `BANDAR_CONFIG_DIR`                               | Directory holding `install.json`. Must be absolute. Environment only.                                                                       |
 
 ## Exit codes
 
@@ -133,8 +146,8 @@ line, `<hex>  <filename>`. Other platforms are refused by name.
 ## Tests
 
 `scripts/update-test.sh` runs the command against a loopback stub release feed in a temporary
-directory. It covers the anonymous happy path, the private-fork override, an API URL without a
-token, a checksum mismatch, a foreign asset host, an unknown install source, a same-version no-op,
-`--check` with and without a published release, `--archive`, and an unwritable target. It never
-reaches the network. `src/server/cli/update.test.ts` covers the same behavior without a filesystem
+directory, with its own `BANDAR_HOME` per case. It covers the anonymous happy path, a feed named
+only by `config.json`, the private-fork override, an API URL without a token, a checksum mismatch,
+a foreign asset host, an unknown install source, a same-version no-op, `--check` with and without
+a published release, `--archive`, and an unwritable target. It never reaches the network. `src/server/cli/update.test.ts` covers the same behavior without a filesystem
 where it can.

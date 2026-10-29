@@ -13,6 +13,12 @@ export const settingsIo: SettingsIo = {
   write: (path, text) => writeBeside(path, text),
 };
 
+/** A read-only view, for a tool that resolves the settings without writing beside them. */
+export const settingsReadIo: SettingsIo = {
+  read: (path) => readFileSync(path, "utf8"),
+  write: () => {},
+};
+
 function writeBeside(path: string, text: string): void {
   const directory = dirname(path);
 

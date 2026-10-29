@@ -1,21 +1,19 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Analytics } from "../../shared/analytics";
+import { ANALYTICS_RANGES, type Analytics, type AnalyticsRange } from "../../shared/analytics";
 import { formatExactTokens, formatTokens, formatTps, formatUsd } from "../format";
 import type { ModelLabels } from "../model-labels";
 import { ModelName } from "../model-name";
 import { OverviewStats } from "./overview-stats";
 import { TokenChart } from "./token-chart";
 
-export const OVERVIEW_RANGES = [7, 30, 90] as const;
-
 export function OverviewHeader({
   days,
   onDays,
   onRefresh,
 }: {
-  readonly days: number;
-  readonly onDays: (days: number) => void;
+  readonly days: AnalyticsRange;
+  readonly onDays: (days: AnalyticsRange) => void;
   readonly onRefresh: () => void;
 }) {
   return (
@@ -27,7 +25,7 @@ export function OverviewHeader({
         </p>
       </div>
       <div className="flex items-center gap-1">
-        {OVERVIEW_RANGES.map((range) => (
+        {ANALYTICS_RANGES.map((range) => (
           <Button
             key={range}
             variant={days === range ? "default" : "outline"}

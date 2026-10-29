@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { DEFAULT_ANALYTICS_DAYS, type AnalyticsRange } from "../shared/analytics";
 import type { ProviderDetail } from "../shared/providers";
 import { providerApi } from "./api";
 import { describeError, isError } from "./errors";
@@ -8,15 +9,15 @@ type Status = "loading" | "ready" | "error";
 export type ProviderDetailState = {
   readonly status: Status;
   readonly detail: ProviderDetail | null;
-  readonly days: number;
+  readonly days: AnalyticsRange;
   readonly error: string | null;
-  readonly setDays: (days: number) => void;
+  readonly setDays: (days: AnalyticsRange) => void;
   readonly refresh: () => void;
 };
 
 export function useProviderDetail(id: string): ProviderDetailState {
   const [detail, setDetail] = useState<ProviderDetail | null>(null);
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState<AnalyticsRange>(DEFAULT_ANALYTICS_DAYS);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);

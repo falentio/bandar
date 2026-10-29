@@ -158,6 +158,12 @@ export type ProjectList = v.InferOutput<typeof ProjectListSchema>;
 
 export type SessionList = v.InferOutput<typeof SessionListSchema>;
 
+export const ANALYTICS_RANGES = [7, 30, 90] as const;
+
+export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
+
+export const DEFAULT_ANALYTICS_DAYS: AnalyticsRange = 30;
+
 export const EMPTY_ANALYTICS_FILTERS: AnalyticsFilters = {
   providerKind: [],
   providerId: [],

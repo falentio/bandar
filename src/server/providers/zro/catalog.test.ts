@@ -14,6 +14,7 @@ describe("zro catalog", () => {
         outputPricePerMtok: 0.5,
         contextWindow: null,
         maxOutput: null,
+        inputModalities: null,
       },
     ]);
   });

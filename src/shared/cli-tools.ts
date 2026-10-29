@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import type { InputModality } from "./providers";
 
 /** Which gateway ingress paths this build registers. Mirrors ./src/server/gateway.ts. */
 export const GATEWAY_SURFACE = {
@@ -41,6 +42,7 @@ export type CliSnippet =
 export type ModelLimit = {
   readonly contextWindow: number;
   readonly maxOutput: number;
+  readonly inputModalities: readonly InputModality[] | null;
 };
 
 export type CliRenderInput = {
@@ -356,8 +358,9 @@ function modelRef(ref: string): string {
 }
 
 type OpenCodeModelEntry = {
-  readonly name: string;
-  readonly limit?: { readonly context: number; readonly output: number };
+  name: string;
+  limit?: { context: number; output: number };
+  modalities?: { input: readonly InputModality[] };
 };
 
 function modelEntries(
@@ -370,16 +373,26 @@ function modelEntries(
 
       if (limit === undefined) return [ref, { name: ref }];
 
-      return [ref, { name: ref, limit: { context: limit.contextWindow, output: limit.maxOutput } }];
+      const entry: OpenCodeModelEntry = {
+        name: ref,
+        limit: { context: limit.contextWindow, output: limit.maxOutput },
+      };
+
+      if (limit.inputModalities !== null && limit.inputModalities.length > 0) {
+        entry.modalities = { input: limit.inputModalities };
+      }
+
+      return [ref, entry];
     }),
   );
 }
 
 type PiModelEntry = {
-  readonly id: string;
-  readonly name: string;
-  readonly contextWindow?: number;
-  readonly maxTokens?: number;
+  id: string;
+  name: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  input?: readonly InputModality[];
 };
 
 function piEntries(
@@ -391,7 +404,20 @@ function piEntries(
 
     if (limit === undefined) return { id: ref, name: ref };
 
-    return { id: ref, name: ref, contextWindow: limit.contextWindow, maxTokens: limit.maxOutput };
+    const entry: PiModelEntry = {
+      id: ref,
+      name: ref,
+      contextWindow: limit.contextWindow,
+      maxTokens: limit.maxOutput,
+    };
+
+    const accepted = limit.inputModalities?.filter(
+      (modality) => modality === "text" || modality === "image",
+    );
+
+    if (accepted !== undefined && accepted.length > 0) entry.input = accepted;
+
+    return entry;
   });
 }
 

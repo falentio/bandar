@@ -11,6 +11,7 @@ import {
   type CliSnippet,
   type CliTool,
   type CliToolId,
+  type ModelLimit,
 } from "./cli-tools";
 
 const ORIGIN = "https://gw.example";
@@ -221,7 +222,9 @@ describe("status", () => {
 });
 
 describe("token limits", () => {
-  const limits = new Map([["sonnet", { contextWindow: 200000, maxOutput: 64000 }]]);
+  const limits = new Map([
+    ["sonnet", { contextWindow: 200000, maxOutput: 64000, inputModalities: null }],
+  ]);
 
   test("opencode writes the limit it knows and leaves the rest alone", () => {
     const render = renderInput(ORIGIN, ["sonnet", CODING], KEY, limits);
@@ -260,6 +263,40 @@ describe("token limits", () => {
 
     expect(code).toContain('"name": "sonnet"');
     expect(code).not.toContain('"limit"');
+  });
+
+  test("opencode writes input modalities and pi keeps text and image", () => {
+    const withModalities = new Map<string, ModelLimit>([
+      [
+        "sonnet",
+        {
+          contextWindow: 200000,
+          maxOutput: 64000,
+          inputModalities: ["text", "image", "pdf"],
+        },
+      ],
+    ]);
+
+    const render = renderInput(ORIGIN, ["sonnet"], KEY, withModalities);
+
+    expect(JSON.parse(fileCode(toolById("opencode-v1"), render))).toMatchObject({
+      provider: {
+        bandar: {
+          models: { sonnet: { modalities: { input: ["text", "image", "pdf"] } } },
+        },
+      },
+    });
+
+    expect(JSON.parse(fileCode(toolById("pi"), render))).toMatchObject({
+      providers: { bandar: { models: [{ id: "sonnet", input: ["text", "image"] }] } },
+    });
+  });
+
+  test("a model with no modalities reported carries no modalities key", () => {
+    const render = renderInput(ORIGIN, ["sonnet"], KEY, limits);
+
+    expect(fileCode(toolById("opencode-v1"), render)).not.toContain('"modalities"');
+    expect(fileCode(toolById("pi"), render)).not.toContain('"input"');
   });
 
   test("codex and claude code ignore limits", () => {

@@ -45,6 +45,8 @@ The tools disagree about how a config holds several refs, and the picker follows
 
 Claude Code cannot list models in its settings file. Its page therefore pins one starting ref in `ANTHROPIC_MODEL`, and the three alias variables are how `/model` gains bandar entries.
 
+Input modalities come from the same row. opencode takes the five values it knows, `text`, `image`, `audio`, `video`, and `pdf`, under `modalities.input`; pi accepts only `text` and `image`, so a `pdf` capability is dropped there rather than written as an invalid value.
+
 Token limits come from the model row. A model you add or import keeps whatever the provider's catalog reports; when the catalog reports nothing, bandar asks [models.dev](https://models.dev) for that model id and stores the answer. The model dialog edits both numbers, so a custom model carries them too. opencode and pi write them into their configs; Codex and Claude Code take no limits, so their snippets ignore them.
 
 ## Secret rules
@@ -80,7 +82,8 @@ Global config: `~/.config/opencode/opencode.json`. The provider block uses `@ai-
       "models": {
         "sonnet": {
           "name": "sonnet",
-          "limit": { "context": 200000, "output": 64000 }
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image"] }
         },
         "tags/coding": { "name": "tags/coding" }
       }
@@ -117,7 +120,8 @@ Global config: `~/.config/opencode/opencode.jsonc`. v2 moves providers under `pr
       "models": {
         "sonnet": {
           "name": "sonnet",
-          "limit": { "context": 200000, "output": 64000 }
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image"] }
         },
         "tags/coding": { "name": "tags/coding" }
       }
@@ -211,7 +215,13 @@ Config: `~/.pi/agent/models.json`. pi resolves `$BANDAR_API_KEY` when it builds 
       "api": "openai-completions",
       "apiKey": "$BANDAR_API_KEY",
       "models": [
-        { "id": "sonnet", "name": "sonnet", "contextWindow": 200000, "maxTokens": 64000 },
+        {
+          "id": "sonnet",
+          "name": "sonnet",
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "input": ["text", "image"]
+        },
         { "id": "tags/coding", "name": "tags/coding" }
       ]
     }

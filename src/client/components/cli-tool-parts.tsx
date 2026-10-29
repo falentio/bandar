@@ -10,6 +10,7 @@ import {
   type CliToolStatus,
   type ModelLimit,
 } from "@/shared/cli-tools";
+import type { InputModality } from "@/shared/providers";
 import { modelChoices } from "../model-options";
 import { ModelCombobox } from "./model-combobox";
 import { ModelSelect } from "./model-select";
@@ -26,7 +27,11 @@ function modelLimitsOf(
     for (const model of provider.models) {
       if (model.contextWindow === null || model.maxOutput === null) continue;
 
-      limits.set(model.slug, { contextWindow: model.contextWindow, maxOutput: model.maxOutput });
+      limits.set(model.slug, {
+        contextWindow: model.contextWindow,
+        maxOutput: model.maxOutput,
+        inputModalities: model.inputModalities,
+      });
     }
   }
 
@@ -37,6 +42,7 @@ type ProviderModelLike = {
   readonly slug: string;
   readonly contextWindow: number | null;
   readonly maxOutput: number | null;
+  readonly inputModalities: readonly InputModality[] | null;
 };
 
 const STATUS_LABEL: Record<CliToolStatus["status"], string> = {

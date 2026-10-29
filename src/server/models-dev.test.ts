@@ -39,7 +39,13 @@ describe("parseModelLimits", () => {
 
   test("keeps a context window with no output beside it", () => {
     expect(entriesOf("gpt-5.1")).toEqual([
-      { providerId: "opencode", providerName: "opencode", contextWindow: 400000, maxOutput: null },
+      {
+        providerId: "opencode",
+        providerName: "opencode",
+        contextWindow: 400000,
+        maxOutput: null,
+        inputModalities: null,
+      },
     ]);
   });
 
@@ -50,6 +56,31 @@ describe("parseModelLimits", () => {
   test("rejects anything that is not the models.dev shape", () => {
     expect(v.safeParse(ModelsDevPayloadSchema, { anthropic: "nope" }).success).toBe(false);
     expect(v.safeParse(ModelsDevPayloadSchema, null).success).toBe(false);
+  });
+});
+
+describe("input modalities", () => {
+  const limited = {
+    anthropic: {
+      id: "anthropic",
+      name: "Anthropic",
+      models: {
+        vision: { modalities: { input: ["text", "image", "pdf"] } },
+        odd: { modalities: { input: ["text", "hologram"] } },
+      },
+    },
+  };
+
+  test("keeps the modalities the provider reports", () => {
+    expect(parseModelLimits(limited).get("vision")?.[0]?.inputModalities).toEqual([
+      "text",
+      "image",
+      "pdf",
+    ]);
+  });
+
+  test("drops a modality bandar does not model", () => {
+    expect(parseModelLimits(limited).get("odd")?.[0]?.inputModalities).toEqual(["text"]);
   });
 });
 
@@ -64,13 +95,26 @@ describe("pickModelLimit", () => {
       providerName: "Anthropic",
       contextWindow: 200000,
       maxOutput: 64000,
+      inputModalities: null,
     });
   });
 
   test("breaks a context tie on the smaller output", () => {
     const entries: readonly ProviderLimit[] = [
-      { providerId: "a", providerName: "A", contextWindow: 200000, maxOutput: 128000 },
-      { providerId: "b", providerName: "B", contextWindow: 200000, maxOutput: 64000 },
+      {
+        providerId: "a",
+        providerName: "A",
+        contextWindow: 200000,
+        maxOutput: 128000,
+        inputModalities: null,
+      },
+      {
+        providerId: "b",
+        providerName: "B",
+        contextWindow: 200000,
+        maxOutput: 64000,
+        inputModalities: null,
+      },
     ];
 
     expect(pickModelLimit(entries, undefined)?.providerId).toBe("b");

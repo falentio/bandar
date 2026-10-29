@@ -1,8 +1,10 @@
 import * as v from "valibot";
+import { INPUT_MODALITIES, type InputModality } from "../shared/providers";
 
 export type ModelLimits = {
   readonly contextWindow: number | null;
   readonly maxOutput: number | null;
+  readonly inputModalities: readonly InputModality[] | null;
 };
 
 export type ProviderLimit = ModelLimits & {
@@ -10,7 +12,11 @@ export type ProviderLimit = ModelLimits & {
   readonly providerName: string;
 };
 
-export const NO_LIMITS: ModelLimits = { contextWindow: null, maxOutput: null };
+export const NO_LIMITS: ModelLimits = {
+  contextWindow: null,
+  maxOutput: null,
+  inputModalities: null,
+};
 
 export const MODELS_DEV_URL = "https://models.dev/api.json";
 
@@ -21,7 +27,14 @@ const LimitSchema = v.object({
   output: v.optional(v.nullable(v.number())),
 });
 
-const ModelSchema = v.object({ limit: v.optional(v.nullable(LimitSchema)) });
+const ModalitiesSchema = v.object({
+  input: v.optional(v.nullable(v.array(v.string()))),
+});
+
+const ModelSchema = v.object({
+  limit: v.optional(v.nullable(LimitSchema)),
+  modalities: v.optional(v.nullable(ModalitiesSchema)),
+});
 
 const ProviderSchema = v.object({
   id: v.optional(v.string()),
@@ -45,11 +58,12 @@ export function parseModelLimits(
     for (const [modelId, model] of Object.entries(provider.models)) {
       const contextWindow = model.limit?.context ?? null;
       const maxOutput = model.limit?.output ?? null;
+      const inputModalities = inputModalitiesOf(model.modalities?.input ?? null);
 
-      if (contextWindow === null && maxOutput === null) continue;
+      if (contextWindow === null && maxOutput === null && inputModalities === null) continue;
 
       const entries = limits.get(modelId) ?? [];
-      entries.push({ providerId, providerName, contextWindow, maxOutput });
+      entries.push({ providerId, providerName, contextWindow, maxOutput, inputModalities });
       limits.set(modelId, entries);
     }
   }
@@ -109,10 +123,24 @@ export async function lookupModelLimits(
 
     if (chosen === null) continue;
 
-    found.set(id, { contextWindow: chosen.contextWindow, maxOutput: chosen.maxOutput });
+    found.set(id, {
+      contextWindow: chosen.contextWindow,
+      maxOutput: chosen.maxOutput,
+      inputModalities: chosen.inputModalities,
+    });
   }
 
   return found;
+}
+
+export function inputModalitiesOf(
+  values: readonly string[] | null,
+): readonly InputModality[] | null {
+  if (values === null) return null;
+
+  const known = INPUT_MODALITIES.filter((modality) => values.includes(modality));
+
+  return known.length === 0 ? null : known;
 }
 
 export function pickModelLimit(

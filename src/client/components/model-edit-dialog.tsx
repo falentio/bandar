@@ -13,8 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   COMPAT_LABELS,
+  INPUT_MODALITIES,
   parseCompat,
   type Compat,
+  type InputModality,
   type ProviderModel,
   type ProviderModelEditInput,
 } from "../../shared/providers";
@@ -72,6 +74,10 @@ export function EditModelDialog({
   const [contextWindow, setContextWindow] = useState(priceText(model.contextWindow));
   const [maxOutput, setMaxOutput] = useState(priceText(model.maxOutput));
 
+  const [modalities, setModalities] = useState<readonly InputModality[]>(
+    model.inputModalities ?? [],
+  );
+
   const reset = () => {
     setName(model.alias ?? "");
     setSlug(model.slug);
@@ -81,6 +87,7 @@ export function EditModelDialog({
     setOutputPrice(priceText(model.outputPricePerMtok));
     setContextWindow(priceText(model.contextWindow));
     setMaxOutput(priceText(model.maxOutput));
+    setModalities(model.inputModalities ?? []);
   };
 
   const parsedInput = parsePrice(inputPrice);
@@ -124,6 +131,7 @@ export function EditModelDialog({
       outputPricePerMtok: parsedOutput,
       contextWindow: parsedContext,
       maxOutput: parsedMaxOutput,
+      inputModalities: modalities.length === 0 ? null : [...modalities],
     };
 
     if (await providers.updateModel(providerId, model.id, edit)) {
@@ -305,6 +313,33 @@ export function EditModelDialog({
           {tokensValid ? null : (
             <p className="text-xs text-destructive">Token limits are whole numbers above zero.</p>
           )}
+
+          <div className="grid gap-2">
+            <span className="text-xs text-muted-foreground">Input modalities</span>
+            <div className="flex flex-wrap gap-3">
+              {INPUT_MODALITIES.map((modality) => (
+                <label key={modality} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-3.5 accent-primary"
+                    checked={modalities.includes(modality)}
+                    onChange={() =>
+                      setModalities(
+                        modalities.includes(modality)
+                          ? modalities.filter((value) => value !== modality)
+                          : [...modalities, modality],
+                      )
+                    }
+                    disabled={providers.pending}
+                  />
+                  {modality}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              What the model accepts as input. Leave every box clear when the provider does not say.
+            </p>
+          </div>
 
           {providers.error === null ? null : (
             <p className="text-sm text-destructive">{providers.error}</p>

@@ -2,6 +2,7 @@ import type {
   BuiltInProviderKind,
   Compat,
   GenericProviderKind,
+  InputModality,
   ProviderAuthMode,
   ProviderKind,
 } from "../../shared/providers";
@@ -86,6 +87,7 @@ export type ModelCatalogEntry = {
   readonly outputPricePerMtok: number | null;
   readonly contextWindow?: number | null;
   readonly maxOutput?: number | null;
+  readonly inputModalities?: readonly InputModality[] | null;
 };
 
 export type CatalogRequest = {

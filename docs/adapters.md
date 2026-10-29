@@ -433,6 +433,11 @@ truncates. A row with neither number stays null until someone edits it in the
 model dialog, and the generated CLI configs write the numbers where the tool
 accepts them.
 
+Input modalities ride along the same way: `modalities.input` at models.dev is
+filtered to the five values bandar models, filled on the write path, and kept
+on the row as a JSON array. A model that reports none keeps null, and a config
+that gets null writes no modality keys at all.
+
 ## Errors
 
 Adapters throw one type:

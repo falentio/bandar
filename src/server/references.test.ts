@@ -31,6 +31,7 @@ import {
   type ProviderDeps,
 } from "./providers";
 import { DEFAULT_PROVIDER_ENDPOINTS } from "./providers/endpoints";
+import type { ModelLimits } from "./models-dev";
 import { assignProviderSlugs } from "./providers/seeding";
 import {
   addProviderCredential,
@@ -754,6 +755,7 @@ describe("provider models", () => {
     expect(applyMigrations(handle.sqlite, all).applied).toEqual([
       "0013_model_slug",
       "0014_model_limits",
+      "0015_input_modalities",
     ]);
 
     const rows = handle.sqlite
@@ -1151,6 +1153,7 @@ describe("provider credentials", () => {
       "0012_tiresome_amphibian",
       "0013_model_slug",
       "0014_model_limits",
+      "0015_input_modalities",
     ]);
 
     const rows = handle.sqlite
@@ -1219,9 +1222,8 @@ function providerDeps(handle: DatabaseHandle): Promise<ProviderDeps> {
 }
 
 describe("model limits", () => {
-  const limitsOf = async (): Promise<
-    ReadonlyMap<string, { contextWindow: number | null; maxOutput: number | null }>
-  > => new Map([["gpt-5.1", { contextWindow: 400000, maxOutput: 128000 }]]);
+  const limitsOf = async (): Promise<ReadonlyMap<string, ModelLimits>> =>
+    new Map([["gpt-5.1", { contextWindow: 400000, maxOutput: 128000, inputModalities: null }]]);
 
   async function providerWith(deps: ProviderDeps): Promise<Provider> {
     return createProvider(deps, "user-1", {
@@ -1244,6 +1246,28 @@ describe("model limits", () => {
     const added = await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "gpt-5.1" });
 
     expect(modelOn(added, "gpt-5.1")).toMatchObject({ contextWindow: 400000, maxOutput: 128000 });
+  });
+
+  test("a new model takes the input modalities models.dev reports", async () => {
+    const handle = freshDb();
+    const base = await providerDeps(handle);
+
+    const deps: ProviderDeps = {
+      ...base,
+      modelLimits: async () =>
+        new Map([
+          [
+            "gpt-5.1",
+            { contextWindow: 400000, maxOutput: 128000, inputModalities: ["text", "image"] },
+          ],
+        ]),
+    };
+
+    const provider = await providerWith(deps);
+
+    const added = await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "gpt-5.1" });
+
+    expect(modelOn(added, "gpt-5.1")?.inputModalities).toEqual(["text", "image"]);
   });
 
   test("a value the caller sent wins over models.dev", async () => {

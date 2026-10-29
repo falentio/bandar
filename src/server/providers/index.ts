@@ -2,6 +2,8 @@ import { and, asc, eq } from "drizzle-orm";
 import {
   BUILT_IN_PROVIDER_KINDS,
   parseCompat,
+  parseInputModalities,
+  serializeInputModalities,
   type Compat,
   type Provider,
   type ProviderCredential,
@@ -133,6 +135,7 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       outputPricePerMtok: row.outputPricePerMtok,
       contextWindow: row.contextWindow,
       maxOutput: row.maxOutput,
+      inputModalities: parseInputModalities(row.inputModalities),
       failures: row.failures,
       flaggedUntil: row.flaggedUntil?.toISOString() ?? null,
     });
@@ -328,6 +331,9 @@ export async function addProviderModel(
         outputPricePerMtok: model.outputPricePerMtok ?? null,
         contextWindow: model.contextWindow ?? known?.contextWindow ?? null,
         maxOutput: model.maxOutput ?? known?.maxOutput ?? null,
+        inputModalities: serializeInputModalities(
+          model.inputModalities ?? known?.inputModalities ?? null,
+        ),
         enabled: true,
         createdAt: new Date(),
       })
@@ -397,6 +403,9 @@ export async function syncProviderModels(
         outputPricePerMtok: model.outputPricePerMtok,
         contextWindow: model.contextWindow ?? known.get(model.upstreamModel)?.contextWindow ?? null,
         maxOutput: model.maxOutput ?? known.get(model.upstreamModel)?.maxOutput ?? null,
+        inputModalities: serializeInputModalities(
+          model.inputModalities ?? known.get(model.upstreamModel)?.inputModalities ?? null,
+        ),
         enabled: true,
         createdAt: new Date(now.getTime() + index),
       },
@@ -466,6 +475,9 @@ export async function updateProviderModel(
   if (edit.contextWindow !== undefined) patches.contextWindow = edit.contextWindow;
 
   if (edit.maxOutput !== undefined) patches.maxOutput = edit.maxOutput;
+
+  if (edit.inputModalities !== undefined)
+    patches.inputModalities = serializeInputModalities(edit.inputModalities);
 
   const updated = await deps.db
     .update(providerModels)

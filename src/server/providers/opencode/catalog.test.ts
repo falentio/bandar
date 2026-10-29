@@ -33,6 +33,7 @@ describe("opencode go catalog", () => {
         outputPricePerMtok: null,
         contextWindow: null,
         maxOutput: null,
+        inputModalities: null,
       },
       {
         upstreamModel: "glm-5.3",
@@ -42,6 +43,7 @@ describe("opencode go catalog", () => {
         outputPricePerMtok: 4.4,
         contextWindow: null,
         maxOutput: null,
+        inputModalities: null,
       },
       {
         upstreamModel: "beam-free",
@@ -51,6 +53,7 @@ describe("opencode go catalog", () => {
         outputPricePerMtok: 0,
         contextWindow: null,
         maxOutput: null,
+        inputModalities: null,
       },
     ]);
   });

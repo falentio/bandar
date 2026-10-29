@@ -39,7 +39,7 @@ if (entries.size === 0) {
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
-  fetch(request) {
+  fetch(request: Request): Response {
     const url = new URL(request.url);
     const origin = `http://127.0.0.1:${server.port}`;
 

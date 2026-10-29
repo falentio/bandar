@@ -84,7 +84,7 @@ export function KeyAndModelsCard({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">API key</span>
               <Input

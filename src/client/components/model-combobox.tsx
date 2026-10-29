@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { CheckIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import type { ModelChoiceGroup, ModelChoices, ModelOption } from "../model-options";
 
 type ModelComboboxProps = {
@@ -13,7 +14,6 @@ type ModelComboboxProps = {
 
 export function ModelCombobox({ choices, selected, disabled, onChange }: ModelComboboxProps) {
   const id = useId();
-  const container = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState<string | null>(null);
@@ -26,26 +26,9 @@ export function ModelCombobox({ choices, selected, disabled, onChange }: ModelCo
 
   const listboxId = `${id}-listbox`;
 
-  useEffect(() => {
-    if (!open) return;
-
-    const closeOnOutside = (event: PointerEvent): void => {
-      if (event.target instanceof Node && container.current?.contains(event.target) === true) {
-        return;
-      }
-
-      setOpen(false);
-    };
-
-    document.addEventListener("pointerdown", closeOnOutside);
-
-    return () => document.removeEventListener("pointerdown", closeOnOutside);
-  }, [open]);
-
   const choose = (value: string): void => {
     setQuery("");
     setActive(value);
-
     setOpen(true);
     onChange(
       selected.includes(value) ? selected.filter((ref) => ref !== value) : [...selected, value],
@@ -91,36 +74,39 @@ export function ModelCombobox({ choices, selected, disabled, onChange }: ModelCo
       <label htmlFor={id} className="text-xs text-muted-foreground">
         Models
       </label>
-      <div ref={container} className="relative">
-        <Input
-          id={id}
-          role="combobox"
-          aria-expanded={open}
-          aria-controls={listboxId}
-          aria-autocomplete="list"
-          aria-activedescendant={
-            open && highlighted !== null ? optionId(id, highlighted) : undefined
-          }
-          autoComplete="off"
-          spellCheck={false}
-          value={query}
-          disabled={disabled}
-          placeholder="Search models"
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onClick={() => setOpen(true)}
-          onKeyDown={onKeyDown}
-        />
-        {open ? (
-          <div
-            id={listboxId}
-            role="listbox"
-            aria-multiselectable
-            className="absolute inset-x-0 top-full z-50 mt-1 max-h-64 space-y-1 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
-          >
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverAnchor asChild>
+          <Input
+            id={id}
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={
+              open && highlighted !== null ? optionId(id, highlighted) : undefined
+            }
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            disabled={disabled}
+            placeholder="Search models"
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onClick={() => setOpen(true)}
+            onKeyDown={onKeyDown}
+          />
+        </PopoverAnchor>
+        <PopoverContent
+          align="start"
+          sideOffset={4}
+          className="max-h-64 w-(--radix-popover-trigger-width) overflow-y-auto p-1"
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          <div id={listboxId} role="listbox" aria-multiselectable>
             {options.length === 0 ? (
               <p className="px-1.5 py-2 text-xs text-muted-foreground">
                 {query === "" ? "No models yet" : "No matches"}
@@ -157,8 +143,8 @@ export function ModelCombobox({ choices, selected, disabled, onChange }: ModelCo
               </div>
             ))}
           </div>
-        ) : null}
-      </div>
+        </PopoverContent>
+      </Popover>
 
       {selected.length === 0 ? null : (
         <ol className="flex flex-wrap gap-1">

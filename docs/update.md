@@ -82,7 +82,7 @@ A copy installed with `npm install -g bandar` has no `install.json`, because `in
 ran. `bandar update` refuses it in one line and writes nothing:
 
 ```text
-bandar: no install.json records an install source; update an npm install with "npm install -g bandar@latest", or reinstall with install.sh from https://github.com/falentio/bandar to let bandar update itself
+bandar: no install.json records an install source; an npm install updates with "npm install -g bandar@latest"; otherwise reinstall with install.sh from https://github.com/falentio/bandar to let bandar update itself
 ```
 
 npm owns that copy: it recorded the version and chose where the files went, and replacing the binary

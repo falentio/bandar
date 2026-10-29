@@ -22,6 +22,6 @@ export const SessionIdSchema = v.pipe(
   v.string(),
   v.check(
     (value) => sessionIdOf(value) !== null,
-    "use 1-128 printable ascii characters without spaces",
+    "use 1-128 printable ascii characters with no space inside. Leading and trailing spaces are dropped.",
   ),
 );

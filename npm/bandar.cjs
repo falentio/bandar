@@ -2,7 +2,7 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
-const { existsSync } = require("node:fs");
+const { existsSync, readFileSync } = require("node:fs");
 const { dirname, join } = require("node:path");
 
 const PACKAGES = new Map([
@@ -36,6 +36,16 @@ function resolveBinary(platform, arch, resolve = require.resolve) {
     return {
       kind: "absent",
       reason: `npm did not install ${entry.name} for ${key}; run "npm install -g bandar@latest", or install with ${INSTALLER}`,
+    };
+  }
+
+  const version = JSON.parse(readFileSync(manifest, "utf8")).version;
+  const own = require("../package.json").version;
+
+  if (version !== own) {
+    return {
+      kind: "mismatch",
+      reason: `${entry.name} is ${version}, but this loader is ${own}; run "npm install -g bandar@latest"`,
     };
   }
 

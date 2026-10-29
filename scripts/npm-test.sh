@@ -222,5 +222,23 @@ else
   fail "a missing platform package said: $(cat "$WORK/absent.err")"
 fi
 
+cp -R "$PREFIX" "$WORK/mixed"
+mixed_platform=$(cd "$WORK/mixed/lib/node_modules/bandar" &&
+  node -e "process.stdout.write(require.resolve('bandar-linux-x64/package.json'))")
+node -e 'fs=require("node:fs");p=process.argv[1];m=JSON.parse(fs.readFileSync(p,"utf8"));m.version="0.0.0";fs.writeFileSync(p,JSON.stringify(m,null,2))' "$mixed_platform"
+
+status=0
+node "$WORK/mixed/lib/node_modules/bandar/bin/bandar.cjs" --version \
+  >"$WORK/mismatch.out" 2>"$WORK/mismatch.err" || status=$?
+
+if [ "$status" = 1 ] && [ ! -s "$WORK/mismatch.out" ] &&
+  [ "$(wc -l <"$WORK/mismatch.err")" -eq 1 ] &&
+  grep -q 'bandar-linux-x64 is 0.0.0' "$WORK/mismatch.err" &&
+  grep -q "loader is $VERSION" "$WORK/mismatch.err"; then
+  pass "a platform package at another version refuses in one line"
+else
+  fail "a platform package at another version said: $(cat "$WORK/mismatch.err")"
+fi
+
 printf 'npm-test: %s checks, %s failures\n' "$checks" "$failures"
 [ "$failures" -eq 0 ]

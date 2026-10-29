@@ -16,6 +16,7 @@ import { anthropicError, anthropicWire, estimateInputTokens } from "./router/ant
 import { runChat, type ChatDeps } from "./router/chat";
 import { listModelRefs } from "./router/resolve";
 import { openAiError } from "./router/wire";
+import { issueOf } from "./validation";
 
 const MESSAGES_PATH = "/v1/messages";
 
@@ -64,13 +65,9 @@ export function createGateway(deps: GatewayDeps) {
       const parsed = v.safeParse(GatewayRequestSchema, body);
 
       if (!parsed.success) {
-        const issue = parsed.issues[0];
+        const text = issueOf(parsed.issues);
 
-        return openAiError(
-          422,
-          issue === undefined ? "request did not match the schema" : issue.message,
-          "validation",
-        );
+        return openAiError(422, text.message, "validation", "invalid_request_error", text.param);
       }
 
       const caller = await callerOf(deps.auth, request);
@@ -101,8 +98,7 @@ export function createGateway(deps: GatewayDeps) {
     .post("/messages", async ({ body, request }) => {
       const parsed = v.safeParse(MessagesRequestSchema, body);
 
-      if (!parsed.success)
-        return anthropicError(422, parsed.issues[0]?.message ?? "request did not match the schema");
+      if (!parsed.success) return anthropicError(422, issueOf(parsed.issues).message);
 
       const caller = await callerOf(deps.auth, request);
 
@@ -128,8 +124,7 @@ export function createGateway(deps: GatewayDeps) {
     .post("/messages/count_tokens", async ({ body, request }) => {
       const parsed = v.safeParse(MessagesRequestSchema, body);
 
-      if (!parsed.success)
-        return anthropicError(422, parsed.issues[0]?.message ?? "request did not match the schema");
+      if (!parsed.success) return anthropicError(422, issueOf(parsed.issues).message);
 
       const caller = await callerOf(deps.auth, request);
 

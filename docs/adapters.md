@@ -124,7 +124,7 @@ block anywhere in `messages` or `system` answers 422 and names the block type
 and its position:
 
 ```text
-messages[1].content[0]: tool_use blocks are not supported by this text gateway
+messages.1.content.0: tool_use blocks are not supported by this text gateway
 ```
 
 Because `tools` is ignored, a client such as Claude Code connects and receives

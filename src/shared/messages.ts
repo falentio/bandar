@@ -56,7 +56,7 @@ export function normalizeMessages(request: MessagesRequest): MessagesNormalizati
   const messages: MessagesTurn[] = [];
 
   for (const [index, message] of request.messages.entries()) {
-    const text = textOf(message.content, `messages[${String(index)}].content`);
+    const text = textOf(message.content, `messages.${String(index)}.content`);
 
     if (!text.ok) return text;
 
@@ -92,7 +92,7 @@ function textOf(
   const parts: string[] = [];
 
   for (const [index, block] of blocks.output.entries()) {
-    const blockAt = `${at}[${String(index)}]`;
+    const blockAt = `${at}.${String(index)}`;
 
     if (block.type !== "text") return { ok: false, rejection: unsupported(blockAt, block.type) };
 

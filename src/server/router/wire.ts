@@ -5,9 +5,10 @@ export function openAiError(
   message: string,
   code: string,
   type = "invalid_request_error",
+  param: string | null = null,
 ): Response {
   return Response.json(
-    { error: { message, type, param: null, code } },
+    { error: { message, type, param, code } },
     { status, headers: { "cache-control": "no-store" } },
   );
 }

@@ -2,7 +2,7 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
-const { chmodSync, existsSync, statSync } = require("node:fs");
+const { existsSync } = require("node:fs");
 const { dirname, join } = require("node:path");
 
 const PACKAGES = new Map([
@@ -48,17 +48,7 @@ function resolveBinary(platform, arch, resolve = require.resolve) {
   return { kind: "ready", path };
 }
 
-function ensureExecutable(path) {
-  if (process.platform === "win32") return;
-
-  try {
-    if ((statSync(path).mode & 0o111) === 0) chmodSync(path, 0o755);
-  } catch {}
-}
-
 function launch(path, argv) {
-  ensureExecutable(path);
-
   const child = spawn(path, argv, { stdio: "inherit", windowsHide: true });
   const forwarding = new Map();
 

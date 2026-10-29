@@ -66,14 +66,14 @@ export function createGateway(deps: GatewayDeps) {
 
       if (!parsed.success) {
         const issue = parsed.issues[0];
-        const note = issue === undefined ? null : issueText(issue);
+        const text = issue === undefined ? null : issueText(issue);
 
         return openAiError(
           422,
-          note?.message ?? "request did not match the schema",
+          text?.message ?? "request did not match the schema",
           "validation",
           "invalid_request_error",
-          note?.param ?? null,
+          text?.param ?? null,
         );
       }
 

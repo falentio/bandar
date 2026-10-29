@@ -76,4 +76,21 @@ describe("gateway schema rejections", () => {
     expect(response.status).toBe(422);
     expect(body.error.message.startsWith("stop_sequences: ")).toBe(true);
   });
+
+  test("names the rejected field on count_tokens", async () => {
+    const response = await post(
+      "/v1/messages/count_tokens",
+      JSON.stringify({
+        model: "tags/deepseek",
+        max_tokens: 16,
+        stop_sequences: 1,
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    );
+
+    const body = v.parse(AnthropicErrorSchema, await response.json());
+
+    expect(response.status).toBe(422);
+    expect(body.error.message.startsWith("stop_sequences: ")).toBe(true);
+  });
 });

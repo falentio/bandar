@@ -45,6 +45,13 @@ describe("filterParams", () => {
     expect(params.model).toEqual(["fast"]);
     expect(params.tag).toEqual(["fast"]);
   });
+
+  test("drops a value that arrives empty", () => {
+    const params = filterParams(new URLSearchParams("projectUrl=&model=%20"));
+
+    expect(params.projectUrl).toEqual([]);
+    expect(params.model).toEqual([]);
+  });
 });
 
 describe("AnalyticsFiltersInputSchema", () => {
@@ -60,6 +67,21 @@ describe("AnalyticsFiltersInputSchema", () => {
     expect(parse("projectUrl=https%3A%2F%2FExample.com%2Fapp%2F").success).toBe(true);
     expect(parse("projectUrl=not-a-url").success).toBe(false);
     expect(parse("projectUrl=ftp%3A%2F%2Fx%2F").success).toBe(false);
+  });
+
+  test("accepts a blank value as no filter in every dimension", () => {
+    const filters = v.parse(
+      AnalyticsFiltersInputSchema,
+      filterParams(new URLSearchParams("providerKind=&providerId=&model=&tag=&projectUrl=")),
+    );
+
+    expect(filters).toEqual({
+      providerKind: [],
+      providerId: [],
+      model: [],
+      tag: [],
+      projectUrl: [],
+    });
   });
 
   test("accepts every dimension together", () => {

@@ -84,6 +84,8 @@ export type ModelCatalogEntry = {
   readonly inputPricePerMtok: number | null;
   readonly cacheInputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;
+  readonly contextWindow?: number | null;
+  readonly maxOutput?: number | null;
 };
 
 export type CatalogRequest = {

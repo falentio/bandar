@@ -122,6 +122,8 @@ export const ProviderModelSchema = v.object({
   inputPricePerMtok: v.nullable(v.number()),
   cacheInputPricePerMtok: v.nullable(v.number()),
   outputPricePerMtok: v.nullable(v.number()),
+  contextWindow: v.nullable(v.number()),
+  maxOutput: v.nullable(v.number()),
   failures: v.number(),
   flaggedUntil: v.nullable(v.string()),
 });
@@ -164,6 +166,8 @@ export const ProviderDetailSchema = v.object({
 
 const ModelLabelSchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100));
 
+const TokenCountSchema = v.pipe(v.number(), v.integer(), v.minValue(1));
+
 export const ProviderModelInputSchema = v.object({
   upstreamModel: v.pipe(
     v.string(),
@@ -176,6 +180,8 @@ export const ProviderModelInputSchema = v.object({
   inputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
   cacheInputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
   outputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+  contextWindow: v.optional(v.nullable(TokenCountSchema)),
+  maxOutput: v.optional(v.nullable(TokenCountSchema)),
 });
 
 export const ProviderModelEditInputSchema = v.object({
@@ -185,6 +191,8 @@ export const ProviderModelEditInputSchema = v.object({
   inputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
   cacheInputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
   outputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
+  contextWindow: v.optional(v.nullable(TokenCountSchema)),
+  maxOutput: v.optional(v.nullable(TokenCountSchema)),
 });
 
 export const ProviderInputSchema = v.object({

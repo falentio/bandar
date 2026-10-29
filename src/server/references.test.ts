@@ -751,7 +751,10 @@ describe("provider models", () => {
         Date.parse("2026-01-03T00:00:00.000Z"),
       );
 
-    expect(applyMigrations(handle.sqlite, all).applied).toEqual(["0013_model_slug"]);
+    expect(applyMigrations(handle.sqlite, all).applied).toEqual([
+      "0013_model_slug",
+      "0014_model_limits",
+    ]);
 
     const rows = handle.sqlite
       .query<{ id: string; slug: string; alias: string | null }, []>(
@@ -1147,6 +1150,7 @@ describe("provider credentials", () => {
       "0011_petite_leopardon",
       "0012_tiresome_amphibian",
       "0013_model_slug",
+      "0014_model_limits",
     ]);
 
     const rows = handle.sqlite
@@ -1213,3 +1217,78 @@ function providerDeps(handle: DatabaseHandle): Promise<ProviderDeps> {
     endpoints: DEFAULT_PROVIDER_ENDPOINTS,
   }));
 }
+
+describe("model limits", () => {
+  const limitsOf = async (): Promise<
+    ReadonlyMap<string, { contextWindow: number | null; maxOutput: number | null }>
+  > => new Map([["gpt-5.1", { contextWindow: 400000, maxOutput: 128000 }]]);
+
+  async function providerWith(deps: ProviderDeps): Promise<Provider> {
+    return createProvider(deps, "user-1", {
+      name: "Kilo",
+      kind: "openai",
+      baseUrl: "https://kilo.example/v1",
+      apiKey: "",
+    });
+  }
+
+  function modelOn(provider: Provider | null, upstreamModel: string) {
+    return provider?.models.find((model) => model.upstreamModel === upstreamModel);
+  }
+
+  test("a new model takes the limits models.dev reports", async () => {
+    const handle = freshDb();
+    const deps: ProviderDeps = { ...(await providerDeps(handle)), modelLimits: limitsOf };
+    const provider = await providerWith(deps);
+
+    const added = await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "gpt-5.1" });
+
+    expect(modelOn(added, "gpt-5.1")).toMatchObject({ contextWindow: 400000, maxOutput: 128000 });
+  });
+
+  test("a value the caller sent wins over models.dev", async () => {
+    const handle = freshDb();
+    const deps: ProviderDeps = { ...(await providerDeps(handle)), modelLimits: limitsOf };
+    const provider = await providerWith(deps);
+
+    const added = await addProviderModel(deps, "user-1", provider.id, {
+      upstreamModel: "gpt-5.1",
+      contextWindow: 200000,
+    });
+
+    expect(modelOn(added, "gpt-5.1")).toMatchObject({ contextWindow: 200000, maxOutput: 128000 });
+  });
+
+  test("a model models.dev does not know keeps null limits", async () => {
+    const handle = freshDb();
+    const deps: ProviderDeps = { ...(await providerDeps(handle)), modelLimits: limitsOf };
+    const provider = await providerWith(deps);
+
+    const added = await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "mystery" });
+
+    expect(modelOn(added, "mystery")).toMatchObject({ contextWindow: null, maxOutput: null });
+  });
+
+  test("an edit writes both limits and can clear one", async () => {
+    const handle = freshDb();
+    const deps: ProviderDeps = { ...(await providerDeps(handle)), modelLimits: limitsOf };
+    const provider = await providerWith(deps);
+    const added = await addProviderModel(deps, "user-1", provider.id, { upstreamModel: "gpt-5.1" });
+    const model = modelOn(added, "gpt-5.1");
+
+    if (model === undefined) throw new Error("the model was not created");
+
+    const edited = await updateProviderModel(deps, "user-1", provider.id, model.id, {
+      slug: model.slug,
+      alias: null,
+      compat: null,
+      inputPricePerMtok: null,
+      cacheInputPricePerMtok: null,
+      outputPricePerMtok: null,
+      contextWindow: 1000,
+      maxOutput: null,
+    });
+
+    expect(modelOn(edited, "gpt-5.1")).toMatchObject({ contextWindow: 1000, maxOutput: null });
+  });
+});

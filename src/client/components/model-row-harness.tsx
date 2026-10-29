@@ -38,6 +38,8 @@ function model(overrides: Partial<ProviderModel>): ProviderModel {
     inputPricePerMtok: null,
     cacheInputPricePerMtok: null,
     outputPricePerMtok: null,
+    contextWindow: null,
+    maxOutput: null,
     failures: 0,
     flaggedUntil: null,
     ...overrides,

@@ -423,6 +423,16 @@ every id it lists with the published price. OpenCode Go is the opposite case: th
 list carries no price and no wire, so the imported set is the table's callable
 rows that the list contains, in table order.
 
+Context windows and max output take a different path. A catalog that reports
+them imports the numbers; otherwise bandar asks [models.dev](https://models.dev)
+for the model id and stores what it finds. models.dev lists one id under many
+providers with different numbers, so a lookup prefers the entry named like the
+provider and otherwise takes the smallest context window: an overstated window
+makes a tool send a request the model rejects, while an understated one only
+truncates. A row with neither number stays null until someone edits it in the
+model dialog, and the generated CLI configs write the numbers where the tool
+accepts them.
+
 ## Errors
 
 Adapters throw one type:

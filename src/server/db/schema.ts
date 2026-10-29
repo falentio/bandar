@@ -73,6 +73,8 @@ export const providerModels = sqliteTable(
     inputPricePerMtok: real("input_price_per_mtok"),
     cacheInputPricePerMtok: real("cache_input_price_per_mtok"),
     outputPricePerMtok: real("output_price_per_mtok"),
+    contextWindow: integer("context_window"),
+    maxOutput: integer("max_output"),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     failures: integer("failures").notNull().default(0),
     flaggedUntil: integer("flagged_until", { mode: "timestamp_ms" }),

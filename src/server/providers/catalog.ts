@@ -73,13 +73,19 @@ export function optionalPrices<T>(read: Promise<T>, signal: AbortSignal): Promis
   });
 }
 
-export function entryOf(upstreamModel: string, prices: ModelPrices = NO_PRICE): ModelCatalogEntry {
+export function entryOf(
+  upstreamModel: string,
+  prices: ModelPrices = NO_PRICE,
+  limits: { readonly contextWindow?: number | null; readonly maxOutput?: number | null } = {},
+): ModelCatalogEntry {
   return {
     upstreamModel,
     label: upstreamModel,
     inputPricePerMtok: prices.inputPricePerMtok,
     cacheInputPricePerMtok: prices.cacheInputPricePerMtok ?? null,
     outputPricePerMtok: prices.outputPricePerMtok,
+    contextWindow: limits.contextWindow ?? null,
+    maxOutput: limits.maxOutput ?? null,
   };
 }
 

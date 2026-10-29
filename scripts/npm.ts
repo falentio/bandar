@@ -20,6 +20,7 @@ const MANIFEST = join(ROOT, "package.json");
 const REPOSITORY = "https://github.com/falentio/bandar";
 const LOADER_NAME = "bandar";
 const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
+const TRUSTED_PUBLISHING_NPM = "11.5.1";
 const VERSION_TEXT = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const VISIBILITY_TIMEOUT = 60_000;
 const VISIBILITY_INTERVAL = 3_000;
@@ -189,6 +190,27 @@ function viewFailure(text: string): string {
   return code ?? text.split("\n").find((line) => line !== "") ?? "npm view printed nothing";
 }
 
+function npmCliVersion(): string | undefined {
+  const result = Bun.spawnSync({ cmd: [NPM, "--version"], stdout: "pipe", stderr: "pipe" });
+
+  return result.exitCode === 0 ? result.stdout.toString().trim() : undefined;
+}
+
+function reaches(actual: string, floor: string): boolean {
+  const parts = (value: string) => value.split(".").map((part) => Number(part));
+
+  const have = parts(actual);
+  const want = parts(floor);
+
+  for (const [index, theirs] of want.entries()) {
+    const mine = have[index] ?? 0;
+
+    if (mine !== theirs) return mine > theirs;
+  }
+
+  return true;
+}
+
 function reportedVersion(): VersionReport {
   if (process.platform !== "linux") return { kind: "skipped" };
 
@@ -211,6 +233,18 @@ function reportedVersion(): VersionReport {
 
 async function preflight(staged: readonly string[]): Promise<void> {
   const problems: string[] = [];
+
+  const cli = npmCliVersion();
+
+  if (cli === undefined) {
+    problems.push(
+      `the npm CLI version could not be read; trusted publishing needs ${TRUSTED_PUBLISHING_NPM} or later`,
+    );
+  } else if (!reaches(cli, TRUSTED_PUBLISHING_NPM)) {
+    problems.push(
+      `the npm CLI is ${cli}; trusted publishing needs ${TRUSTED_PUBLISHING_NPM} or later, so run npm install --global npm@11`,
+    );
+  }
 
   if (!VERSION_TEXT.test(version))
     problems.push(`package.json version ${version} is not a release version`);

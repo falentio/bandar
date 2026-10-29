@@ -13,11 +13,13 @@ import {
   AnalyticsSchema,
   ProjectListSchema,
   RequestListSchema,
+  SessionListSchema,
   analyticsPaths,
   type Analytics,
   type AnalyticsFilters,
   type ProjectList,
   type RequestList,
+  type SessionList,
 } from "../shared/analytics";
 import { CooldownListSchema, cooldownPaths, type CooldownList } from "../shared/cooldowns";
 import {
@@ -164,6 +166,7 @@ export const analyticsApi = {
     return request(`${analyticsPaths.analytics}?${params.toString()}`, AnalyticsSchema);
   },
   projects: (): Promise<ProjectList> => request(analyticsPaths.projects, ProjectListSchema),
+  sessions: (): Promise<SessionList> => request(analyticsPaths.sessions, SessionListSchema),
   requests: (limit = 50, providerId?: string): Promise<RequestList> =>
     request(
       providerId === undefined

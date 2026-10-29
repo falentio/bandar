@@ -12,7 +12,7 @@ import {
 import { PROVIDER_KIND_LABELS, PROVIDER_KINDS, type Provider } from "../../shared/providers";
 import type { Tag } from "../../shared/tags";
 import { modelLabelOf } from "../model-labels";
-import { useProjects } from "../use-projects";
+import { useAnalyticsValues } from "../use-analytics-values";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
 
@@ -41,8 +41,9 @@ type FilterMenuProps = {
 export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProps) {
   const providers = useProviders();
   const tags = useTags();
-  const projects = useProjects();
-  const error = providers.error ?? tags.error ?? projects.error;
+  const projects = useAnalyticsValues("projectUrl");
+  const sessions = useAnalyticsValues("sessionId");
+  const error = providers.error ?? tags.error ?? projects.error ?? sessions.error;
 
   const update = (dimension: AnalyticsFilterDimension, values: readonly string[]): void => {
     onChange({ ...filters, [dimension]: [...values] });
@@ -76,11 +77,19 @@ export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProp
       />
       <FilterMenu
         label="Project"
-        options={projectOptions(projects.projects)}
+        options={valueOptions(projects.values)}
         selected={filters.projectUrl}
         onChange={(values) => update("projectUrl", values)}
         onOpen={projects.refresh}
         emptyLabel="No projects yet"
+      />
+      <FilterMenu
+        label="Session"
+        options={valueOptions(sessions.values)}
+        selected={filters.sessionId}
+        onChange={(values) => update("sessionId", values)}
+        onOpen={sessions.refresh}
+        emptyLabel="No sessions yet"
       />
       {hasAnalyticsFilters(filters) ? (
         <Button variant="ghost" size="sm" onClick={() => onChange(EMPTY_ANALYTICS_FILTERS)}>
@@ -200,8 +209,8 @@ function tagOptions(tags: readonly Tag[]): readonly FilterOption[] {
   return tags.map((tag) => ({ value: tag.slug, label: tag.ref }));
 }
 
-function projectOptions(projects: readonly string[]): readonly FilterOption[] {
-  return projects.map((url) => ({ value: url, label: url }));
+function valueOptions(values: readonly string[]): readonly FilterOption[] {
+  return values.map((value) => ({ value, label: value }));
 }
 
 function triggerLabel(

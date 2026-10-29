@@ -25,7 +25,18 @@ describe("filterParams", () => {
       providerId: [],
       model: [],
       tag: [],
+      projectUrl: [],
     });
+  });
+
+  test("collects repeated project url values as sent", () => {
+    const params = filterParams(
+      new URLSearchParams(
+        "projectUrl=https%3A%2F%2Facme.test%2Fapp&projectUrl=https%3A%2F%2Facme.test%2Fother",
+      ),
+    );
+
+    expect(params.projectUrl).toEqual(["https://acme.test/app", "https://acme.test/other"]);
   });
 
   test("keeps a value repeated across dimensions separate", () => {
@@ -45,6 +56,12 @@ describe("AnalyticsFiltersInputSchema", () => {
     expect(parse("tag=Not A Tag").success).toBe(false);
   });
 
+  test("accepts a project url a human typed and rejects anything else", () => {
+    expect(parse("projectUrl=https%3A%2F%2FExample.com%2Fapp%2F").success).toBe(true);
+    expect(parse("projectUrl=not-a-url").success).toBe(false);
+    expect(parse("projectUrl=ftp%3A%2F%2Fx%2F").success).toBe(false);
+  });
+
   test("accepts every dimension together", () => {
     const filters = v.parse(
       AnalyticsFiltersInputSchema,
@@ -58,6 +75,7 @@ describe("AnalyticsFiltersInputSchema", () => {
       providerId: ["provider-1"],
       model: ["fast"],
       tag: ["failover"],
+      projectUrl: [],
     });
   });
 

@@ -1,7 +1,14 @@
 import * as v from "valibot";
+import { ProjectUrlSchema } from "./project";
 import { MAX_MODEL_REF_LENGTH, SlugSchema } from "./slugs";
 
-export const ANALYTICS_FILTER_DIMENSIONS = ["providerKind", "providerId", "model", "tag"] as const;
+export const ANALYTICS_FILTER_DIMENSIONS = [
+  "providerKind",
+  "providerId",
+  "model",
+  "tag",
+  "projectUrl",
+] as const;
 
 const AnalyticsFilterValuesSchema = v.pipe(
   v.array(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH))),
@@ -10,11 +17,14 @@ const AnalyticsFilterValuesSchema = v.pipe(
 
 const AnalyticsFilterTagsSchema = v.pipe(v.array(SlugSchema), v.maxLength(50));
 
+const AnalyticsFilterProjectUrlsSchema = v.pipe(v.array(ProjectUrlSchema), v.maxLength(50));
+
 export const AnalyticsFiltersSchema = v.object({
   providerKind: AnalyticsFilterValuesSchema,
   providerId: AnalyticsFilterValuesSchema,
   model: AnalyticsFilterValuesSchema,
   tag: AnalyticsFilterTagsSchema,
+  projectUrl: AnalyticsFilterProjectUrlsSchema,
 });
 
 export const AnalyticsSummarySchema = v.object({
@@ -123,6 +133,7 @@ export const EMPTY_ANALYTICS_FILTERS: AnalyticsFilters = {
   providerId: [],
   model: [],
   tag: [],
+  projectUrl: [],
 };
 
 export function hasAnalyticsFilters(filters: AnalyticsFilters): boolean {

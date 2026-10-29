@@ -298,7 +298,7 @@ SQLite migrations: 14 files under `drizzle/` (0000_init through 0013_model_slug)
 
 The table is `request_events` (`duckdb/0001_analytics.sql:1-21`), plus a `reference` column from the second migration (`duckdb/0002_request_reference.sql:1`). Index on (user_id, started_at) at `duckdb/0001_analytics.sql:23-24`.
 
-Columns: id (PK), user_id, api_key_id, provider_id, provider_kind, model, upstream_model, status, http_status, error_kind, streamed, input_tokens, output_tokens, total_tokens, cost_usd, ttft_ms, duration_ms, tokens_per_second, started_at (`duckdb/0001_analytics.sql:1-21`), reference (`duckdb/0002_request_reference.sql:1`).
+Columns: id (PK), user_id, api_key_id, provider_id, provider_kind, model, upstream_model, status, http_status, error_kind, streamed, input_tokens, output_tokens, total_tokens, cost_usd, ttft_ms, duration_ms, tokens_per_second, started_at (`duckdb/0001_analytics.sql:1-21`), reference (`duckdb/0002_request_reference.sql:1`), project_url (`duckdb/0003_request_project_url.sql:1`).
 
 One row per attempt, failed attempts included, written by `recordRequest` (`src/server/router/record.ts:28-76`). Derived at write time: `tokens_per_second` (`src/server/router/record.ts:29-33`), `cost_usd` (`src/server/router/record.ts:35-40`), `total_tokens` (`src/server/router/record.ts:42-45`). `status` is `success | error | aborted` (`src/server/router/record.ts:5`).
 
@@ -308,7 +308,7 @@ DuckDB migrations use the same ledger pattern (`_bandar_duck_migrations`, `src/s
 
 Reads. `readAnalytics` returns a summary (requests, errors, tokens, avg TPS, avg TTFT, p50/p95 from `approx_quantile`, cost), a daily series built from `generate_series` left-joined so empty days survive, and the top 20 models by token volume (`src/server/analytics.ts:113-214`; filter-placement note at `src/server/analytics.ts:144`). `readRequests` returns the last N events, optionally scoped to one provider (`src/server/analytics.ts:216-256`). `readProviderUsage` returns one provider's totals plus `last_request_at` (`src/server/analytics.ts:258-299`).
 
-Filters are four dimensions: providerKind, providerId, model, tag, mapped to columns at `src/server/analytics.ts:106-111`. A tag filter is matched against the stored `tags/<slug>` reference (`src/server/analytics.ts:313-314`).
+Filters are five dimensions: providerKind, providerId, model, tag, projectUrl, each with its column and its value normalizer in `FILTER_SPECS` (`src/server/analytics.ts:114-121`). A tag filter is matched against the stored `tags/<slug>` reference; a project filter is normalized by `projectUrlOf` (`src/shared/project.ts:7-24`).
 
 ### 3.3 The cooldown model
 

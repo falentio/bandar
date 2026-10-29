@@ -13,5 +13,6 @@ export function filterParams(search: URLSearchParams): Record<AnalyticsFilterDim
     providerId: search.getAll("providerId"),
     model: search.getAll("model"),
     tag: search.getAll("tag"),
+    projectUrl: search.getAll("projectUrl"),
   };
 }

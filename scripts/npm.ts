@@ -231,11 +231,26 @@ function reportedVersion(): VersionReport {
 
     if (!existsSync(artifact)) return { kind: "skipped" };
 
-    const result = Bun.spawnSync({ cmd: [artifact, "--version"], stdout: "pipe", stderr: "pipe" });
+    // actions/download-artifact drops file modes, so the asset arrives 644 and cannot be spawned.
+    chmodSync(artifact, 0o755);
 
-    if (result.exitCode !== 0) return { kind: "unreadable" };
+    let reported: string;
 
-    return { kind: "ok", value: result.stdout.toString().trim() };
+    try {
+      const result = Bun.spawnSync({
+        cmd: [artifact, "--version"],
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+
+      if (result.exitCode !== 0) return { kind: "unreadable" };
+
+      reported = result.stdout.toString().trim();
+    } catch {
+      return { kind: "unreadable" };
+    }
+
+    return { kind: "ok", value: reported };
   }
 
   return { kind: "skipped" };

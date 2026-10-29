@@ -15,6 +15,7 @@ import { openai } from "./openai";
 import { river } from "./river";
 import { tokenharbor } from "./tokenharbor";
 import { yeta } from "./yeta";
+import { zro } from "./zro";
 import type {
   BuiltInProviderDefinition,
   BuiltInProviderDefinitions,
@@ -36,6 +37,7 @@ const builtInDefinitions = {
   nous,
   hyper,
   opencode,
+  zro,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {

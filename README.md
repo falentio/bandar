@@ -31,10 +31,11 @@ provider, the model, and the credential of that attempt. When every attempt in a
 is cooling down, the gateway runs the plan anyway as a probe, so a request never
 fails only because everything is flagged.
 
-**Seven built-in providers.** Kilo Code, Token Harbor, Yeta, River, Nous Portal,
-Hyper, and OpenCode Go are on every account, seeded empty. Kilo Code and Nous Portal
+**Eight built-in providers.** Kilo Code, Token Harbor, Yeta, River, Nous Portal,
+Hyper, OpenCode Go, and Zro are on every account, seeded empty. Kilo Code and Nous Portal
 sign in with a device code. OpenCode Go picks a wire per model across the chat,
-responses, messages, and GenAI endpoints. Three generic wires, `openai`, `anthropic`,
+responses, messages, and GenAI endpoints. Zro answers chat and messages from one base
+URL, and defaults every model to chat. Three generic wires, `openai`, `anthropic`,
 and `google`, cover a custom upstream added from the dashboard without changing code.
 
 **Analytics that survive a deletion.** Every attempt writes one row to DuckDB:
@@ -198,6 +199,7 @@ http or https URL, and only the fields its kind uses exist:
 | `nous`        | `baseUrl`, `authUrl`    |
 | `hyper`       | `baseUrl`               |
 | `opencode`    | `baseUrl`               |
+| `zro`         | `baseUrl`               |
 
 `baseUrl` is the full wire base, mount included. `catalogUrl` is the model catalog
 document. `authUrl` is the OAuth origin and prefix. Kilo Code has no `authUrl`: its
@@ -285,6 +287,7 @@ providers.nous.baseUrl         https://inference-api.nousresearch.com/v1 (defaul
 providers.nous.authUrl         https://portal.nousresearch.com (default)
 providers.hyper.baseUrl        https://hyper.charm.land/v1 (default)
 providers.opencode.baseUrl     https://opencode.ai/inference (default)
+providers.zro.baseUrl          https://zro.moonmath.ai/v1 (default)
 update.webUrl                  https://github.com/falentio/bandar (default)
 update.apiUrl                  none (default)
 ```

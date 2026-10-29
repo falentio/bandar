@@ -75,6 +75,7 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   nous: BUILT_IN_PROVIDERS.nous.baseUrl,
   hyper: BUILT_IN_PROVIDERS.hyper.baseUrl,
   opencode: BUILT_IN_PROVIDERS.opencode.baseUrl,
+  zro: BUILT_IN_PROVIDERS.zro.baseUrl,
 };
 
 function credentialsTabName(authModes: readonly ProviderAuthMode[]): string {

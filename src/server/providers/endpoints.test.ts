@@ -39,6 +39,7 @@ describe("provider endpoints", () => {
       },
       hyper: { baseUrl: "https://hyper.charm.land/v1", catalogUrl: null, authUrl: null },
       opencode: { baseUrl: "https://opencode.ai/inference", catalogUrl: null, authUrl: null },
+      zro: { baseUrl: "https://zro.moonmath.ai/v1", catalogUrl: null, authUrl: null },
     });
   });
 
@@ -62,6 +63,7 @@ describe("provider endpoints", () => {
     expect(endpointSpecsFor("nous").authUrl?.env).toBe("BANDAR_NOUS_PORTAL");
     expect(endpointSpecsFor("hyper").baseUrl.env).toBe("BANDAR_HYPER_API");
     expect(endpointSpecsFor("opencode").baseUrl.env).toBe("BANDAR_OPENCODE_API");
+    expect(endpointSpecsFor("zro").baseUrl.env).toBe("BANDAR_ZRO_API");
   });
 
   test("the mounts are the path each kind appends to an origin", () => {
@@ -73,6 +75,7 @@ describe("provider endpoints", () => {
       nous: "/v1",
       hyper: "/v1",
       opencode: "/inference",
+      zro: "/v1",
     });
   });
 

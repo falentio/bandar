@@ -316,6 +316,7 @@ function resolveProviders(
       nous: endpoint("nous"),
       hyper: endpoint("hyper"),
       opencode: endpoint("opencode"),
+      zro: endpoint("zro"),
     },
     rows,
   };

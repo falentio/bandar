@@ -54,7 +54,7 @@ function fail(reason: string): never {
   process.exit(1);
 }
 
-function split(key: string): { os: string; arch: string } {
+function split(key: string) {
   const dash = key.indexOf("-");
 
   return { os: key.slice(0, dash), arch: key.slice(dash + 1) };
@@ -98,7 +98,7 @@ function platforms(args: readonly string[]): readonly string[] {
   return keys;
 }
 
-function shared(name: string, description: string): Record<string, unknown> {
+function shared(name: string, description: string) {
   return {
     name,
     version,
@@ -111,7 +111,7 @@ function shared(name: string, description: string): Record<string, unknown> {
   };
 }
 
-function platformManifest(key: string, platform: Platform): Record<string, unknown> {
+function platformManifest(key: string, platform: Platform) {
   const { os, arch } = split(key);
 
   return {
@@ -123,7 +123,7 @@ function platformManifest(key: string, platform: Platform): Record<string, unkno
   };
 }
 
-function loaderManifest(staged: readonly string[]): Record<string, unknown> {
+function loaderManifest(staged: readonly string[]) {
   const installed = [...PACKAGES.values()].filter((platform) => staged.includes(platform.name));
 
   return {
@@ -185,7 +185,7 @@ function stagedOnDisk(): readonly string[] {
     .map((entry) => entry.name);
 }
 
-function view(args: readonly string[]): { readonly ok: boolean; readonly text: string } {
+function view(args: readonly string[]) {
   const result = Bun.spawnSync({ cmd: [NPM, "view", ...args, "--json"], stdout: "pipe", stderr: "pipe" });
 
   return { ok: result.exitCode === 0, text: result.stdout.toString().trim() };

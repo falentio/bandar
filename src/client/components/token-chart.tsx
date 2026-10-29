@@ -8,7 +8,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import type { DailyUsage } from "../../shared/analytics";
-import { formatDay, formatTokens } from "../format";
+import { formatDay, formatExactTokens, formatTokens } from "../format";
 
 const chartConfig = {
   inputTokens: { label: "Input", color: "var(--chart-2)" },
@@ -16,6 +16,8 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 export function TokenChart({ daily }: { daily: readonly DailyUsage[] }) {
+  const requestsByDate = new Map(daily.map((day): [string, number] => [day.date, day.requests]));
+
   return (
     <ChartContainer config={chartConfig} className="aspect-auto h-56 w-full">
       <BarChart accessibilityLayer data={[...daily]}>
@@ -35,7 +37,18 @@ export function TokenChart({ daily }: { daily: readonly DailyUsage[] }) {
           tickFormatter={formatTokens}
         />
         <ChartTooltip
-          content={<ChartTooltipContent labelFormatter={(label) => formatDay(String(label))} />}
+          content={
+            <ChartTooltipContent
+              labelFormatter={(label) => {
+                const date = String(label);
+                const requests = requestsByDate.get(date);
+
+                return requests === undefined
+                  ? formatDay(date)
+                  : `${formatDay(date)} · ${formatExactTokens(requests)} requests`;
+              }}
+            />
+          }
         />
         <ChartLegend content={<ChartLegendContent />} />
         <Bar

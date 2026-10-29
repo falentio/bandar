@@ -6,7 +6,7 @@ import * as RechartsPrimitive from "recharts";
 import type { TooltipValueType } from "recharts";
 import * as v from "valibot";
 
-const THEMES = { light: "", dark: ".dark" };
+const THEMES = { light: "", dark: ".dark" } as const;
 
 const INITIAL_DIMENSION = { width: 320, height: 200 } as const;
 
@@ -17,7 +17,10 @@ export type ChartConfig = Record<
   {
     label?: React.ReactNode;
     icon?: React.ComponentType;
-  } & ({ color?: string; theme?: never } | { color?: never; theme: Record<string, string> })
+  } & (
+    | { color?: string; theme?: never }
+    | { color?: never; theme: Record<keyof typeof THEMES, string> }
+  )
 >;
 
 type ChartContextProps = {
@@ -74,6 +77,10 @@ function ChartContainer({
   );
 }
 
+function isTheme(value: string): value is keyof typeof THEMES {
+  return Object.hasOwn(THEMES, value);
+}
+
 function ChartStyle({ id, config }: { id: string; config: ChartConfig }) {
   const colorConfig = Object.entries(config).filter(
     ([, entry]) => entry.theme !== undefined || entry.color !== undefined,
@@ -87,7 +94,7 @@ function ChartStyle({ id, config }: { id: string; config: ChartConfig }) {
     .map(([theme, prefix]) => {
       const declarations = colorConfig
         .map(([key, entry]) => {
-          const color = entry.theme?.[theme] ?? entry.color;
+          const color = (isTheme(theme) ? entry.theme?.[theme] : undefined) ?? entry.color;
 
           return color === undefined ? null : `  --color-${key}: ${color};`;
         })
@@ -98,6 +105,21 @@ function ChartStyle({ id, config }: { id: string; config: ChartConfig }) {
     .join("\n");
 
   return <style>{css}</style>;
+}
+
+const ChartRowSchema = v.record(v.string(), v.union([v.string(), v.number(), v.null()]));
+
+type ChartRow = v.InferOutput<typeof ChartRowSchema>;
+
+// The registry's resolver narrows its entry with `typeof`, which anti-slop/no-runtime-typeof forbids; the row is parsed instead.
+function getPayloadConfigFromPayload(
+  config: ChartConfig,
+  row: ChartRow | undefined,
+  key: string,
+): ChartConfig[string] | undefined {
+  const override = v.safeParse(v.string(), row?.[key]);
+
+  return config[override.success ? override.output : key] ?? config[key];
 }
 
 function resolvedLabel(config: ChartConfig, label: React.ReactNode): React.ReactNode {
@@ -144,7 +166,7 @@ function ChartTooltipContent({
 
     const [item] = payload;
     const key = String(labelKey ?? item?.dataKey ?? item?.name ?? "value");
-    const itemConfig = config[key];
+    const itemConfig = getPayloadConfigFromPayload(config, item?.payload, key);
 
     const value = labelKey === undefined ? resolvedLabel(config, label) : itemConfig?.label;
 
@@ -182,7 +204,7 @@ function ChartTooltipContent({
           }
 
           const entryKey = String(nameKey ?? item.name ?? item.dataKey ?? "value");
-          const itemConfig = config[entryKey];
+          const itemConfig = getPayloadConfigFromPayload(config, item.payload, entryKey);
           const indicatorColor = color ?? item.fill ?? item.color ?? itemConfig?.color;
 
           return (
@@ -232,7 +254,7 @@ function ChartTooltipContent({
                         {itemConfig?.label ?? item.name}
                       </span>
                     </div>
-                    {item.value === undefined ? null : (
+                    {item.value === undefined || item.value === null ? null : (
                       <span className="font-mono font-medium text-foreground tabular-nums">
                         {item.value.toLocaleString()}
                       </span>
@@ -280,7 +302,13 @@ function ChartLegendContent({
         }
 
         const key = String(nameKey ?? item.dataKey ?? "value");
-        const itemConfig = config[key];
+        const row = v.safeParse(ChartRowSchema, item.payload);
+
+        const itemConfig = getPayloadConfigFromPayload(
+          config,
+          row.success ? row.output : undefined,
+          key,
+        );
 
         return (
           <div

@@ -43,6 +43,13 @@ describe("the tailnet", () => {
     });
   });
 
+  test("a document without a Self object is missing", () => {
+    expect(parseTailnetStatus(status())).toEqual({
+      kind: "missing",
+      reason: "tailscale reports no MagicDNS name or address",
+    });
+  });
+
   test("stdout that is not a status document is missing", () => {
     expect(parseTailnetStatus("not json")).toEqual({
       kind: "missing",

@@ -44,7 +44,7 @@ describe("gateway schema rejections", () => {
 
     expect(response.status).toBe(422);
     expect(body.error.param).toBe("stop");
-    expect(body.error.message).toContain("stop");
+    expect(body.error.message.startsWith("stop: ")).toBe(true);
   });
 
   test("names the rejected nested field", async () => {
@@ -55,8 +55,9 @@ describe("gateway schema rejections", () => {
 
     const body = v.parse(OpenAiErrorSchema, await response.json());
 
+    expect(response.status).toBe(422);
     expect(body.error.param).toBe("messages.0.content");
-    expect(body.error.message).toContain("messages.0.content");
+    expect(body.error.message.startsWith("messages.0.content: ")).toBe(true);
   });
 
   test("names the rejected field on the anthropic surface", async () => {
@@ -72,6 +73,7 @@ describe("gateway schema rejections", () => {
 
     const body = v.parse(AnthropicErrorSchema, await response.json());
 
-    expect(body.error.message).toContain("stop_sequences");
+    expect(response.status).toBe(422);
+    expect(body.error.message.startsWith("stop_sequences: ")).toBe(true);
   });
 });

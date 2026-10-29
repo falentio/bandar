@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite-plus";
 import { loadConfig } from "./src/server/config";
 import { settingsReadIo } from "./src/server/settings-io";
-import { DEV_WEB_PORT, originForHost } from "./src/shared/topology";
+import { DEV_WEB_PORT, originToDial } from "./src/shared/topology";
 
 const ignored = [
   "src/server/generated/**",
@@ -57,8 +57,8 @@ export default defineConfig({
     allowedHosts: [".ts.net"],
     proxy: {
       // Segment match, not a prefix: /api-keys is a client route, not the API.
-      "^/api(?:/|$)": { target: originForHost(config.host, config.port), changeOrigin: true },
-      "^/v1(?:/|$)": { target: originForHost(config.host, config.port), changeOrigin: true },
+      "^/api(?:/|$)": { target: originToDial(config.host, config.port), changeOrigin: true },
+      "^/v1(?:/|$)": { target: originToDial(config.host, config.port), changeOrigin: true },
     },
   },
   fmt: { ignorePatterns: ignored },

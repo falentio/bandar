@@ -13,7 +13,8 @@ export const loopbackOrigin = (port: number): string => httpOrigin("127.0.0.1", 
 /** A wildcard bind listens on every interface, so its own address is not an origin to open. */
 export const isWildcardHost = (host: string): boolean => host === "0.0.0.0" || host === "::";
 
-export const originForHost = (host: string, port: number): string =>
+/** The origin this machine dials to reach a server on `host`; a wildcard bind answers on loopback. */
+export const originToDial = (host: string, port: number): string =>
   httpOrigin(isWildcardHost(host) ? "127.0.0.1" : host, port);
 
 /**

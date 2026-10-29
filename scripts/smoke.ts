@@ -2682,7 +2682,7 @@ try {
 
     assert.equal(body.error.type, "invalid_request_error");
     assert.match(body.error.message, /tool_use/);
-    assert.match(body.error.message, /messages\[1\]\.content\[1\]/);
+    assert.match(body.error.message, /messages\.1\.content\.1/);
   });
 
   await check(

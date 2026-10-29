@@ -29,6 +29,7 @@ import {
   type HttpSend,
   type UpdateRun,
 } from "./update";
+import type { UpdateEvent } from "./update-progress";
 
 const workspaces: string[] = [];
 
@@ -196,6 +197,7 @@ type Recorded = {
   readonly run: UpdateRun;
   readonly lines: string[];
   readonly errors: string[];
+  readonly events: UpdateEvent[];
   readonly requests: Request[];
 };
 
@@ -213,17 +215,19 @@ const runOf = (fixture: Fixture, options: RunOptions): Recorded => {
   const lines: string[] = [];
   const errors: string[] = [];
   const requests: Request[] = [];
+  const events: UpdateEvent[] = [];
   const send: HttpSend = options.send ?? (async () => ({ status: 404, body: new Uint8Array() }));
 
-  const recording: HttpSend = async (url, headers, redirect = "follow") => {
+  const recording: HttpSend = async (url, headers, redirect = "follow", onBytes) => {
     requests.push({ url, accept: headers.Accept, authorization: headers.Authorization, redirect });
 
-    return send(url, headers, redirect);
+    return send(url, headers, redirect, onBytes);
   };
 
   return {
     lines,
     errors,
+    events,
     requests,
     run: {
       configDir: fixture.configDir,
@@ -237,6 +241,7 @@ const runOf = (fixture: Fixture, options: RunOptions): Recorded => {
       stderr: (line) => errors.push(line),
       send: recording,
       canWrite: () => options.canWrite ?? true,
+      report: (event) => events.push(event),
     },
   };
 };
@@ -447,6 +452,18 @@ describe("update --check", () => {
     expect(recorded.requests[0]?.redirect).toBe("manual");
   });
 
+  test("a report of the latest release reports only the check", async () => {
+    const fixture = fixtureOf(null);
+
+    const recorded = runOf(fixture, {
+      argv: ["--check"],
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(recorded.events).toEqual([{ kind: "checking" }]);
+  });
+
   test("the same version is up-to-date", async () => {
     const fixture = fixtureOf(null);
 
@@ -607,6 +624,68 @@ describe("bandar update", () => {
       releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64"),
       releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.sha256"),
     ]);
+  });
+
+  test("the anonymous flow reports every phase it enters", async () => {
+    const fixture = fixtureOf("install-script");
+    const bytes = encode("new binary payload");
+    const serving = publicServing({ version: "0.2.0", bytes });
+    const asset = releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64");
+
+    const recorded = runOf(fixture, {
+      send: async (url, headers, redirect, onBytes) => {
+        if (url === asset) {
+          onBytes?.(9, 18);
+          onBytes?.(18, 18);
+        }
+
+        return serving(url, headers, redirect);
+      },
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(recorded.events).toEqual([
+      { kind: "checking" },
+      { kind: "downloading", asset: "bandar-0.2.0-linux-x64", received: 9, total: 18 },
+      { kind: "downloading", asset: "bandar-0.2.0-linux-x64", received: 18, total: 18 },
+      { kind: "verifying", bytes: 18 },
+      { kind: "installing", target: fixture.target },
+    ]);
+    expect(recorded.errors).toEqual([]);
+  });
+
+  test("the checksum download draws no row of its own", async () => {
+    const fixture = fixtureOf("install-script");
+    const serving = publicServing({ version: "0.2.0", bytes: encode("new binary payload") });
+    const checksum = releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.sha256");
+
+    const recorded = runOf(fixture, {
+      send: async (url, headers, redirect, onBytes) => {
+        onBytes?.(1, 1);
+
+        return serving(url, headers, redirect);
+      },
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+
+    const drawn = recorded.events.flatMap((event) =>
+      event.kind === "downloading" ? [event.asset] : [],
+    );
+
+    expect(drawn).toEqual(["bandar-0.2.0-linux-x64"]);
+    expect(recorded.requests.map((request) => request.url)).toContain(checksum);
+  });
+
+  test("an unknown source reports no phase at all", async () => {
+    const fixture = fixtureOf(null);
+
+    const recorded = runOf(fixture, {
+      send: publicServing({ version: "0.2.0", bytes: encode("new") }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.events).toEqual([]);
   });
 
   test("a manual copy may be replaced too", async () => {
@@ -905,6 +984,20 @@ describe("bandar update --archive", () => {
     expect(decode(readFileSync(fixture.target))).toBe("archived binary payload");
     expect(statSync(fixture.target).mode & 0o777).toBe(0o755);
     expect(recorded.requests).toEqual([]);
+  });
+
+  test("an archive reports the verify and the install with no network phase", async () => {
+    const fixture = archiveFixture();
+
+    const recorded = runOf(fixture, {
+      argv: ["--archive", fixture.archive],
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(recorded.events).toEqual([
+      { kind: "verifying", bytes: 23 },
+      { kind: "installing", target: fixture.target },
+    ]);
   });
 
   test("a mismatched archive is refused and the binary keeps its bytes", async () => {

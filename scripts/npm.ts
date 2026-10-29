@@ -67,7 +67,7 @@ const argv = process.argv.slice(2);
 const RELEASE = releaseDirectory(argv);
 
 if (argv.includes("--stage")) {
-  await stage(platforms(argv));
+  await stage();
 } else if (argv.includes("--preflight")) {
   await preflight(stagedOnDisk());
 } else if (argv.includes("--publish")) {
@@ -108,23 +108,6 @@ function releaseDirectory(args: readonly string[]): string {
   const path = index === -1 ? undefined : args[index + 1];
 
   return path === undefined ? join(ROOT, "dist", "release") : resolve(path);
-}
-
-function platforms(args: readonly string[]): readonly string[] {
-  const keys: string[] = [];
-
-  for (const [index, arg] of args.entries()) {
-    if (arg !== "--platform") continue;
-
-    const key = args[index + 1];
-
-    if (key === undefined || !PACKAGES.has(key))
-      fail(`--platform needs one of ${[...PACKAGES.keys()].join(", ")}`);
-
-    keys.push(key);
-  }
-
-  return keys;
 }
 
 function shared(name: string, description: string) {
@@ -175,14 +158,12 @@ function writeManifest(directory: string, manifest: Manifest): void {
 }
 
 /** Copies the release assets into publishable directories. The asset is the only source of bytes. */
-async function stage(only: readonly string[]): Promise<void> {
+async function stage(): Promise<void> {
   rmSync(OUTPUT, { recursive: true, force: true });
 
   const staged: string[] = [];
 
   for (const [key, platform] of PACKAGES) {
-    if (only.length > 0 && !only.includes(key)) continue;
-
     const artifact = join(RELEASE, artifactName(key, platform));
 
     if (!existsSync(artifact)) fail(`${artifact} is missing; run bun scripts/release.ts first`);

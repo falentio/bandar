@@ -630,11 +630,12 @@ describe("bandar update", () => {
 
     expect(await runUpdate(recorded.run)).toBe(1);
     expect(recorded.errors).toHaveLength(1);
-    expect(recorded.errors[0]).toContain('"npm install -g bandar@latest"');
-    expect(recorded.errors[0]).toContain("install.sh");
-    expect(recorded.errors[0].indexOf("bandar@latest")).toBeLessThan(
-      recorded.errors[0].indexOf("install.sh"),
-    );
+
+    const message = recorded.errors[0] ?? "";
+
+    expect(message).toContain('"npm install -g bandar@latest"');
+    expect(message).toContain("install.sh");
+    expect(message.indexOf("bandar@latest")).toBeLessThan(message.indexOf("install.sh"));
     expect(recorded.lines).toEqual([]);
     expect(decode(readFileSync(fixture.target))).toBe("old binary");
     expect(existsSync(join(fixture.configDir, "install.json"))).toBe(false);

@@ -242,6 +242,57 @@ A build without that subcommand, or one that does not finish within `BANDAR_SERV
 prints one line that says the service step was skipped. The installer still exits 0, because the
 binary is installed.
 
+## Install from npm
+
+```sh
+npm install -g bandar
+```
+
+npm publishes two layers per release. A package named `bandar` holds the loader, under 4 KB,
+and no server code. One package per platform, `bandar-linux-x64` and `bandar-windows-x64`, carries
+the release asset for that platform, byte for byte.
+
+The loader package lists the platform packages as `optionalDependencies`, and npm installs the one
+that matches the machine. A global install holds three things under the npm prefix
+(`npm prefix -g`):
+
+```text
+lib/node_modules/bandar/                  the loader
+lib/node_modules/bandar/node_modules/…    the platform package npm picked
+bin/bandar                                the command, a shim to the loader
+```
+
+npm may hoist the platform package beside `bandar` instead; the loader resolves it either way.
+
+Nothing runs at install time. No package declares `postinstall`, `prepare`, or any other lifecycle
+script, and nothing is downloaded on the first run either, because the binary is already inside the
+tarball npm resolved. `--ignore-scripts` changes nothing, and neither does a package manager that
+skips lifecycle scripts by default.
+
+npm does the platform selection itself. Each platform package declares `os`, `cpu`, and, on Linux,
+`libc: ["glibc"]`, so npm installs one of them and drops the other, and a musl system such as
+Alpine gets an unsupported platform instead of a binary that cannot start. The loader package
+deliberately carries no `os` field: npm would otherwise refuse the whole install with a bare
+`EBADPLATFORM`, before anything could explain it. The install succeeds instead, and the first run
+refuses in one line:
+
+```text
+bandar: bandar has no npm build for darwin-arm64; npm ships linux-x64, win32-x64
+```
+
+An npm copy belongs to npm's tree, which owns the path and the recorded version. Replacing the
+binary behind npm's back would leave the two disagreeing, so `bandar update` refuses an npm copy
+and names the npm command; [update.md](./update.md#an-npm-install) prints the line. Update and
+remove it with npm:
+
+```sh
+npm install -g bandar@latest
+npm uninstall -g bandar
+```
+
+`bandar update --check` still reports the installed and latest versions for an npm copy, because a
+report writes nothing.
+
 ## Manual build
 
 For a source checkout, build and place the binary yourself:
@@ -284,4 +335,11 @@ against it, with a temporary install and config directory:
 ```sh
 sh -n install.sh
 scripts/install-test.sh
+```
+
+`scripts/npm-test.sh` stages, packs, and installs the npm packages from a stub registry on
+`127.0.0.1`, with a temporary prefix:
+
+```sh
+scripts/npm-test.sh
 ```

@@ -9,10 +9,21 @@ export const AnalyticsFiltersInputSchema = v.object({
 
 export function filterParams(search: URLSearchParams): Record<AnalyticsFilterDimension, string[]> {
   return {
-    providerKind: search.getAll("providerKind"),
-    providerId: search.getAll("providerId"),
-    model: search.getAll("model"),
-    tag: search.getAll("tag"),
-    projectUrl: search.getAll("projectUrl"),
+    providerKind: nonBlankValues(search, "providerKind"),
+    providerId: nonBlankValues(search, "providerId"),
+    model: nonBlankValues(search, "model"),
+    tag: nonBlankValues(search, "tag"),
+    projectUrl: nonBlankValues(search, "projectUrl"),
   };
+}
+
+export function nonBlankValues(
+  search: URLSearchParams,
+  dimension: AnalyticsFilterDimension,
+): string[] {
+  return search.getAll(dimension).filter((value) => !isBlank(value));
+}
+
+export function isBlank(value: string): boolean {
+  return value.trim() === "";
 }

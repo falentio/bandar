@@ -678,6 +678,17 @@ try {
       requests.requests.map((request) => request.model),
       ["claude"],
     );
+
+    const allProviders = await getJson(
+      `${analyticsPaths.requests}?limit=10&providerId=`,
+      RequestListSchema,
+      200,
+    );
+
+    assert.ok(
+      allProviders.requests.length > requests.requests.length,
+      "a blank provider filter still narrowed the list",
+    );
   });
 
   await check("GET /api/analytics filters by provider, account and model", async () => {
@@ -776,6 +787,14 @@ try {
     );
 
     assert.equal(rejected.status, 422);
+
+    const blank = await getJson(
+      `${analyticsPaths.analytics}?days=30&projectUrl=`,
+      AnalyticsSchema,
+      200,
+    );
+
+    assert.equal(blank.summary.requests, after.summary.requests);
   });
 
   await check("POST /api/providers cannot create another built-in provider", async () => {

@@ -24,7 +24,7 @@ import {
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import { readAnalytics, readProjectUrls, readProviderUsage, readRequests } from "./analytics";
-import { AnalyticsFiltersInputSchema, filterParams } from "./analytics-filters";
+import { AnalyticsFiltersInputSchema, filterParams, isBlank } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import { createBackup } from "./backup";
 import { isUniqueViolation } from "./db/client";
@@ -91,7 +91,10 @@ const RequestsQuerySchema = v.object({
     v.pipe(v.string(), v.transform(Number), v.integer(), v.minValue(1), v.maxValue(200)),
     "50",
   ),
-  providerId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(100))),
+  providerId: v.pipe(
+    v.optional(v.pipe(v.string(), v.maxLength(100))),
+    v.transform((value) => (value === undefined || isBlank(value) ? undefined : value)),
+  ),
 });
 
 export function createApi(deps: ApiDeps) {

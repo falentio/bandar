@@ -13,7 +13,7 @@ export type Manifest = {
   readonly repository: { readonly type: string; readonly url: string };
   readonly homepage: string;
   readonly bugs: { readonly url: string };
-  readonly publishConfig: { readonly access: string; readonly provenance: boolean };
+  readonly publishConfig: { readonly access: string };
   readonly files: readonly string[];
   readonly os?: readonly string[];
   readonly cpu?: readonly string[];

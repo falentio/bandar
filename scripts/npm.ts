@@ -89,7 +89,7 @@ function shared(name: string, description: string) {
     repository: { type: "git", url: `git+${REPOSITORY}.git` },
     homepage: `${REPOSITORY}#readme`,
     bugs: { url: `${REPOSITORY}/issues` },
-    publishConfig: { access: "public", provenance: true },
+    publishConfig: { access: "public" },
   };
 }
 

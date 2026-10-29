@@ -31,7 +31,7 @@ import { isUniqueViolation } from "./db/client";
 import type { MigrationResult } from "./db/migrate";
 import { readCooldowns } from "./cooldowns";
 import type { DuckDb } from "./duck/client";
-import { createProjectUrlCatalog } from "./project-urls";
+import { createValueCatalog } from "./value-catalog";
 import {
   addProviderCredential,
   addProviderCredentials,
@@ -99,7 +99,7 @@ const RequestsQuerySchema = v.object({
 
 export function createApi(deps: ApiDeps) {
   const pendingLogins = new Map<string, { code: string; expiresAt: number }>();
-  const projectUrls = createProjectUrlCatalog((userId) => readProjectUrls(deps.duck, { userId }));
+  const projectUrls = createValueCatalog((userId) => readProjectUrls(deps.duck, { userId }));
 
   const app = new Elysia({ prefix: "/api" })
     .onError(({ code, error, path, set }) => {

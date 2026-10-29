@@ -1,6 +1,4 @@
 #!/bin/sh
-# Installs the staged npm packages from a loopback registry stub, then runs the installed copy the
-# way a user would. Every release file is a stand-in script, and no case reaches npmjs.org.
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
@@ -33,9 +31,6 @@ sha256_of() {
   bun --eval "process.stdout.write(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync('$1')).digest('hex'))"
 }
 
-# A stand-in for the release binary: it answers --version with the version this build publishes and
-# every other argument with a failure. The npm path needs a file the loader can run, not a 229 MB
-# compile, so this test runs before any build.
 write_asset() {
   path=$1
 
@@ -52,8 +47,6 @@ write_asset() {
 ASSET=$RELEASE_DIR/bandar-$VERSION-linux-x64
 write_asset "$ASSET"
 
-# A stand-in for the other platform, so one install proves npm drops the wrong package by os and
-# cpu instead of the test only ever seeing the right one.
 write_asset "$RELEASE_DIR/bandar-$VERSION-windows-x64.exe"
 
 bun "$ROOT/scripts/npm.ts" --stage --release "$RELEASE_DIR" >"$WORK/stage.log" 2>&1 ||
@@ -116,8 +109,6 @@ fi
 bin=$PREFIX/bin/bandar
 loader=$PREFIX/lib/node_modules/bandar/bin/bandar.cjs
 
-# Resolves the package the way the loader does, so the test follows npm's layout instead of
-# guessing where it nests an optional dependency.
 resolve_package() {
   (cd "$PREFIX/lib/node_modules/bandar" &&
     node -e "process.stdout.write(require.resolve('$1/package.json'))" 2>/dev/null) || true

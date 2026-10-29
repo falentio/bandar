@@ -16,6 +16,7 @@ import {
   type FailureRecord,
 } from "./health";
 import { addProviderModel, createProvider, type ProviderDeps } from "./providers";
+import { DEFAULT_PROVIDER_ENDPOINTS } from "./providers/endpoints";
 import { createSealer } from "./seal";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -194,5 +195,9 @@ function freshDb(): DatabaseHandle {
 }
 
 function providerDeps(handle: DatabaseHandle): Promise<ProviderDeps> {
-  return createSealer("test-secret").then((sealer) => ({ db: handle.db, sealer }));
+  return createSealer("test-secret").then((sealer) => ({
+    db: handle.db,
+    sealer,
+    endpoints: DEFAULT_PROVIDER_ENDPOINTS,
+  }));
 }

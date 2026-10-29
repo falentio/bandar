@@ -12,6 +12,8 @@ import { cooldownEvents, providerCredentials, providerModels, providers } from "
 import { DuckDb, type QueryRow } from "../duck/client";
 import { applyDuckMigrations } from "../duck/migrate";
 import { addProviderModel, createProvider, type ProviderDeps } from "../providers";
+import { DEFAULT_PROVIDER_ENDPOINTS } from "../providers/endpoints";
+import { ensureBuiltInProviders } from "../providers/seeding";
 import { createSealer } from "../seal";
 import { createTag, setTagModels } from "../tags";
 import { runChat, type ChatDeps, type ChatInput } from "./chat";
@@ -492,7 +494,12 @@ async function freshHarness(
   applyDuckMigrations(duck, duckMigrations());
 
   const sealer = await createSealer("test-secret");
-  const providers = { db: database.db, sealer } satisfies ProviderDeps;
+
+  const providers = {
+    db: database.db,
+    sealer,
+    endpoints: DEFAULT_PROVIDER_ENDPOINTS,
+  } satisfies ProviderDeps;
 
   cleanup.push(
     () => upstream.stop(),
@@ -581,6 +588,66 @@ function requestEvents(duck: DuckDb): readonly QueryRow[] {
   return duck.query(
     "SELECT status, error_kind, http_status, reference FROM request_events ORDER BY started_at",
   );
+}
+
+describe("built-in provider endpoints", () => {
+  test("the config base URL outranks the seeded row on a gateway request", async () => {
+    const stale = startUpstream(() => answer("stale"));
+    const live = startUpstream(() => answer("live"));
+    const harness = await freshHarness(() => openAiSuccess());
+
+    cleanup.push(stale.stop, live.stop);
+
+    const staleEndpoints = {
+      ...DEFAULT_PROVIDER_ENDPOINTS,
+      tokenharbor: { ...DEFAULT_PROVIDER_ENDPOINTS.tokenharbor, baseUrl: stale.origin },
+    };
+
+    const staleProviders: ProviderDeps = { ...harness.providers, endpoints: staleEndpoints };
+
+    await ensureBuiltInProviders(staleProviders, "user-1");
+
+    const row = harness.db.select().from(providers).where(eq(providers.kind, "tokenharbor")).get();
+
+    if (row === undefined) throw new Error("tokenharbor was not seeded");
+
+    expect(row.baseUrl).toBe(stale.origin);
+
+    await addProviderModel(staleProviders, "user-1", row.id, {
+      upstreamModel: "m",
+      alias: "builtin-fast",
+    });
+    await addCredential(staleProviders, row.id, "builtin-key", "key");
+
+    stale.calls.length = 0;
+    live.calls.length = 0;
+
+    const liveEndpoints = {
+      ...staleEndpoints,
+      tokenharbor: { ...staleEndpoints.tokenharbor, baseUrl: live.origin },
+    };
+
+    const liveProviders: ProviderDeps = { ...harness.providers, endpoints: liveEndpoints };
+
+    const response = await runChat(
+      { ...harness.deps, providers: liveProviders },
+      chatInput("builtin-fast"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(v.parse(CompletionSchema, await response.json()).choices[0]?.message.content).toBe(
+      "live",
+    );
+    expect(live.calls).toHaveLength(1);
+    expect(stale.calls).toHaveLength(0);
+  });
+});
+
+function answer(content: string): Response {
+  return Response.json({
+    choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 1, completion_tokens: 2 },
+  });
 }
 
 function deadOrigin(): string {

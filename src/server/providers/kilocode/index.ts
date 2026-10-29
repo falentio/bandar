@@ -1,5 +1,4 @@
 import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
-import { apiBaseUrl } from "../env";
 import { always, type BuiltInProviderDefinition } from "../types";
 import { kilocodeAdapter } from "./adapter";
 import { fetchKilocodeCatalog } from "./catalog";
@@ -15,7 +14,6 @@ export const kilocode: BuiltInProviderDefinition<"kilocode"> = {
   builtIn: {
     name: settings.name,
     slug: settings.slug,
-    baseUrl: () => apiBaseUrl("BANDAR_KILOCODE_API", settings.baseUrl, "/api/openrouter"),
   },
   routes: { chat: { adapter: kilocodeAdapter } },
   defaultCompat: always("chat"),

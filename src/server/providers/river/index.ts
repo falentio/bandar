@@ -1,5 +1,4 @@
 import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
-import { apiBaseUrl } from "../env";
 import { bearerAdapter } from "../openai/compatible";
 import { always, type BuiltInProviderDefinition } from "../types";
 import { fetchRiverCatalog } from "./catalog";
@@ -12,7 +11,6 @@ export const river: BuiltInProviderDefinition<"river"> = {
   builtIn: {
     name: settings.name,
     slug: settings.slug,
-    baseUrl: () => apiBaseUrl("BANDAR_RIVER_API", settings.baseUrl),
   },
   routes: { chat: { adapter: bearerAdapter("river") } },
   defaultCompat: always("chat"),

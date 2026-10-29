@@ -741,7 +741,7 @@ else
   if [ -n "$installed" ]; then
     printf '%s\n' "$installed" >"$STUB/latest"
     update_status=0
-    RUN_OUTPUT=$(env BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_WEB_URL="$base" \
+    RUN_OUTPUT=$(env BANDAR_HOME="$case_dir" BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_WEB_URL="$base" \
       bun "$ROOT/src/server/main.ts" update 2>&1) || update_status=$?
     if [ "$update_status" -eq 0 ]; then
       pass "escaped path: bandar update reads the manifest"
@@ -750,7 +750,7 @@ else
     fi
     expect_absent "escaped path: bandar update never calls it unreadable" "unreadable"
     expect_contains "escaped path: bandar update reports the installed version" "bandar $installed is up to date"
-    RUN_OUTPUT=$(env BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_WEB_URL="$base" \
+    RUN_OUTPUT=$(env BANDAR_HOME="$case_dir" BANDAR_CONFIG_DIR="$case_dir/config" BANDAR_RELEASE_WEB_URL="$base" \
       bun "$ROOT/src/server/main.ts" update --check 2>&1)
     expect_contains "escaped path: update --check reports the installed version" "installed $installed"
     expect_absent "escaped path: update --check never calls it unreadable" "unreadable"

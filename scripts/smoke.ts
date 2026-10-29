@@ -1,7 +1,15 @@
 import { Database } from "bun:sqlite";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
@@ -2718,24 +2726,40 @@ async function check(name: string, run: () => Promise<void>): Promise<void> {
 async function boot(port = 0, timeoutMs = BOOT_TIMEOUT_MS): Promise<Booted> {
   if (!existsSync(BINARY)) throw new Error(`${BINARY} is missing; run \`bun run build\` first`);
 
+  mkdirSync(homeDir, { recursive: true });
+
+  writeFileSync(
+    join(homeDir, "config.json"),
+    JSON.stringify({
+      server: { port },
+      providers: {
+        kilocode: {
+          baseUrl: `${kilocodeOrigin}/api/openrouter`,
+          catalogUrl: `${kilocodeOrigin}/api/gateway/models`,
+        },
+        tokenharbor: { baseUrl: `${builtInsOrigin}/tokenharbor/v1` },
+        yeta: { baseUrl: `${builtInsOrigin}/yeta/v1` },
+        river: {
+          baseUrl: `${builtInsOrigin}/river/v1`,
+          catalogUrl: `${builtInsOrigin}/river/pricing`,
+        },
+        nous: {
+          baseUrl: `${builtInsOrigin}/nous/v1`,
+          authUrl: `${builtInsOrigin}/portal`,
+        },
+        hyper: { baseUrl: `${builtInsOrigin}/hyper/v1` },
+        opencode: { baseUrl: `${builtInsOrigin}/opencode/inference` },
+      },
+    }),
+  );
+
   const started = Date.now();
 
   const proc = Bun.spawn([BINARY], {
     env: {
       ...Bun.env,
-      BANDAR_PORT: String(port),
       BANDAR_HOME: homeDir,
       BANDAR_AUTH_SECRET: AUTH_SECRET,
-      BANDAR_KILOCODE_API: kilocodeOrigin,
-      BANDAR_KILOCODE_MODELS_URL: `${kilocodeOrigin}/api/gateway/models`,
-      BANDAR_TOKENHARBOR_API: `${builtInsOrigin}/tokenharbor`,
-      BANDAR_YETA_API: `${builtInsOrigin}/yeta`,
-      BANDAR_RIVER_API: `${builtInsOrigin}/river`,
-      BANDAR_RIVER_PRICING_URL: `${builtInsOrigin}/river/pricing`,
-      BANDAR_NOUS_API: `${builtInsOrigin}/nous`,
-      BANDAR_HYPER_API: `${builtInsOrigin}/hyper`,
-      BANDAR_OPENCODE_API: `${builtInsOrigin}/opencode`,
-      BANDAR_NOUS_PORTAL: `${builtInsOrigin}/portal`,
     },
     stdout: "pipe",
     stderr: "pipe",

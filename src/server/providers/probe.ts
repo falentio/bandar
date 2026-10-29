@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { Provider, ProviderCredentialProbe } from "../../shared/providers";
 import type { Credential } from "../credential";
 import { providerCredentials } from "../db/schema";
+import { endpointFor } from "./endpoints";
 import { readCredential, type ProviderDeps } from "./index";
 import { definitionFor } from "./registry";
 import { routeAttempt } from "./route";
@@ -45,7 +46,7 @@ export async function probeProviderCredential(
   const started = performance.now();
 
   try {
-    const read = await probeRead(provider, await readCredential(deps, sealed), signal);
+    const read = await probeRead(deps, provider, await readCredential(deps, sealed), signal);
 
     return { ...read, latencyMs: Math.round(performance.now() - started) };
   } catch (error) {
@@ -56,6 +57,7 @@ export async function probeProviderCredential(
 }
 
 async function probeRead(
+  deps: ProviderDeps,
   provider: Provider,
   credential: Credential,
   signal: AbortSignal,
@@ -68,7 +70,12 @@ async function probeRead(
 
       if (catalog === undefined) return { ok: false, status: null, error: NO_MODEL };
 
-      await catalog({ baseUrl: provider.baseUrl, credential: async () => credential, signal });
+      await catalog({
+        baseUrl: provider.baseUrl,
+        catalogUrl: endpointFor(deps.endpoints, provider.kind)?.catalogUrl ?? null,
+        credential: async () => credential,
+        signal,
+      });
 
       return PASSED;
     }

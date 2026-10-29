@@ -129,6 +129,85 @@ describe("settings", () => {
     );
   });
 
+  test("a provider section parses the fields its kind has", () => {
+    expect(
+      settingsFrom(
+        readerOf(
+          '{"providers":{"kilocode":{"baseUrl":"https://kilo.example.test/api","catalogUrl":"https://kilo.example.test/models"},"nous":{"authUrl":"https://portal.example.test"}}}',
+        ),
+      ),
+    ).toEqual({
+      kind: "ok",
+      path,
+      settings: {
+        providers: {
+          kilocode: {
+            baseUrl: "https://kilo.example.test/api",
+            catalogUrl: "https://kilo.example.test/models",
+          },
+          nous: { authUrl: "https://portal.example.test" },
+        },
+      },
+    });
+  });
+
+  test("an unknown provider kind or field is invalid", () => {
+    expect(reasonOf(settingsFrom(readerOf('{"providers":{"nope":{}}}')))).toContain(
+      "providers.nope",
+    );
+    expect(
+      reasonOf(settingsFrom(readerOf('{"providers":{"kilocode":{"authUrl":"https://x.test"}}}'))),
+    ).toContain("providers.kilocode.authUrl");
+    expect(
+      reasonOf(settingsFrom(readerOf('{"providers":{"hyper":{"catalogUrl":"https://x.test"}}}'))),
+    ).toContain("providers.hyper.catalogUrl");
+  });
+
+  test("a provider URL must be http or https", () => {
+    const reason = reasonOf(
+      settingsFrom(readerOf('{"providers":{"tokenharbor":{"baseUrl":"ftp://x.test"}}}')),
+    );
+
+    expect(reason).toContain("providers.tokenharbor.baseUrl");
+    expect(reason).toContain("must be an http or https URL");
+  });
+
+  test("an update section parses its two URLs", () => {
+    expect(
+      settingsFrom(
+        readerOf(
+          '{"update":{"webUrl":"https://web.example.test/bandar","apiUrl":"https://api.example.test/latest"}}',
+        ),
+      ),
+    ).toEqual({
+      kind: "ok",
+      path,
+      settings: {
+        update: {
+          webUrl: "https://web.example.test/bandar",
+          apiUrl: "https://api.example.test/latest",
+        },
+      },
+    });
+  });
+
+  test("an unknown update key is invalid", () => {
+    expect(reasonOf(settingsFrom(readerOf('{"update":{"pageUrl":"https://x.test"}}')))).toContain(
+      "update.pageUrl",
+    );
+  });
+
+  test("an update URL must be http or https", () => {
+    const reason = reasonOf(settingsFrom(readerOf('{"update":{"apiUrl":"ftp://x.test/latest"}}')));
+
+    expect(reason).toContain("update.apiUrl");
+    expect(reason).toContain("must be an http or https URL");
+  });
+
+  test("a providers section that is not an object is invalid", () => {
+    expect(reasonOf(settingsFrom(readerOf('{"providers":[]}')))).toContain("providers");
+  });
+
   test("an unknown key is invalid at either level", () => {
     expect(reasonOf(settingsFrom(readerOf('{"nope":true}')))).toMatch(/^nope: Invalid key\b/u);
     expect(
@@ -143,6 +222,24 @@ describe("settings", () => {
       );
 
       expect(reason).toContain("server.port");
+    }
+  });
+
+  test("the web port parses within the same bounds", () => {
+    expect(settingsFrom(readerOf('{"server":{"webPort":6000}}'))).toEqual({
+      kind: "ok",
+      path,
+      settings: { server: { webPort: 6000 } },
+    });
+  });
+
+  test("a web port outside 0..65535, or not a whole number, is invalid", () => {
+    for (const webPort of [-1, 70000, 80.5, "5173"]) {
+      const reason = reasonOf(
+        settingsFrom(readerOf(`{"server":{"webPort":${JSON.stringify(webPort)}}}`)),
+      );
+
+      expect(reason).toContain("server.webPort");
     }
   });
 

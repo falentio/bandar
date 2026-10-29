@@ -1,11 +1,9 @@
 import * as v from "valibot";
 import type { Credential } from "../../credential";
-import { originUrl } from "../env";
 import { joinUrl, postForm } from "../http";
 import { UpstreamError } from "../types";
-import type { DeviceLogin, DevicePollResult, OAuthConnector } from "../types";
+import type { ConnectorInput, DeviceLogin, DevicePollResult, OAuthConnector } from "../types";
 
-const PORTAL = "https://portal.nousresearch.com";
 export const CLIENT_ID = "hermes-cli";
 const SCOPE = "inference:invoke";
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
@@ -38,9 +36,9 @@ export async function oauthFailureReason(response: Response): Promise<string> {
 }
 
 export const nousConnector: OAuthConnector = {
-  async start(signal: AbortSignal): Promise<DeviceLogin> {
+  async start({ authUrl, signal }: ConnectorInput): Promise<DeviceLogin> {
     const response = await postForm({
-      url: portalUrl("api/oauth/device/code"),
+      url: portalUrl(authUrl, "api/oauth/device/code"),
       headers: {},
       form: { client_id: CLIENT_ID, scope: SCOPE },
       signal,
@@ -68,9 +66,9 @@ export const nousConnector: OAuthConnector = {
     };
   },
 
-  async poll(code: string, signal: AbortSignal): Promise<DevicePollResult> {
+  async poll(code: string, { authUrl, signal }: ConnectorInput): Promise<DevicePollResult> {
     const response = await postForm({
-      url: portalUrl("api/oauth/token"),
+      url: portalUrl(authUrl, "api/oauth/token"),
       headers: {},
       form: { grant_type: DEVICE_GRANT, client_id: CLIENT_ID, device_code: code },
       signal,
@@ -102,8 +100,8 @@ export const nousConnector: OAuthConnector = {
   },
 };
 
-export function portalUrl(path: string): string {
-  return joinUrl(originUrl("BANDAR_NOUS_PORTAL", PORTAL), path);
+export function portalUrl(authUrl: string, path: string): string {
+  return joinUrl(authUrl, path);
 }
 
 export async function credentialOf(response: Response): Promise<Credential> {

@@ -8,13 +8,13 @@ export const nousRenewal: CredentialRenewer = {
     return credential.expiresAt !== null && credential.expiresAt - now <= EXPIRING_CONNECTION_MS;
   },
 
-  async renew({ credential, signal }): Promise<Credential> {
+  async renew({ credential, signal, authUrl }): Promise<Credential> {
     if (credential.refreshToken === null) {
       throw new UpstreamError("the Nous Portal connection expired; connect it again", "auth");
     }
 
     const response = await postForm({
-      url: portalUrl("api/oauth/token"),
+      url: portalUrl(authUrl, "api/oauth/token"),
       headers: { "x-nous-refresh-token": credential.refreshToken },
       form: { grant_type: "refresh_token", client_id: CLIENT_ID },
       signal,

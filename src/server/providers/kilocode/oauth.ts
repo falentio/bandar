@@ -1,7 +1,6 @@
 import * as v from "valibot";
-import { originUrl } from "../env";
 import { UpstreamError } from "../types";
-import type { DeviceLogin, DevicePollResult, OAuthConnector } from "../types";
+import type { ConnectorInput, DeviceLogin, DevicePollResult, OAuthConnector } from "../types";
 
 const DeviceLoginSchema = v.object({
   code: v.string(),
@@ -18,16 +17,9 @@ const ProfileSchema = v.object({
   organizations: v.optional(v.array(v.object({ id: v.string() }))),
 });
 
-const KILO_ORIGIN = "https://api.kilo.ai";
-
-// Read per call so a test can point the login at a fake after this module loads.
-function kiloApi(): string {
-  return originUrl("BANDAR_KILOCODE_API", KILO_ORIGIN);
-}
-
 export const kilocodeConnector: OAuthConnector = {
-  async start(signal: AbortSignal): Promise<DeviceLogin> {
-    const response = await fetch(`${kiloApi()}/api/device-auth/codes`, {
+  async start({ authUrl, signal }: ConnectorInput): Promise<DeviceLogin> {
+    const response = await fetch(`${authUrl}/api/device-auth/codes`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal,
@@ -56,8 +48,8 @@ export const kilocodeConnector: OAuthConnector = {
     };
   },
 
-  async poll(code: string, signal: AbortSignal): Promise<DevicePollResult> {
-    const response = await fetch(`${kiloApi()}/api/device-auth/codes/${encodeURIComponent(code)}`, {
+  async poll(code: string, { authUrl, signal }: ConnectorInput): Promise<DevicePollResult> {
+    const response = await fetch(`${authUrl}/api/device-auth/codes/${encodeURIComponent(code)}`, {
       signal,
     }).catch((error: Error) => {
       throw new UpstreamError(`kilo code login poll failed: ${error.message}`, "network");
@@ -94,7 +86,7 @@ export const kilocodeConnector: OAuthConnector = {
       credential: {
         authMode: "oauth",
         accessToken: approved.output.token,
-        organizationId: await organizationOf(approved.output.token, signal),
+        organizationId: await organizationOf(approved.output.token, authUrl, signal),
         refreshToken: null,
         expiresAt: null,
       },
@@ -102,8 +94,12 @@ export const kilocodeConnector: OAuthConnector = {
   },
 };
 
-async function organizationOf(token: string, signal: AbortSignal): Promise<string | null> {
-  const response = await fetch(`${kiloApi()}/api/profile`, {
+async function organizationOf(
+  token: string,
+  authUrl: string,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const response = await fetch(`${authUrl}/api/profile`, {
     headers: { authorization: `Bearer ${token}` },
     signal,
   }).catch(() => null);

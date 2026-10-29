@@ -18,7 +18,7 @@ if [ "$host" != "linux-x64" ]; then
 fi
 
 unset BANDAR_GITHUB_TOKEN GH_TOKEN GITHUB_TOKEN BANDAR_RELEASE_API_URL \
-  BANDAR_RELEASE_WEB_URL BANDAR_CONFIG_DIR || true
+  BANDAR_RELEASE_WEB_URL BANDAR_CONFIG_DIR BANDAR_HOME || true
 
 work="$(mktemp -d)"
 stub_pid=""
@@ -307,7 +307,7 @@ case_dir() {
 public() {
   local name="$1"
   shift
-  run "$name" env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_WEB_URL=$API" "$@" \
+  run "$name" env "BANDAR_HOME=$CASE_DIR" "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_WEB_URL=$API" "$@" \
     bun src/server/main.ts update
 }
 
@@ -315,7 +315,7 @@ public() {
 private() {
   local name="$1"
   shift
-  run "$name" env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_API_URL=$feed" \
+  run "$name" env "BANDAR_HOME=$CASE_DIR" "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_API_URL=$feed" \
     "BANDAR_GITHUB_TOKEN=$STUB_TOKEN" "$@" bun src/server/main.ts update
 }
 
@@ -360,6 +360,17 @@ else
 fi
 
 echo
+echo "case: the config file names the release web base"
+case_dir configfeed install-script
+stage_release "$newer" 'config payload'
+printf '{"update":{"webUrl":"%s"}}\n' "$API" >"$CASE_DIR/config.json"
+run configfeed env "BANDAR_HOME=$CASE_DIR" "BANDAR_CONFIG_DIR=$CASE_DIR/config" \
+  bun src/server/main.ts update
+expect_exit configfeed 0
+expect_stdout configfeed "bandar $newer installed at $CASE_DIR/bin/bandar"
+expect_same "$CASE_DIR/bin/bandar" "$work/site/rel/v$newer/bandar-$newer-linux-x64" "configfeed: the binary is the release asset"
+
+echo
 echo "case: private fork override"
 case_dir fork install-script
 stage_release "$newer" 'private fork payload'
@@ -399,11 +410,11 @@ echo "case: the API override without a token"
 case_dir apinotoken install-script
 stage_release "$newer" 'new binary payload'
 : >"$work/logs/requests.log"
-run apinotoken env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_API_URL=$feed" \
+run apinotoken env "BANDAR_HOME=$CASE_DIR" "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_API_URL=$feed" \
   bun src/server/main.ts update
 expect_exit apinotoken 1
 expect_stderr_lines apinotoken 1
-expect_stderr apinotoken "BANDAR_RELEASE_API_URL reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN"
+expect_stderr apinotoken "update.apiUrl reads a private fork, so it needs a GitHub token: set BANDAR_GITHUB_TOKEN"
 expect_same "$CASE_DIR/bin/bandar" "$work/logs/expected-old" "apinotoken: the binary keeps its bytes"
 
 if [ -s "$work/logs/requests.log" ]; then
@@ -428,7 +439,7 @@ case_dir foreign install-script
 stage_release "$newer_major" 'foreign payload'
 stage_foreign_release "$newer_major"
 : >"$work/logs/requests.log"
-run foreign env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_API_URL=$API/api/releases/foreign" \
+run foreign env "BANDAR_HOME=$CASE_DIR" "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_API_URL=$API/api/releases/foreign" \
   "BANDAR_GITHUB_TOKEN=$STUB_TOKEN" bun src/server/main.ts update
 expect_exit foreign 1
 expect_stderr foreign "not an allowed asset host"
@@ -474,7 +485,7 @@ echo
 echo "case: --check"
 case_dir check install-script
 stage_release "$newer" 'new binary payload'
-run check env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_WEB_URL=$API" \
+run check env "BANDAR_HOME=$CASE_DIR" "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_WEB_URL=$API" \
   bun src/server/main.ts update --check
 expect_exit check 0
 expect_stdout check "installed $installed"
@@ -486,7 +497,7 @@ echo "case: --check with no published release"
 case_dir norelease install-script
 rm -rf "$work/site"
 mkdir -p "$work/site"
-run norelease env "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_WEB_URL=$API" \
+run norelease env "BANDAR_HOME=$CASE_DIR" "BANDAR_CONFIG_DIR=$CASE_DIR/config" "BANDAR_RELEASE_WEB_URL=$API" \
   bun src/server/main.ts update --check
 expect_exit norelease 0
 expect_stdout norelease "latest unknown"
@@ -498,7 +509,7 @@ case_dir archive install-script
 ARCHIVE="$work/logs/bandar-$newer-linux-x64"
 printf 'offline binary payload' >"$ARCHIVE"
 printf '%s  %s\n' "$(sha256_of "$ARCHIVE")" "$(basename "$ARCHIVE")" >"$ARCHIVE.sha256"
-run archive env "BANDAR_CONFIG_DIR=$CASE_DIR/config" \
+run archive env "BANDAR_HOME=$CASE_DIR" "BANDAR_CONFIG_DIR=$CASE_DIR/config" \
   bun src/server/main.ts update --archive "$ARCHIVE"
 expect_exit archive 0
 expect_same "$CASE_DIR/bin/bandar" "$ARCHIVE" "archive: the binary is the archive"

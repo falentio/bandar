@@ -26,6 +26,7 @@ jobs:
       - run: bun run test
       - run: ./scripts/update-test.sh
       - run: ./scripts/install-test.sh
+      - run: ./scripts/npm-test.sh
 
   build:
     name: build (${{ matrix.name }})

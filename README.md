@@ -86,6 +86,19 @@ curl -fsSL https://raw.githubusercontent.com/falentio/bandar/main/install.sh \
 
 Releases carry Linux x64 and Windows x64 builds. arm64 is not built yet.
 
+### From npm
+
+```sh
+npm install -g bandar
+```
+
+npm installs a small loader and, in a second package, the compiled binary for your platform. The
+loader starts that binary, so `bandar` behaves the same as a release install. Nothing runs at
+install time and nothing is downloaded later. The copy belongs to npm, so `bandar update` leaves
+it alone and you update it with `npm install -g bandar@latest`. The same two platforms as the
+release: Linux x64 and Windows x64. Read [`docs/install.md`](./docs/install.md#install-from-npm)
+for what lands in the npm prefix.
+
 ### From a source checkout
 
 You need Bun 1.4.3, which `.bun-version` pins.
@@ -134,10 +147,20 @@ bandar install-service --scope user
 
 ### Update and uninstall
 
+An `install.sh` copy updates and removes itself:
+
 ```sh
 bandar update
 bandar uninstall-service --scope user
 rm "$(command -v bandar)"
+rm -rf ~/.config/bandar ~/.bandar ~/.bandar_dev
+```
+
+An npm copy belongs to npm, so npm replaces it and removes it:
+
+```sh
+bandar uninstall-service --scope user
+npm uninstall -g bandar
 rm -rf ~/.config/bandar ~/.bandar ~/.bandar_dev
 ```
 

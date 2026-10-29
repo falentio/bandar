@@ -621,7 +621,7 @@ describe("bandar update", () => {
     expect(decode(readFileSync(fixture.target))).toBe("new binary payload");
   });
 
-  test("an unknown source refuses in one line naming the installer", async () => {
+  test("an unknown source refuses in one line naming the npm install first", async () => {
     const fixture = fixtureOf(null);
 
     const recorded = runOf(fixture, {
@@ -630,7 +630,12 @@ describe("bandar update", () => {
 
     expect(await runUpdate(recorded.run)).toBe(1);
     expect(recorded.errors).toHaveLength(1);
-    expect(recorded.errors[0]).toContain("install.sh");
+
+    const message = recorded.errors[0] ?? "";
+
+    expect(message).toContain('an npm install updates with "npm install -g bandar@latest"');
+    expect(message).toContain("otherwise reinstall with install.sh");
+    expect(message.indexOf("bandar@latest")).toBeLessThan(message.indexOf("install.sh"));
     expect(recorded.lines).toEqual([]);
     expect(decode(readFileSync(fixture.target))).toBe("old binary");
     expect(existsSync(join(fixture.configDir, "install.json"))).toBe(false);

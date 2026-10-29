@@ -75,3 +75,32 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" dist/release/* --title "$GITHUB_REF_NAME" --generate-notes
           fi
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install an npm CLI new enough for trusted publishing
+        run: npm install --global npm@11
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/release
+          merge-multiple: true
+      - name: Stage the npm packages from the release files
+        run: bun scripts/npm.ts --stage
+      - name: Fail on a version, tag, or binary mismatch
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: bun scripts/npm.ts --preflight
+      - name: Publish the platform packages, then the loader
+        run: bun scripts/npm.ts --publish

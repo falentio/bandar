@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import type { InputModality } from "../../shared/providers";
 import { bearerHeaders, joinUrl, type WireHeaders } from "./http";
 import { UpstreamError, type CatalogRequest, type ModelCatalogEntry } from "./types";
 
@@ -73,13 +74,24 @@ export function optionalPrices<T>(read: Promise<T>, signal: AbortSignal): Promis
   });
 }
 
-export function entryOf(upstreamModel: string, prices: ModelPrices = NO_PRICE): ModelCatalogEntry {
+export function entryOf(
+  upstreamModel: string,
+  prices: ModelPrices = NO_PRICE,
+  limits: {
+    readonly contextWindow?: number | null;
+    readonly maxOutput?: number | null;
+    readonly inputModalities?: readonly InputModality[] | null;
+  } = {},
+): ModelCatalogEntry {
   return {
     upstreamModel,
     label: upstreamModel,
     inputPricePerMtok: prices.inputPricePerMtok,
     cacheInputPricePerMtok: prices.cacheInputPricePerMtok ?? null,
     outputPricePerMtok: prices.outputPricePerMtok,
+    contextWindow: limits.contextWindow ?? null,
+    maxOutput: limits.maxOutput ?? null,
+    inputModalities: limits.inputModalities ?? null,
   };
 }
 

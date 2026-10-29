@@ -2,6 +2,8 @@ import { and, asc, eq } from "drizzle-orm";
 import {
   BUILT_IN_PROVIDER_KINDS,
   parseCompat,
+  parseInputModalities,
+  serializeInputModalities,
   type Compat,
   type Provider,
   type ProviderCredential,
@@ -16,6 +18,7 @@ import { availableSlug, defaultModelSlug, slugify } from "../../shared/slugs";
 import { parseCredential, type Credential } from "../credential";
 import { isUniqueViolation, type Db } from "../db/client";
 import { providerCredentials, providerModels, providers } from "../db/schema";
+import { lookupModelLimits, type ModelLimits } from "../models-dev";
 import type { Sealer } from "../seal";
 import { renumberTagPriorities } from "../tags";
 import type { ProviderEndpoints } from "./endpoints";
@@ -29,6 +32,10 @@ export type ProviderDeps = {
   readonly db: Db;
   readonly sealer: Sealer;
   readonly endpoints: ProviderEndpoints;
+  readonly modelLimits?: (
+    ids: readonly string[],
+    providerHint?: string,
+  ) => Promise<ReadonlyMap<string, ModelLimits>>;
 };
 
 const BUILT_IN_RANK = new Map<string, number>(
@@ -126,6 +133,9 @@ export async function listProviders(deps: ProviderDeps, userId: string): Promise
       inputPricePerMtok: row.inputPricePerMtok,
       cacheInputPricePerMtok: row.cacheInputPricePerMtok,
       outputPricePerMtok: row.outputPricePerMtok,
+      contextWindow: row.contextWindow,
+      maxOutput: row.maxOutput,
+      inputModalities: parseInputModalities(row.inputModalities),
       failures: row.failures,
       flaggedUntil: row.flaggedUntil?.toISOString() ?? null,
     });
@@ -302,6 +312,8 @@ export async function addProviderModel(
   }
 
   const slug = model.slug ?? defaultModelSlug(providerSlug, model.upstreamModel);
+  const limitsOf = deps.modelLimits ?? lookupModelLimits;
+  const known = (await limitsOf([model.upstreamModel], providerSlug)).get(model.upstreamModel);
 
   try {
     deps.db
@@ -317,6 +329,11 @@ export async function addProviderModel(
         inputPricePerMtok: model.inputPricePerMtok ?? null,
         cacheInputPricePerMtok: model.cacheInputPricePerMtok ?? null,
         outputPricePerMtok: model.outputPricePerMtok ?? null,
+        contextWindow: model.contextWindow ?? known?.contextWindow ?? null,
+        maxOutput: model.maxOutput ?? known?.maxOutput ?? null,
+        inputModalities: serializeInputModalities(
+          model.inputModalities ?? known?.inputModalities ?? null,
+        ),
         enabled: true,
         createdAt: new Date(),
       })
@@ -359,6 +376,12 @@ export async function syncProviderModels(
   );
 
   const now = new Date();
+  const limitsOf = deps.modelLimits ?? lookupModelLimits;
+
+  const known = await limitsOf(
+    models.map((model) => model.upstreamModel),
+    providerSlug,
+  );
 
   const missing = models.flatMap((model, index) => {
     const slug = defaultModelSlug(providerSlug, model.upstreamModel);
@@ -378,6 +401,11 @@ export async function syncProviderModels(
         inputPricePerMtok: model.inputPricePerMtok,
         cacheInputPricePerMtok: model.cacheInputPricePerMtok,
         outputPricePerMtok: model.outputPricePerMtok,
+        contextWindow: model.contextWindow ?? known.get(model.upstreamModel)?.contextWindow ?? null,
+        maxOutput: model.maxOutput ?? known.get(model.upstreamModel)?.maxOutput ?? null,
+        inputModalities: serializeInputModalities(
+          model.inputModalities ?? known.get(model.upstreamModel)?.inputModalities ?? null,
+        ),
         enabled: true,
         createdAt: new Date(now.getTime() + index),
       },
@@ -435,16 +463,25 @@ export async function updateProviderModel(
     throw new ProviderRuleError(`the address ${edit.slug} is taken`, "conflict");
   }
 
+  const patches: Partial<typeof providerModels.$inferInsert> = {
+    slug: edit.slug,
+    alias: edit.alias,
+    compat: edit.compat,
+    inputPricePerMtok: edit.inputPricePerMtok,
+    cacheInputPricePerMtok: edit.cacheInputPricePerMtok,
+    outputPricePerMtok: edit.outputPricePerMtok,
+  };
+
+  if (edit.contextWindow !== undefined) patches.contextWindow = edit.contextWindow;
+
+  if (edit.maxOutput !== undefined) patches.maxOutput = edit.maxOutput;
+
+  if (edit.inputModalities !== undefined)
+    patches.inputModalities = serializeInputModalities(edit.inputModalities);
+
   const updated = await deps.db
     .update(providerModels)
-    .set({
-      slug: edit.slug,
-      alias: edit.alias,
-      compat: edit.compat,
-      inputPricePerMtok: edit.inputPricePerMtok,
-      cacheInputPricePerMtok: edit.cacheInputPricePerMtok,
-      outputPricePerMtok: edit.outputPricePerMtok,
-    })
+    .set(patches)
     .where(and(eq(providerModels.id, modelId), eq(providerModels.providerId, providerId)))
     .returning({ id: providerModels.id });
 

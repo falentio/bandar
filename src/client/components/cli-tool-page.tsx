@@ -11,7 +11,7 @@ import {
   type CliTool,
 } from "@/shared/cli-tools";
 import { CliToolLogo } from "./cli-tool-logo";
-import { CliToolStatusChip, CopyButton, KeyAndModelCard } from "./cli-tool-parts";
+import { CliToolStatusChip, CopyButton, KeyAndModelsCard } from "./cli-tool-parts";
 
 export function CliToolPage({ toolId }: { toolId: string }) {
   const tool = cliToolOf(toolId);
@@ -74,9 +74,9 @@ function ToolPage({ tool, origin }: { tool: CliTool; origin: string }) {
         <span className="text-muted-foreground">{status.reason}</span>
       </p>
 
-      <KeyAndModelCard toolId={tool.id} origin={origin}>
+      <KeyAndModelsCard tool={tool} origin={origin}>
         {(input) => <ToolGuide tool={tool} input={input} />}
-      </KeyAndModelCard>
+      </KeyAndModelsCard>
     </>
   );
 }

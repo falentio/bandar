@@ -110,6 +110,26 @@ export const ProviderAuthModeSchema = v.picklist(PROVIDER_AUTH_MODES);
 
 export const ProviderOriginSchema = v.picklist(PROVIDER_ORIGINS);
 
+export const INPUT_MODALITIES = ["text", "image", "audio", "video", "pdf"] as const;
+
+export const InputModalitySchema = v.picklist(INPUT_MODALITIES);
+
+export type InputModality = v.InferOutput<typeof InputModalitySchema>;
+
+export function parseInputModalities(value: string | null): InputModality[] | null {
+  if (value === null) return null;
+
+  const parsed = v.safeParse(v.array(InputModalitySchema), JSON.parse(value));
+
+  return parsed.success ? parsed.output : null;
+}
+
+export function serializeInputModalities(
+  modalities: readonly InputModality[] | null | undefined,
+): string | null {
+  return modalities === null || modalities === undefined ? null : JSON.stringify(modalities);
+}
+
 export const ProviderModelSchema = v.object({
   id: v.string(),
   upstreamModel: v.string(),
@@ -122,6 +142,9 @@ export const ProviderModelSchema = v.object({
   inputPricePerMtok: v.nullable(v.number()),
   cacheInputPricePerMtok: v.nullable(v.number()),
   outputPricePerMtok: v.nullable(v.number()),
+  contextWindow: v.nullable(v.number()),
+  maxOutput: v.nullable(v.number()),
+  inputModalities: v.nullable(v.array(InputModalitySchema)),
   failures: v.number(),
   flaggedUntil: v.nullable(v.string()),
 });
@@ -164,6 +187,8 @@ export const ProviderDetailSchema = v.object({
 
 const ModelLabelSchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100));
 
+const TokenCountSchema = v.pipe(v.number(), v.integer(), v.minValue(1));
+
 export const ProviderModelInputSchema = v.object({
   upstreamModel: v.pipe(
     v.string(),
@@ -176,6 +201,9 @@ export const ProviderModelInputSchema = v.object({
   inputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
   cacheInputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
   outputPricePerMtok: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+  contextWindow: v.optional(v.nullable(TokenCountSchema)),
+  maxOutput: v.optional(v.nullable(TokenCountSchema)),
+  inputModalities: v.optional(v.nullable(v.array(InputModalitySchema))),
 });
 
 export const ProviderModelEditInputSchema = v.object({
@@ -185,6 +213,9 @@ export const ProviderModelEditInputSchema = v.object({
   inputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
   cacheInputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
   outputPricePerMtok: v.nullable(v.pipe(v.number(), v.minValue(0))),
+  contextWindow: v.optional(v.nullable(TokenCountSchema)),
+  maxOutput: v.optional(v.nullable(TokenCountSchema)),
+  inputModalities: v.optional(v.nullable(v.array(InputModalitySchema))),
 });
 
 export const ProviderInputSchema = v.object({

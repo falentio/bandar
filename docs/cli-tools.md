@@ -32,7 +32,22 @@ Every tool below needs the ref bandar resolves, not the vendor model name. Three
 
 Claude Code asks for `claude-sonnet-4-6` unless you set `ANTHROPIC_MODEL`. That name will not resolve unless a model carries it as its address, so set the variable.
 
-On each setup page the model ref is a picker. It lists tags first, then each provider's models.
+A tool that carries several refs gets a combobox whose option list starts with tags, then each provider's models, and typing filters both. A tool that pins one ref gets a plain select. Pick one ref or several: the first ref you pick is the tool's default. A tool that carries many refs writes every pick into the same file, so it switches between them without a second edit. A single-ref tool pins that one ref in its file and lists the rest itself.
+
+The tools disagree about how a config holds several refs, and the picker follows each one:
+
+| Tool              | How its config carries the refs                                                                                         | Switch inside the tool          |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| opencode (v1, v2) | one entry per ref in the provider's `models` map; the top-level `model` names the default                               | `/models`                       |
+| Codex             | the default in `model`, and one profile file per ref after it                                                           | `codex --profile bandar-<slug>` |
+| Claude Code       | one ref in `ANTHROPIC_MODEL`; the three `ANTHROPIC_DEFAULT_*_MODEL` variables point Claude's own entries at bandar refs | `/model`                        |
+| pi                | one entry per ref in the `models` array; the file names no default                                                      | `/model`                        |
+
+Claude Code cannot list models in its settings file. Its page therefore pins one starting ref in `ANTHROPIC_MODEL`, and the three alias variables are how `/model` gains bandar entries.
+
+Input modalities come from the same row. opencode takes the five values it knows, `text`, `image`, `audio`, `video`, and `pdf`, under `modalities.input`; pi accepts only `text` and `image`, so a `pdf` capability is dropped there rather than written as an invalid value.
+
+Token limits come from the model row. A model you add or import keeps whatever the provider's catalog reports; when the catalog reports nothing, bandar asks [models.dev](https://models.dev) for that model id and stores the answer. The model dialog edits both numbers, so a custom model carries them too. opencode and pi write them into their configs; Codex and Claude Code take no limits, so their snippets ignore them.
 
 ## Secret rules
 
@@ -64,7 +79,14 @@ Global config: `~/.config/opencode/opencode.json`. The provider block uses `@ai-
         "baseURL": "https://bandar.example/v1",
         "apiKey": "{env:BANDAR_API_KEY}"
       },
-      "models": { "sonnet": { "name": "sonnet" } }
+      "models": {
+        "sonnet": {
+          "name": "sonnet",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image"] }
+        },
+        "tags/coding": { "name": "tags/coding" }
+      }
     }
   }
 }
@@ -76,6 +98,8 @@ opencode
 ```
 
 `{file:~/.config/bandar/key}` also works where `{env:...}` does, and keeps the value out of the environment. A missing variable substitutes an empty string, so a 401 means the export never reached the process that started opencode.
+
+Every key in `models` is a model opencode offers, and the top-level `model` is the one it starts on. `/models` opens the list, so a second ref costs one map entry and no restart. A ref whose context window and max output are known carries a `limit`; a tag ref never does, because the tag picks the model at request time.
 
 Status: partial. opencode sends `tools` with every turn, bandar drops them, so the agent answers but never calls a tool.
 
@@ -93,7 +117,14 @@ Global config: `~/.config/opencode/opencode.jsonc`. v2 moves providers under `pr
       "env": ["BANDAR_API_KEY"],
       "package": "@opencode/ai/providers/openai-compatible",
       "settings": { "baseURL": "https://bandar.example/v1" },
-      "models": { "sonnet": { "name": "sonnet" } }
+      "models": {
+        "sonnet": {
+          "name": "sonnet",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image"] }
+        },
+        "tags/coding": { "name": "tags/coding" }
+      }
     }
   }
 }
@@ -105,10 +136,10 @@ Status: partial, same reason as v1.
 
 ## Codex
 
-Config: `~/.codex/config.toml`. Codex takes the key from the variable named in `env_key`, which keeps it out of the file:
+Codex reads two files: `~/.codex/config.toml` for the provider, and one profile file per ref after the first. `env_key` keeps the key out of both:
 
 ```toml
-model = "bandar/sonnet"
+model = "sonnet"
 model_provider = "bandar"
 
 [model_providers.bandar]
@@ -118,9 +149,18 @@ env_key = "BANDAR_API_KEY"
 wire_api = "responses"
 ```
 
+Each ref after the first gets its own file next to `config.toml`, named after the ref. `~/.codex/bandar-tags-coding.config.toml` holds one top-level key:
+
+```toml
+model = "tags/coding"
+```
+
+`model` is the ref codex starts on, and it reaches bandar unchanged: no `bandar/` prefix, because the gateway matches the ref itself, whether that is an address, a provider ref, or a tag ref. Codex 0.134.0 and later ignores `[profiles.*]` tables in `config.toml`, so a profile is a file. It layers over `config.toml`, which leaves `model_provider` inherited. Start one with `codex --profile bandar-tags-coding`. A profile name accepts letters, numbers, hyphens, and underscores, so each ref is slugged: `tags/coding` becomes `bandar-tags-coding`, and `kilocode/anthropic/claude-sonnet-4.5` becomes `bandar-kilocode-anthropic-claude-sonnet-4-5`.
+
 ```bash
 export BANDAR_API_KEY="bandar_..."
 codex
+codex --profile bandar-tags-coding
 ```
 
 `wire_api` accepts `responses` and nothing else. The alternative, posting the key in `http_headers` or `experimental_bearer_token`, puts the secret in the file and the docs discourage it.
@@ -158,6 +198,8 @@ chmod 600 ~/.config/bandar/key
 
 The key file holds one line and no trailing newline. Run `claude`, then `/status`: it lists the base URL and the `apiKeyHelper` line when the setup took.
 
+`ANTHROPIC_MODEL` pins the model the session starts on. `/model` switches among Claude's own entries, and `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, and `ANTHROPIC_DEFAULT_HAIKU_MODEL` each point one of those entries at a bandar ref. Gateway discovery is not the path here: Claude Code keeps a discovered entry only when its id contains `claude` or `anthropic`, and bandar serves refs, so most refs would never appear.
+
 Status: partial. The first prompt streams. As soon as Claude Code sends a `tool_result` block, bandar answers 422, because the text path rejects non-text blocks instead of dropping them.
 
 ## pi coding agent
@@ -172,7 +214,16 @@ Config: `~/.pi/agent/models.json`. pi resolves `$BANDAR_API_KEY` when it builds 
       "baseUrl": "https://bandar.example/v1",
       "api": "openai-completions",
       "apiKey": "$BANDAR_API_KEY",
-      "models": [{ "id": "sonnet", "name": "sonnet" }]
+      "models": [
+        {
+          "id": "sonnet",
+          "name": "sonnet",
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "input": ["text", "image"]
+        },
+        { "id": "tags/coding", "name": "tags/coding" }
+      ]
     }
   }
 }
@@ -184,6 +235,8 @@ pi --list-models
 ```
 
 `apiKey` accepts a literal, `$NAME`, `${NAME}`, or a leading `!command`. A command runs at request time, so a vault CLI works. Without `$BANDAR_API_KEY` set, pi reports the provider as unauthenticated instead of sending an empty key.
+
+Each entry in `models` appears under `/model`, and pi keeps the one you used last, so the file carries no default. pi takes `contextWindow` and `maxTokens` from the model's stored limits, and leaves both out for a tag.
 
 Status: partial, same reason as opencode.
 
@@ -211,12 +264,15 @@ The blockers, in the order they pay off:
 
 ## Adding a tool
 
-Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, the steps, and the snippets. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status. Add the tool's mark to `CliToolLogo` in `./src/client/components/cli-tool-logo.tsx`; the paths there come from [svgl.app](https://svgl.app), which serves single-color marks, so a two-tone one carries an opacity instead of a second color.
+Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, `modelCapacity`, the steps, and the snippets. `modelCapacity: "many"` means one file holds every picked ref, and the combobox appends each pick as a chip; `"one"` means the file pins a single ref and the tool lists the rest itself, so the page renders a select instead. A snippet reads `refsOf(input)` for the refs to write and `activeOf(input)` for the default, so a blank pick still renders the placeholder. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status. Add the tool's mark to `CliToolLogo` in `./src/client/components/cli-tool-logo.tsx`; the paths there come from [svgl.app](https://svgl.app), which serves single-color marks, so a two-tone one carries an opacity instead of a second color.
 
-Two rules the tests enforce, so keep them true:
+Five rules the tests enforce, so keep them true:
 
 - A snippet that names a file must reference the key variable and must not contain the key.
 - The base URL in the snippets must equal `tool.baseUrl(origin)`.
+- Every picked ref reaches the file snippet of a `"many"` tool, and a `"one"` tool's file carries only the first.
+- Index 0 is the default line: the top-level `model` for opencode and Codex.
+- Codex writes one profile file per ref after the first, and never a `[profiles.*]` table.
 
 When an ingress lands, flip its flag in `GATEWAY_SURFACE`. The drift test in `./src/server/gateway-surface.test.ts` fails until the flag matches `./src/server/gateway.ts` and `./src/server/providers/types.ts`, and the badges follow.
 

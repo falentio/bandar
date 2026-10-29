@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import type { InputModality } from "./providers";
 
 /** Which gateway ingress paths this build registers. Mirrors ./src/server/gateway.ts. */
 export const GATEWAY_SURFACE = {
@@ -38,12 +39,20 @@ export type CliSnippet =
       readonly code: string;
     };
 
+export type ModelLimit = {
+  readonly contextWindow: number;
+  readonly maxOutput: number;
+  readonly inputModalities: readonly InputModality[] | null;
+};
+
 export type CliRenderInput = {
   readonly origin: string;
-  /** Model ref as bandar resolves it, empty to render the placeholder. */
-  readonly model: string;
+  /** Model refs as bandar resolves them. Index 0 is the tool's default. Empty renders the placeholder. */
+  readonly models: readonly string[];
   /** Key shown once at creation, empty to render the placeholder. */
   readonly key: string;
+  /** Token limits by model ref. A tag ref never gets one: the tag picks the model at request time. */
+  readonly limits: ReadonlyMap<string, ModelLimit>;
 };
 
 export type CliTool = {
@@ -53,6 +62,8 @@ export type CliTool = {
   readonly docsUrl: string;
   readonly needs: readonly GatewayNeed[];
   readonly needsTools: boolean;
+  /** "many": one file lists every ref. "one": the file pins one ref and the tool lists the rest itself. */
+  readonly modelCapacity: "one" | "many";
   /** Claude Code appends /v1/messages itself, every other tool wants /v1. */
   readonly baseUrl: (origin: string) => string;
   readonly keyVariable: string;
@@ -89,11 +100,19 @@ export function toolStatus(tool: CliTool): CliToolStatus {
   return { status: "ready", reason: "requests and tool calls reach the model" };
 }
 
-export function renderInput(origin: string, model: string, key: string): CliRenderInput {
+export function renderInput(
+  origin: string,
+  models: readonly string[],
+  key: string,
+  limits: ReadonlyMap<string, ModelLimit> = new Map(),
+): CliRenderInput {
+  const trimmed = models.map((ref) => ref.trim());
+
   return {
     origin: origin.replace(/\/+$/u, ""),
-    model: model.trim(),
+    models: [...new Set(trimmed)].filter((ref) => ref !== ""),
     key: key.trim(),
+    limits,
   };
 }
 
@@ -105,6 +124,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     docsUrl: "https://opencode.ai/docs/providers/",
     needs: ["chatCompletions"],
     needsTools: true,
+    modelCapacity: "many",
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
     steps: [
@@ -121,7 +141,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
         language: "json",
         code: json({
           $schema: "https://opencode.ai/config.json",
-          model: modelRef(input),
+          model: modelRef(activeOf(input)),
           provider: {
             bandar: {
               npm: "@ai-sdk/openai-compatible",
@@ -130,7 +150,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
                 baseURL: v1Of(input),
                 apiKey: "{env:BANDAR_API_KEY}",
               },
-              models: { [modelOf(input)]: { name: modelOf(input) } },
+              models: modelEntries(refsOf(input), input.limits),
             },
           },
         }),
@@ -149,6 +169,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     docsUrl: "https://opencode.ai/v2/docs/providers/",
     needs: ["chatCompletions"],
     needsTools: true,
+    modelCapacity: "many",
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
     steps: [
@@ -165,14 +186,14 @@ export const CLI_TOOLS: readonly CliTool[] = [
         language: "json",
         code: json({
           $schema: "https://opencode.ai/config.json",
-          model: modelRef(input),
+          model: modelRef(activeOf(input)),
           providers: {
             bandar: {
               name: "bandar",
               env: ["BANDAR_API_KEY"],
               package: "@opencode/ai/providers/openai-compatible",
               settings: { baseURL: v1Of(input) },
-              models: { [modelOf(input)]: { name: modelOf(input) } },
+              models: modelEntries(refsOf(input), input.limits),
             },
           },
         }),
@@ -191,13 +212,14 @@ export const CLI_TOOLS: readonly CliTool[] = [
     docsUrl: "https://developers.openai.com/codex/config-reference/",
     needs: ["responses"],
     needsTools: true,
+    modelCapacity: "many",
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
     steps: [
       "Install Codex: npm i -g @openai/codex",
       "Add the provider block to ~/.codex/config.toml",
       "Export BANDAR_API_KEY before you start codex",
-      "Run codex",
+      "Run codex for the first ref; for any later ref run codex --profile bandar-<slug>, which reads ~/.codex/bandar-<slug>.config.toml",
     ],
     snippets: (input) => [
       {
@@ -206,7 +228,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
         path: "~/.codex/config.toml",
         language: "toml",
         code: [
-          `model = "${modelRef(input)}"`,
+          `model = "${activeOf(input)}"`,
           `model_provider = "bandar"`,
           "",
           "[model_providers.bandar]",
@@ -216,6 +238,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
           `wire_api = "responses"`,
         ].join("\n"),
       },
+      ...profileSnippets(refsOf(input)),
       {
         kind: "shell",
         label: "Key in the shell",
@@ -230,6 +253,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     docsUrl: "https://code.claude.com/docs/en/llm-gateway-connect",
     needs: ["messages"],
     needsTools: true,
+    modelCapacity: "one",
     baseUrl: (origin) => origin,
     keyVariable: "ANTHROPIC_AUTH_TOKEN",
     steps: [
@@ -237,6 +261,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
       "Save the key to ~/.config/bandar/key with no trailing newline, then chmod 600 that file",
       "Add the settings block to ~/.claude/settings.json, never to a project .claude/settings.json",
       "Run claude, then /status to confirm the base URL and the apiKeyHelper line",
+      "Run /model to switch among Claude's own model entries; ANTHROPIC_DEFAULT_SONNET_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL and ANTHROPIC_DEFAULT_HAIKU_MODEL point one entry each at a bandar ref",
     ],
     snippets: (input) => [
       {
@@ -247,7 +272,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
         code: json({
           env: {
             ANTHROPIC_BASE_URL: input.origin,
-            ANTHROPIC_MODEL: modelOf(input),
+            ANTHROPIC_MODEL: activeOf(input),
           },
           apiKeyHelper: "cat ~/.config/bandar/key",
         }),
@@ -258,7 +283,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
         code: [
           `export ANTHROPIC_BASE_URL="${input.origin}"`,
           `export ANTHROPIC_AUTH_TOKEN="${keyOf(input)}"`,
-          `export ANTHROPIC_MODEL="${modelOf(input)}"`,
+          `export ANTHROPIC_MODEL="${activeOf(input)}"`,
         ].join("\n"),
       },
     ],
@@ -270,6 +295,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
     docsUrl: "https://pi.dev/models",
     needs: ["chatCompletions"],
     needsTools: true,
+    modelCapacity: "many",
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
     steps: [
@@ -291,7 +317,7 @@ export const CLI_TOOLS: readonly CliTool[] = [
               baseUrl: v1Of(input),
               api: "openai-completions",
               apiKey: "$BANDAR_API_KEY",
-              models: [{ id: modelOf(input), name: modelOf(input) }],
+              models: piEntries(refsOf(input), input.limits),
             },
           },
         }),
@@ -317,12 +343,102 @@ function keyOf(input: CliRenderInput): string {
   return input.key === "" ? KEY_PLACEHOLDER : input.key;
 }
 
-function modelOf(input: CliRenderInput): string {
-  return input.model === "" ? MODEL_PLACEHOLDER : input.model;
+function refsOf(input: CliRenderInput): readonly [string, ...string[]] {
+  const [head = MODEL_PLACEHOLDER, ...rest] = input.models;
+
+  return [head, ...rest];
 }
 
-function modelRef(input: CliRenderInput): string {
-  return `bandar/${modelOf(input)}`;
+function activeOf(input: CliRenderInput): string {
+  return refsOf(input)[0];
+}
+
+function modelRef(ref: string): string {
+  return `bandar/${ref}`;
+}
+
+type OpenCodeModelEntry = {
+  name: string;
+  limit?: { context: number; output: number };
+  modalities?: { input: readonly InputModality[] };
+};
+
+function modelEntries(
+  refs: readonly string[],
+  limits: ReadonlyMap<string, ModelLimit>,
+): Record<string, OpenCodeModelEntry> {
+  return Object.fromEntries(
+    refs.map((ref): [string, OpenCodeModelEntry] => {
+      const limit = limits.get(ref);
+
+      if (limit === undefined) return [ref, { name: ref }];
+
+      const entry: OpenCodeModelEntry = {
+        name: ref,
+        limit: { context: limit.contextWindow, output: limit.maxOutput },
+      };
+
+      if (limit.inputModalities !== null && limit.inputModalities.length > 0) {
+        entry.modalities = { input: limit.inputModalities };
+      }
+
+      return [ref, entry];
+    }),
+  );
+}
+
+type PiModelEntry = {
+  id: string;
+  name: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  input?: readonly InputModality[];
+};
+
+function piEntries(
+  refs: readonly string[],
+  limits: ReadonlyMap<string, ModelLimit>,
+): readonly PiModelEntry[] {
+  return refs.map((ref) => {
+    const limit = limits.get(ref);
+
+    if (limit === undefined) return { id: ref, name: ref };
+
+    const entry: PiModelEntry = {
+      id: ref,
+      name: ref,
+      contextWindow: limit.contextWindow,
+      maxTokens: limit.maxOutput,
+    };
+
+    const accepted = limit.inputModalities?.filter(
+      (modality) => modality === "text" || modality === "image",
+    );
+
+    if (accepted !== undefined && accepted.length > 0) entry.input = accepted;
+
+    return entry;
+  });
+}
+
+function profileSnippets(refs: readonly string[]): readonly CliSnippet[] {
+  return refs.slice(1).map((ref): CliSnippet => ({
+    kind: "file",
+    label: `Profile for ${ref}`,
+    path: `~/.codex/${codexProfile(ref)}.config.toml`,
+    language: "toml",
+    code: `model = "${ref}"`,
+  }));
+}
+
+/** A Codex profile name accepts only letters, numbers, hyphens, and underscores. */
+function codexProfile(ref: string): string {
+  const slug = ref
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+
+  return `bandar-${slug}`;
 }
 
 function v1Of(input: CliRenderInput): string {

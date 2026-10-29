@@ -13,8 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   COMPAT_LABELS,
+  INPUT_MODALITIES,
   parseCompat,
   type Compat,
+  type InputModality,
   type ProviderModel,
   type ProviderModelEditInput,
 } from "../../shared/providers";
@@ -34,6 +36,16 @@ function parsePrice(text: string): number | null | undefined {
 
 function priceText(value: number | null): string {
   return value === null ? "" : String(value);
+}
+
+function parseTokens(text: string): number | null | undefined {
+  const trimmed = text.trim();
+
+  if (trimmed === "") return null;
+
+  const value = Number(trimmed);
+
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 export function EditModelDialog({
@@ -59,6 +71,12 @@ export function EditModelDialog({
   const [inputPrice, setInputPrice] = useState(priceText(model.inputPricePerMtok));
   const [cachePrice, setCachePrice] = useState(priceText(model.cacheInputPricePerMtok));
   const [outputPrice, setOutputPrice] = useState(priceText(model.outputPricePerMtok));
+  const [contextWindow, setContextWindow] = useState(priceText(model.contextWindow));
+  const [maxOutput, setMaxOutput] = useState(priceText(model.maxOutput));
+
+  const [modalities, setModalities] = useState<readonly InputModality[]>(
+    model.inputModalities ?? [],
+  );
 
   const reset = () => {
     setName(model.alias ?? "");
@@ -67,14 +85,21 @@ export function EditModelDialog({
     setInputPrice(priceText(model.inputPricePerMtok));
     setCachePrice(priceText(model.cacheInputPricePerMtok));
     setOutputPrice(priceText(model.outputPricePerMtok));
+    setContextWindow(priceText(model.contextWindow));
+    setMaxOutput(priceText(model.maxOutput));
+    setModalities(model.inputModalities ?? []);
   };
 
   const parsedInput = parsePrice(inputPrice);
   const parsedCache = parsePrice(cachePrice);
   const parsedOutput = parsePrice(outputPrice);
+  const parsedContext = parseTokens(contextWindow);
+  const parsedMaxOutput = parseTokens(maxOutput);
 
   const pricesValid =
     parsedInput !== undefined && parsedCache !== undefined && parsedOutput !== undefined;
+
+  const tokensValid = parsedContext !== undefined && parsedMaxOutput !== undefined;
 
   const slugValid =
     slug.trim() !== "" &&
@@ -86,10 +111,13 @@ export function EditModelDialog({
 
     if (
       !pricesValid ||
+      !tokensValid ||
       !slugValid ||
       parsedInput === undefined ||
       parsedCache === undefined ||
-      parsedOutput === undefined
+      parsedOutput === undefined ||
+      parsedContext === undefined ||
+      parsedMaxOutput === undefined
     ) {
       return;
     }
@@ -101,6 +129,9 @@ export function EditModelDialog({
       inputPricePerMtok: parsedInput,
       cacheInputPricePerMtok: parsedCache,
       outputPricePerMtok: parsedOutput,
+      contextWindow: parsedContext,
+      maxOutput: parsedMaxOutput,
+      inputModalities: modalities.length === 0 ? null : [...modalities],
     };
 
     if (await providers.updateModel(providerId, model.id, edit)) {
@@ -122,7 +153,7 @@ export function EditModelDialog({
           <DialogTitle>Edit model</DialogTitle>
           <DialogDescription>
             The upstream id <code>{model.upstreamModel}</code> stays fixed. The address, name, wire,
-            and prices are yours to set.
+            prices, and token limits are yours to set.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={(event) => void submit(event)} className="grid gap-4">
@@ -244,6 +275,72 @@ export function EditModelDialog({
             <p className="text-xs text-destructive">Prices are zero or a positive number.</p>
           )}
 
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="model-edit-context-window">Context window</Label>
+              <Input
+                id="model-edit-context-window"
+                type="number"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                value={contextWindow}
+                onChange={(event) => setContextWindow(event.target.value)}
+                placeholder="200000"
+                disabled={providers.pending}
+                aria-invalid={parsedContext === undefined}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="model-edit-max-output">Max output</Label>
+              <Input
+                id="model-edit-max-output"
+                type="number"
+                inputMode="numeric"
+                min="1"
+                step="1"
+                value={maxOutput}
+                onChange={(event) => setMaxOutput(event.target.value)}
+                placeholder="64000"
+                disabled={providers.pending}
+                aria-invalid={parsedMaxOutput === undefined}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Tokens. Leave a field blank to keep what the provider catalog or models.dev reports.
+          </p>
+          {tokensValid ? null : (
+            <p className="text-xs text-destructive">Token limits are whole numbers above zero.</p>
+          )}
+
+          <div className="grid gap-2">
+            <span className="text-xs text-muted-foreground">Input modalities</span>
+            <div className="flex flex-wrap gap-3">
+              {INPUT_MODALITIES.map((modality) => (
+                <label key={modality} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    className="size-3.5 accent-primary"
+                    checked={modalities.includes(modality)}
+                    onChange={() =>
+                      setModalities(
+                        modalities.includes(modality)
+                          ? modalities.filter((value) => value !== modality)
+                          : [...modalities, modality],
+                      )
+                    }
+                    disabled={providers.pending}
+                  />
+                  {modality}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              What the model accepts as input. Leave every box clear when the provider does not say.
+            </p>
+          </div>
+
           {providers.error === null ? null : (
             <p className="text-sm text-destructive">{providers.error}</p>
           )}
@@ -254,7 +351,10 @@ export function EditModelDialog({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="submit" disabled={providers.pending || !pricesValid || !slugValid}>
+            <Button
+              type="submit"
+              disabled={providers.pending || !pricesValid || !tokensValid || !slugValid}
+            >
               Save
             </Button>
           </DialogFooter>

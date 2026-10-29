@@ -69,12 +69,21 @@ function RailStat({ label, value }: { readonly label: string; readonly value: st
 
 function TokenSplitBar({ input, output }: { readonly input: number; readonly output: number }) {
   const total = input + output;
-  const share = total === 0 ? 0 : (input / total) * 100;
 
   return (
     <div className="mt-4 flex h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-      <div className="bg-foreground/25" style={{ width: `${String(share)}%` }} />
-      <div className="bg-foreground/70" style={{ width: `${String(100 - share)}%` }} />
+      {total === 0 ? null : (
+        <>
+          <div
+            className="bg-foreground/25"
+            style={{ width: `${String((input / total) * 100)}%` }}
+          />
+          <div
+            className="bg-foreground/70"
+            style={{ width: `${String((output / total) * 100)}%` }}
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -1,10 +1,34 @@
 import * as v from "valibot";
+import { ContentSchema, textsOf, type MessagesRejection } from "./messages";
 import { MAX_MODEL_REF_LENGTH } from "./slugs";
 
 export const ChatMessageSchema = v.object({
-  role: v.picklist(["system", "user", "assistant"]),
-  content: v.string(),
+  role: v.picklist(["system", "developer", "user", "assistant"]),
+  content: ContentSchema,
 });
+
+type ChatTurn = {
+  readonly role: "system" | "user" | "assistant";
+  readonly content: string;
+};
+
+type ChatNormalization =
+  | { readonly ok: true; readonly value: readonly ChatTurn[] }
+  | { readonly ok: false; readonly rejection: MessagesRejection };
+
+export function normalizeChatMessages(messages: readonly ChatMessage[]): ChatNormalization {
+  const turns = textsOf(messages);
+
+  if (!turns.ok) return turns;
+
+  return {
+    ok: true,
+    value: turns.value.map(({ role, text }) => ({
+      role: role === "developer" ? "system" : role,
+      content: text,
+    })),
+  };
+}
 
 export const ChatCompletionRequestSchema = v.object({
   model: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH)),

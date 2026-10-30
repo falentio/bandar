@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 import * as v from "valibot";
-import { GatewayRequestSchema, type ModelList } from "../shared/chat";
+import { GatewayRequestSchema, normalizeChatMessages, type ModelList } from "../shared/chat";
 import {
   MessagesRequestSchema,
   normalizeMessages,
@@ -74,10 +74,21 @@ export function createGateway(deps: GatewayDeps) {
 
       if (caller === null) return unauthorized();
 
+      const normalized = normalizeChatMessages(parsed.output.messages);
+
+      if (!normalized.ok)
+        return openAiError(
+          normalized.rejection.status,
+          normalized.rejection.message,
+          "validation",
+          "invalid_request_error",
+          normalized.rejection.param,
+        );
+
       const input = parsed.output;
 
       const canonical: CanonicalRequest = {
-        messages: input.messages,
+        messages: normalized.value,
         temperature: input.temperature,
         topP: input.topP,
         maxTokens: input.maxTokens,

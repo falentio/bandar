@@ -3,7 +3,9 @@ import { MAX_MODEL_REF_LENGTH } from "./slugs";
 
 const BlockSchema = v.object({ type: v.string(), text: v.optional(v.string()) });
 
-const ContentSchema = v.union([v.string(), v.array(BlockSchema)]);
+export const ContentSchema = v.union([v.string(), v.array(BlockSchema)]);
+
+type Content = v.InferOutput<typeof ContentSchema>;
 
 export const MessagesRequestSchema = v.object({
   model: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH)),
@@ -26,8 +28,6 @@ export const MessagesRequestSchema = v.object({
 
 export type MessagesRequest = v.InferOutput<typeof MessagesRequestSchema>;
 
-type MessagesContent = v.InferOutput<typeof ContentSchema>;
-
 export type MessagesTurn = {
   readonly role: "user" | "assistant";
   readonly text: string;
@@ -40,6 +40,7 @@ export type NormalizedMessages = {
 
 export type MessagesRejection = {
   readonly status: number;
+  readonly param: string;
   readonly message: string;
 };
 
@@ -53,17 +54,17 @@ export function normalizeMessages(request: MessagesRequest): MessagesNormalizati
 
   if (!system.ok) return system;
 
-  const messages: MessagesTurn[] = [];
+  const messages = textsOf(request.messages);
 
-  for (const [index, message] of request.messages.entries()) {
-    const text = textOf(message.content, `messages.${String(index)}.content`);
+  if (!messages.ok) return messages;
 
-    if (!text.ok) return text;
-
-    messages.push({ role: message.role, text: text.value });
-  }
-
-  return { ok: true, value: { system: system.value, messages } };
+  return {
+    ok: true,
+    value: {
+      system: system.value,
+      messages: messages.value,
+    },
+  };
 }
 
 export function promptText({ system, messages }: NormalizedMessages): string {
@@ -73,7 +74,7 @@ export function promptText({ system, messages }: NormalizedMessages): string {
 }
 
 function textOf(
-  content: MessagesContent | undefined,
+  content: Content | undefined,
   at: string,
 ):
   | { readonly ok: true; readonly value: string }
@@ -87,7 +88,10 @@ function textOf(
   const blocks = v.safeParse(v.array(BlockSchema), content);
 
   if (!blocks.success)
-    return { ok: false, rejection: { status: 422, message: `${at}: content is not text` } };
+    return {
+      ok: false,
+      rejection: { status: 422, param: at, message: `${at}: content is not text` },
+    };
 
   const parts: string[] = [];
 
@@ -99,7 +103,7 @@ function textOf(
     if (block.text === undefined)
       return {
         ok: false,
-        rejection: { status: 422, message: `${blockAt}: text block has no text` },
+        rejection: { status: 422, param: blockAt, message: `${blockAt}: text block has no text` },
       };
 
     parts.push(block.text);
@@ -108,6 +112,28 @@ function textOf(
   return { ok: true, value: parts.join("\n") };
 }
 
+export function textsOf<Message extends { readonly content: Content }>(
+  messages: readonly Message[],
+):
+  | { readonly ok: true; readonly value: readonly (Message & { readonly text: string })[] }
+  | { readonly ok: false; readonly rejection: MessagesRejection } {
+  const texts: (Message & { text: string })[] = [];
+
+  for (const [index, message] of messages.entries()) {
+    const text = textOf(message.content, `messages.${String(index)}.content`);
+
+    if (!text.ok) return text;
+
+    texts.push({ ...message, text: text.value });
+  }
+
+  return { ok: true, value: texts };
+}
+
 function unsupported(at: string, type: string): MessagesRejection {
-  return { status: 422, message: `${at}: ${type} blocks are not supported by this text gateway` };
+  return {
+    status: 422,
+    param: at,
+    message: `${at}: ${type} blocks are not supported by this text gateway`,
+  };
 }

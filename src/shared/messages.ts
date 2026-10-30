@@ -28,6 +28,16 @@ type Content = v.InferOutput<typeof ContentSchema>;
 
 type Block = v.InferOutput<typeof BlockSchema>;
 
+type TextBlock = v.InferOutput<typeof TextBlockSchema>;
+
+/** One content value in text form: the string shorthand, or the blocks the wire listed. */
+type TextContent = string | readonly TextBlock[];
+
+/** The blocks a content value lists; the string shorthand is one text block. */
+function blocksOf(content: TextContent): readonly TextBlock[] {
+  return v.is(v.string(), content) ? [{ type: "text", text: content }] : content;
+}
+
 const AnthropicToolSchema = v.object({
   name: v.pipe(v.string(), v.minLength(1)),
   description: v.optional(v.string()),
@@ -119,11 +129,13 @@ export function normalizeMessages(request: MessagesRequest): Normalized<Normaliz
 export function contentText(content: Content | null | undefined, at: string): Normalized<string> {
   if (content === undefined || content === null) return { ok: true, value: "" };
 
-  if (typeof content === "string") return { ok: true, value: content };
+  return textOfBlocks(blocksOf(content), at);
+}
 
+function textOfBlocks(blocks: readonly TextBlock[], at: string): Normalized<string> {
   const texts: string[] = [];
 
-  for (const [index, block] of content.entries()) {
+  for (const [index, block] of blocks.entries()) {
     const blockAt = `${at}.${String(index)}`;
 
     if (block.type !== "text") return unsupported(blockAt, block.type);
@@ -168,11 +180,9 @@ function partsOf(
   at: string,
   role: "user" | "assistant",
 ): Normalized<readonly MessagePart[]> {
-  if (typeof content === "string") return { ok: true, value: [{ type: "text", text: content }] };
-
   const parts: MessagePart[] = [];
 
-  for (const [index, block] of content.entries()) {
+  for (const [index, block] of blocksOf(content).entries()) {
     const part = partOf(block, `${at}.${String(index)}`, role);
 
     if (!part.ok) return part;
@@ -241,27 +251,10 @@ function partOf(block: Block, at: string, role: "user" | "assistant"): Normalize
 }
 
 /** A result's own content is text only: this gateway carries no other modality to a model. */
-function resultText(
-  content: string | readonly v.InferOutput<typeof TextBlockSchema>[] | undefined,
-  at: string,
-): Normalized<string> {
+function resultText(content: TextContent | undefined, at: string): Normalized<string> {
   if (content === undefined) return { ok: true, value: "" };
 
-  if (typeof content === "string") return { ok: true, value: content };
-
-  const texts: string[] = [];
-
-  for (const [index, block] of content.entries()) {
-    const blockAt = `${at}.content.${String(index)}`;
-
-    if (block.type !== "text") return unsupported(blockAt, block.type);
-
-    if (block.text === undefined) return rejected(blockAt, `${blockAt}: text block has no text`);
-
-    texts.push(block.text);
-  }
-
-  return { ok: true, value: texts.join("\n") };
+  return textOfBlocks(blocksOf(content), `${at}.content`);
 }
 
 function unsupported(at: string, type: string): Rejected {

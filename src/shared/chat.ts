@@ -190,19 +190,11 @@ function toolOf(tool: v.InferOutput<typeof ChatToolSchema>): ToolDefinition {
 }
 
 function choiceOf(choice: v.InferOutput<typeof ChatToolChoiceSchema>): ToolChoice {
-  if (typeof choice !== "string") return { mode: "tool", name: choice.function.name };
+  if (choice === "auto") return { mode: "auto" };
 
-  switch (choice) {
-    case "auto": {
-      return { mode: "auto" };
-    }
+  if (choice === "none") return { mode: "none" };
 
-    case "none": {
-      return { mode: "none" };
-    }
+  if (choice === "required") return { mode: "required" };
 
-    case "required": {
-      return { mode: "required" };
-    }
-  }
+  return { mode: "tool", name: choice.function.name };
 }

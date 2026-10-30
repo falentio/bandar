@@ -60,8 +60,11 @@ function messageResponse({ id, model, result }: CompletionInput): Response {
 
 function anthropicStream({ id, model, sink }: ChatStreamInput): ChatStreamWriter {
   const messageId = messageIdOf(id);
+  const calls = new Map<string, { readonly index: number; readonly name: string }>();
   let started = false;
-  let blockOpen = false;
+  let nextIndex = 0;
+  let openIndex: number | null = null;
+  let openCall: string | null = null;
 
   const start = () => {
     if (started) return;
@@ -85,18 +88,52 @@ function anthropicStream({ id, model, sink }: ChatStreamInput): ChatStreamWriter
     );
   };
 
-  const openBlock = () => {
-    if (blockOpen) return;
-
-    blockOpen = true;
+  const openBlock = (index: number, contentBlock: Payload, call: string | null) => {
+    openIndex = index;
+    openCall = call;
 
     sink.send(
       frame("content_block_start", {
         type: "content_block_start",
-        index: 0,
-        content_block: { type: "text", text: "" },
+        index,
+        content_block: contentBlock,
       }),
     );
+  };
+
+  const closeBlock = () => {
+    if (openIndex === null) return;
+
+    sink.send(frame("content_block_stop", { type: "content_block_stop", index: openIndex }));
+
+    openIndex = null;
+    openCall = null;
+  };
+
+  // A call's deltas arrive before its stop and the next block's start, so one block is open at a time.
+  const openText = (): number => {
+    if (openIndex !== null && openCall === null) return openIndex;
+
+    closeBlock();
+
+    const index = nextIndex++;
+
+    openBlock(index, { type: "text", text: "" }, null);
+
+    return index;
+  };
+
+  const openTool = (callId: string): number => {
+    const known = calls.get(callId);
+
+    if (known === undefined) throw new Error("no tool call " + callId + " was announced");
+
+    if (openIndex === known.index) return known.index;
+
+    closeBlock();
+    openBlock(known.index, { type: "tool_use", id: callId, name: known.name, input: {} }, callId);
+
+    return known.index;
   };
 
   return {
@@ -106,22 +143,45 @@ function anthropicStream({ id, model, sink }: ChatStreamInput): ChatStreamWriter
 
     text(chunk) {
       start();
-      openBlock();
+
+      const index = openText();
 
       sink.send(
         frame("content_block_delta", {
           type: "content_block_delta",
-          index: 0,
+          index,
           delta: { type: "text_delta", text: chunk },
+        }),
+      );
+    },
+
+    toolCall(call) {
+      start();
+
+      if (!calls.has(call.id)) calls.set(call.id, { index: nextIndex++, name: call.name });
+
+      openTool(call.id);
+    },
+
+    toolArguments(callId, fragment) {
+      const index = openTool(callId);
+
+      sink.send(
+        frame("content_block_delta", {
+          type: "content_block_delta",
+          index,
+          delta: { type: "input_json_delta", partial_json: fragment },
         }),
       );
     },
 
     finish(reason, usage) {
       start();
-      openBlock();
 
-      sink.send(frame("content_block_stop", { type: "content_block_stop", index: 0 }));
+      // A stream that produced nothing still owes the client its block pair.
+      if (openIndex === null) openText();
+
+      closeBlock();
 
       sink.send(
         frame("message_delta", {

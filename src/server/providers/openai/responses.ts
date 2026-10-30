@@ -1,10 +1,12 @@
 import * as v from "valibot";
 import {
   toolResultText,
+  type ToolCall,
   type ToolChoice,
   type ToolDefinition,
   type ToolParameters,
 } from "../../../shared/conversation";
+import { finishOf } from "../types";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -36,7 +38,12 @@ const OutputSchema = v.object({
   content: v.optional(
     v.array(v.object({ type: v.string(), text: v.optional(v.nullable(v.string())) })),
   ),
+  call_id: v.optional(v.nullable(v.string())),
+  name: v.optional(v.nullable(v.string())),
+  arguments: v.optional(v.nullable(v.string())),
 });
+
+type Output = v.InferOutput<typeof OutputSchema>;
 
 const ResponseSchema = v.object({
   output: v.array(OutputSchema),
@@ -51,6 +58,8 @@ const ResponseSchema = v.object({
 const EventSchema = v.object({
   type: v.string(),
   delta: v.optional(v.nullable(v.string())),
+  item: v.optional(v.nullable(OutputSchema)),
+  output_index: v.optional(v.number()),
   response: v.optional(ResponseSchema),
   error: v.optional(ErrorSchema),
   message: v.optional(v.string()),
@@ -119,10 +128,15 @@ export function responsesAdapter<K extends ProviderKind>({
 
       if (failure !== null) throw protocolError(failure);
 
+      const calls = callsOf(parsed.output.output, label);
+
       return {
         text: textOf(parsed.output.output),
-        toolCalls: [],
-        finishReason: finishReason(parsed.output.status ?? null, reasonOf(parsed.output)),
+        toolCalls: calls,
+        finishReason: finishOf(
+          finishReason(parsed.output.status ?? null, reasonOf(parsed.output)),
+          calls,
+        ),
         usage: usageOf(parsed.output.usage),
       };
     },
@@ -139,6 +153,9 @@ export function responsesAdapter<K extends ProviderKind>({
 
       let reason: string | null = null;
       let usage: CanonicalUsage | null = null;
+      const calls: ToolCall[] = [];
+      const started = new Map<number, ToolCall>();
+      const produced = new Set<number>();
 
       for await (const data of sseData(requireBody(response), input.signal)) {
         if (data === "[DONE]") break;
@@ -153,6 +170,77 @@ export function responsesAdapter<K extends ProviderKind>({
               yield { type: "text", text: event.delta };
             }
 
+            break;
+          }
+
+          case "response.output_item.added": {
+            const item = event.item;
+
+            if (item === undefined || item === null || item.type !== "function_call") break;
+
+            const call = callOf(item, label);
+            const index = event.output_index ?? 0;
+
+            started.set(index, call);
+            calls.push(call);
+
+            yield { type: "tool_call_start", call };
+
+            if (call.arguments !== "") {
+              produced.add(index);
+              yield { type: "tool_call_delta", id: call.id, arguments: call.arguments };
+            }
+
+            break;
+          }
+
+          case "response.function_call_arguments.delta": {
+            const index = event.output_index ?? 0;
+            const call = started.get(index);
+
+            if (call === undefined)
+              throw protocolError(label + " streamed arguments for a call it never announced");
+
+            if (event.delta === undefined || event.delta === null || event.delta === "") break;
+
+            produced.add(index);
+            yield { type: "tool_call_delta", id: call.id, arguments: event.delta };
+            break;
+          }
+
+          case "response.output_item.done": {
+            const item = event.item;
+
+            if (item === undefined || item === null || item.type !== "function_call") break;
+
+            const index = event.output_index ?? 0;
+            const known = started.get(index);
+
+            // A provider that only sends the finished item still has to yield the call whole.
+            if (known === undefined) {
+              const call = callOf(item, label);
+
+              started.set(index, call);
+              calls.push(call);
+
+              yield { type: "tool_call_start", call };
+
+              if (call.arguments !== "") {
+                produced.add(index);
+                yield { type: "tool_call_delta", id: call.id, arguments: call.arguments };
+              }
+
+              break;
+            }
+
+            if (produced.has(index)) break;
+
+            const final = item.arguments;
+
+            if (final === undefined || final === null || final === "") break;
+
+            produced.add(index);
+            yield { type: "tool_call_delta", id: known.id, arguments: final };
             break;
           }
 
@@ -191,7 +279,7 @@ export function responsesAdapter<K extends ProviderKind>({
 
       if (usage !== null) yield { type: "usage", usage };
 
-      yield { type: "finish", reason };
+      yield { type: "finish", reason: finishOf(reason, calls) };
     },
   };
 }
@@ -309,7 +397,23 @@ function parseEvent(data: string): v.InferOutput<typeof EventSchema> | null {
   }
 }
 
-function textOf(output: readonly v.InferOutput<typeof OutputSchema>[]): string {
+function callsOf(output: readonly Output[], label: string): readonly ToolCall[] {
+  return output
+    .filter((item) => item.type === "function_call")
+    .map((item) => callOf(item, label));
+}
+
+function callOf(item: Output, label: string): ToolCall {
+  if (item.call_id === undefined || item.call_id === null)
+    throw protocolError(label + " returned a tool call with no call_id");
+
+  if (item.name === undefined || item.name === null)
+    throw protocolError(label + " returned a tool call with no name");
+
+  return { id: item.call_id, name: item.name, arguments: item.arguments ?? "" };
+}
+
+function textOf(output: readonly Output[]): string {
   const parts: string[] = [];
 
   for (const item of output) {

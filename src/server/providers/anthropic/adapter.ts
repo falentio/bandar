@@ -3,6 +3,7 @@ import {
   coalesceText,
   textOfParts,
   type MessagePart,
+  type ToolCall,
   type ToolChoice,
   type ToolDefinition,
   type ToolParameters,
@@ -19,6 +20,7 @@ import {
 } from "../http";
 import {
   UpstreamError,
+  finishOf,
   jsonObjectOf,
   type AdapterInput,
   type CanonicalMessage,
@@ -33,19 +35,32 @@ const UsageSchema = v.object({
   output_tokens: v.optional(v.nullable(v.number())),
 });
 
+const ContentBlockSchema = v.object({
+  type: v.string(),
+  text: v.optional(v.nullable(v.string())),
+  id: v.optional(v.nullable(v.string())),
+  name: v.optional(v.nullable(v.string())),
+  input: v.optional(v.nullable(v.record(v.string(), v.unknown()))),
+});
+
+type ContentBlock = v.InferOutput<typeof ContentBlockSchema>;
+
 const ResponseSchema = v.object({
-  content: v.array(v.object({ type: v.string(), text: v.optional(v.nullable(v.string())) })),
+  content: v.array(ContentBlockSchema),
   stop_reason: v.optional(v.nullable(v.string())),
   usage: v.optional(v.nullable(UsageSchema)),
 });
 
 const StreamSchema = v.object({
   type: v.string(),
+  index: v.optional(v.number()),
   message: v.optional(v.object({ usage: v.optional(v.nullable(UsageSchema)) })),
+  content_block: v.optional(ContentBlockSchema),
   delta: v.optional(
     v.object({
       type: v.optional(v.string()),
       text: v.optional(v.nullable(v.string())),
+      partial_json: v.optional(v.nullable(v.string())),
       stop_reason: v.optional(v.nullable(v.string())),
     }),
   ),
@@ -117,10 +132,12 @@ export function anthropicAdapter<K extends ProviderKind>({
         .map((block) => block.text ?? "")
         .join("");
 
+      const calls = callsOf(parsed.output.content, label);
+
       return {
         text,
-        toolCalls: [],
-        finishReason: finishReason(parsed.output.stop_reason ?? null),
+        toolCalls: calls,
+        finishReason: finishOf(finishReason(parsed.output.stop_reason ?? null), calls),
         usage: usageOf(parsed.output.usage),
       };
     },
@@ -138,6 +155,8 @@ export function anthropicAdapter<K extends ProviderKind>({
       let inputTokens: number | null = null;
       let outputTokens: number | null = null;
       let reason: string | null = null;
+      const calls: ToolCall[] = [];
+      const blocks = new Map<number, ToolCall>();
 
       for await (const data of sseData(requireBody(response), input.signal)) {
         let parsed: v.InferOutput<typeof StreamSchema>;
@@ -163,9 +182,27 @@ export function anthropicAdapter<K extends ProviderKind>({
           outputTokens = startUsage.output_tokens ?? outputTokens;
         }
 
+        if (parsed.type === "content_block_start" && parsed.content_block?.type === "tool_use") {
+          const call = callOf(parsed.content_block, label);
+
+          blocks.set(parsed.index ?? 0, call);
+          calls.push(call);
+
+          yield { type: "tool_call_start", call: { id: call.id, name: call.name } };
+        }
+
         if (parsed.type === "content_block_delta" && parsed.delta !== undefined) {
           if (parsed.delta.type === "text_delta" && parsed.delta.text) {
             yield { type: "text", text: parsed.delta.text };
+          }
+
+          if (parsed.delta.type === "input_json_delta" && parsed.delta.partial_json) {
+            const call = blocks.get(parsed.index ?? 0);
+
+            if (call === undefined)
+              throw protocolError(label + " streamed arguments for a block it never opened");
+
+            yield { type: "tool_call_delta", id: call.id, arguments: parsed.delta.partial_json };
           }
         }
 
@@ -184,7 +221,7 @@ export function anthropicAdapter<K extends ProviderKind>({
       }
 
       yield { type: "usage", usage: { inputTokens, outputTokens } };
-      yield { type: "finish", reason };
+      yield { type: "finish", reason: finishOf(reason, calls) };
     },
   };
 }
@@ -309,6 +346,27 @@ function toolChoiceOf(choice: Exclude<ToolChoice, { mode: "none" }>): AnthropicT
     }
   }
 }
+function callsOf(blocks: readonly ContentBlock[], label: string): readonly ToolCall[] {
+  const calls: ToolCall[] = [];
+
+  for (const block of blocks) {
+    if (block.type === "tool_use") calls.push(callOf(block, label));
+  }
+
+  return calls;
+}
+
+/** The one place a canonical argument string is built from an object. */
+function callOf(block: ContentBlock, label: string): ToolCall {
+  if (block.id === undefined || block.id === null)
+    throw protocolError(label + " returned a tool_use block with no id");
+
+  if (block.name === undefined || block.name === null)
+    throw protocolError(label + " returned a tool_use block with no name");
+
+  return { id: block.id, name: block.name, arguments: JSON.stringify(block.input ?? {}) };
+}
+
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {
   return {
     inputTokens: usage?.input_tokens ?? null,

@@ -4,6 +4,7 @@ import {
   toolNamesOf,
   toolResultText,
   type MessagePart,
+  type ToolCall,
   type ToolChoice,
   type ToolDefinition,
   type ToolParameters,
@@ -21,6 +22,7 @@ import {
 } from "../http";
 import {
   UpstreamError,
+  finishOf,
   jsonObjectOf,
   type AdapterInput,
   type CanonicalMessage,
@@ -35,12 +37,22 @@ const UsageSchema = v.object({
   candidatesTokenCount: v.optional(v.nullable(v.number())),
 });
 
-const CandidateSchema = v.object({
-  content: v.optional(
-    v.object({
-      parts: v.optional(v.array(v.object({ text: v.optional(v.nullable(v.string())) }))),
-    }),
+const PartSchema = v.object({
+  text: v.optional(v.nullable(v.string())),
+  functionCall: v.optional(
+    v.nullable(
+      v.object({
+        name: v.string(),
+        args: v.optional(v.nullable(v.record(v.string(), v.unknown()))),
+      }),
+    ),
   ),
+});
+
+type Part = v.InferOutput<typeof PartSchema>;
+
+const CandidateSchema = v.object({
+  content: v.optional(v.object({ parts: v.optional(v.array(PartSchema)) })),
   finishReason: v.optional(v.nullable(v.string())),
 });
 
@@ -110,10 +122,12 @@ export function googleAdapter<K extends ProviderKind>({
 
       if (candidate === undefined) throw protocolError(`${label} returned no candidates`);
 
+      const calls = callsOf(partsOf(candidate));
+
       return {
         text: textOf(candidate),
-        toolCalls: [],
-        finishReason: finishReason(candidate.finishReason ?? null),
+        toolCalls: calls,
+        finishReason: finishOf(finishReason(candidate.finishReason ?? null), calls),
         usage: usageOf(parsed.output.usageMetadata),
       };
     },
@@ -130,6 +144,7 @@ export function googleAdapter<K extends ProviderKind>({
 
       let reason: string | null = null;
       let usage: CanonicalUsage | null = null;
+      const calls: ToolCall[] = [];
 
       for await (const data of sseData(requireBody(response), input.signal)) {
         let parsed: v.InferOutput<typeof ResponseSchema>;
@@ -156,9 +171,22 @@ export function googleAdapter<K extends ProviderKind>({
 
         if (candidate === undefined) continue;
 
-        const text = textOf(candidate);
+        for (const part of partsOf(candidate)) {
+          if (part.text !== undefined && part.text !== null && part.text !== "") {
+            yield { type: "text", text: part.text };
+            continue;
+          }
 
-        if (text !== "") yield { type: "text", text };
+          const functionCall = part.functionCall;
+
+          if (functionCall === undefined || functionCall === null) continue;
+
+          const call = callOf(functionCall, calls.length);
+
+          calls.push(call);
+          yield { type: "tool_call_start", call: { id: call.id, name: call.name } };
+          yield { type: "tool_call_delta", id: call.id, arguments: call.arguments };
+        }
 
         if (candidate.finishReason !== undefined && candidate.finishReason !== null) {
           reason = finishReason(candidate.finishReason);
@@ -167,7 +195,7 @@ export function googleAdapter<K extends ProviderKind>({
 
       if (usage !== null) yield { type: "usage", usage };
 
-      yield { type: "finish", reason };
+      yield { type: "finish", reason: finishOf(reason, calls) };
     },
   };
 }
@@ -307,8 +335,35 @@ function toolConfigOf(choice: ToolChoice): NonNullable<ChatBody["toolConfig"]> {
     }
   }
 }
+function partsOf(candidate: v.InferOutput<typeof CandidateSchema>): readonly Part[] {
+  return candidate.content?.parts ?? [];
+}
+
 function textOf(candidate: v.InferOutput<typeof CandidateSchema>): string {
-  return (candidate.content?.parts ?? []).map((part) => part.text ?? "").join("");
+  return partsOf(candidate)
+    .map((part) => part.text ?? "")
+    .join("");
+}
+
+function callsOf(parts: readonly Part[]): readonly ToolCall[] {
+  const calls: ToolCall[] = [];
+
+  for (const part of parts) {
+    if (part.functionCall === undefined || part.functionCall === null) continue;
+
+    calls.push(callOf(part.functionCall, calls.length));
+  }
+
+  return calls;
+}
+
+/** This wire carries no call id, so one is minted here; a result travels back by name. */
+function callOf(call: NonNullable<Part["functionCall"]>, index: number): ToolCall {
+  return {
+    id: "call_" + String(index),
+    name: call.name,
+    arguments: JSON.stringify(call.args ?? {}),
+  };
 }
 
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {

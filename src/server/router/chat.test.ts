@@ -555,18 +555,14 @@ describe("runChat recording", () => {
 
 describe("chat ingress", () => {
   async function gatewayFor(harness: Harness) {
-    const provider = await createProvider(harness.providers, "user-1", {
+    const seeded = await providerWithModel(harness, {
       name: "Primary",
-      kind: "openai",
-      baseUrl: harness.upstream.origin,
-      apiKey: "",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
     });
 
-    await addProviderModel(harness.providers, "user-1", provider.id, {
-      upstreamModel: "m",
-      slug: "fast",
-    });
-    await addCredential(harness.providers, provider.id, "primary", "key");
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
 
     return createGateway({ ...harness.deps, auth });
   }

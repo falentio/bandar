@@ -19,6 +19,7 @@ import { createTag, setTagModels } from "../tags";
 import { runChat, type ChatDeps, type ChatInput } from "./chat";
 import type { Auth } from "../auth";
 import { createGateway } from "../gateway";
+import { ChatCompletionRequestSchema } from "../../shared/chat";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 const DUCK_DIR = fileURLToPath(new URL("../../../duckdb", import.meta.url));
@@ -34,6 +35,8 @@ const CompletionSchema = v.object({
 });
 
 const ErrorSchema = v.object({ error: v.object({ message: v.string(), code: v.string() }) });
+
+type ChatCompletionBody = v.InferInput<typeof ChatCompletionRequestSchema>;
 
 type Call = {
   readonly path: string;
@@ -568,12 +571,17 @@ describe("chat ingress", () => {
     return createGateway({ ...harness.deps, auth });
   }
 
-  async function post(gateway: ReturnType<typeof createGateway>, body: unknown): Promise<Response> {
+  async function post(
+    gateway: ReturnType<typeof createGateway>,
+    body: ChatCompletionBody,
+  ): Promise<Response> {
+    const payload = v.parse(ChatCompletionRequestSchema, body);
+
     return gateway.handle(
       new Request("http://gateway.test/v1/chat/completions", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       }),
     );
   }
@@ -632,10 +640,7 @@ describe("chat ingress", () => {
       messages: [
         {
           role: "user",
-          content: [
-            { type: "text", text: "what is this" },
-            { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
-          ],
+          content: [{ type: "text", text: "what is this" }, { type: "image_url" }],
         },
       ],
     });

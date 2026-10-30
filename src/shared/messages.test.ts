@@ -15,6 +15,7 @@ describe("normalizeMessages", () => {
       ok: false,
       rejection: {
         status: 422,
+        param: "messages.0.content.1",
         message: "messages.0.content.1: image blocks are not supported by this text gateway",
       },
     });
@@ -31,6 +32,7 @@ describe("normalizeMessages", () => {
       ok: false,
       rejection: {
         status: 422,
+        param: "system.0",
         message: "system.0: tool_use blocks are not supported by this text gateway",
       },
     });

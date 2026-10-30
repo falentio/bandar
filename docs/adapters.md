@@ -102,6 +102,20 @@ error envelope, its completed response, and its stream frames:
 `ChatWire` and a caller passes one as `ChatInput.wire`; the default is
 `openAiWire`.
 
+### OpenAI chat ingress
+
+`POST /v1/chat/completions` reads `messages` whose `role` is `system`,
+`developer`, `user`, or `assistant`, and whose `content` is a string or an array
+of `{type: "text", text}` parts. `developer` becomes `system`, and several text
+parts in one message join with a newline, so a pi transcript posts unchanged.
+
+A part whose type is not `text` is a rejection, never a silent drop. It answers
+422 with the message and `param` naming the part's position:
+
+```text
+messages.0.content.1: image_url blocks are not supported by this text gateway
+```
+
 ### Anthropic Messages ingress
 
 `POST /v1/messages` accepts these fields:

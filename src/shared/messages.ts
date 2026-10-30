@@ -3,7 +3,9 @@ import { MAX_MODEL_REF_LENGTH } from "./slugs";
 
 const BlockSchema = v.object({ type: v.string(), text: v.optional(v.string()) });
 
-const ContentSchema = v.union([v.string(), v.array(BlockSchema)]);
+export const ContentSchema = v.union([v.string(), v.array(BlockSchema)]);
+
+export type Content = v.InferOutput<typeof ContentSchema>;
 
 export const MessagesRequestSchema = v.object({
   model: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH)),
@@ -26,8 +28,6 @@ export const MessagesRequestSchema = v.object({
 
 export type MessagesRequest = v.InferOutput<typeof MessagesRequestSchema>;
 
-type MessagesContent = v.InferOutput<typeof ContentSchema>;
-
 export type MessagesTurn = {
   readonly role: "user" | "assistant";
   readonly text: string;
@@ -40,6 +40,7 @@ export type NormalizedMessages = {
 
 export type MessagesRejection = {
   readonly status: number;
+  readonly param: string;
   readonly message: string;
 };
 
@@ -72,8 +73,8 @@ export function promptText({ system, messages }: NormalizedMessages): string {
     .join("\n");
 }
 
-function textOf(
-  content: MessagesContent | undefined,
+export function textOf(
+  content: Content | undefined,
   at: string,
 ):
   | { readonly ok: true; readonly value: string }
@@ -87,7 +88,10 @@ function textOf(
   const blocks = v.safeParse(v.array(BlockSchema), content);
 
   if (!blocks.success)
-    return { ok: false, rejection: { status: 422, message: `${at}: content is not text` } };
+    return {
+      ok: false,
+      rejection: { status: 422, param: at, message: `${at}: content is not text` },
+    };
 
   const parts: string[] = [];
 
@@ -99,7 +103,7 @@ function textOf(
     if (block.text === undefined)
       return {
         ok: false,
-        rejection: { status: 422, message: `${blockAt}: text block has no text` },
+        rejection: { status: 422, param: blockAt, message: `${blockAt}: text block has no text` },
       };
 
     parts.push(block.text);
@@ -109,5 +113,9 @@ function textOf(
 }
 
 function unsupported(at: string, type: string): MessagesRejection {
-  return { status: 422, message: `${at}: ${type} blocks are not supported by this text gateway` };
+  return {
+    status: 422,
+    param: at,
+    message: `${at}: ${type} blocks are not supported by this text gateway`,
+  };
 }

@@ -131,6 +131,7 @@ describe("readAnalytics", () => {
     expect(analytics.summary.outputTokens).toBe(150);
     expect(analytics.summary.totalTokens).toBe(450);
     expect(analytics.summary.avgTokensPerDay).toBe(15);
+    expect(analytics.summary.avgTokensPerRequest).toBe(150);
     expect(analytics.summary.avgTps).toBe(50);
     expect(analytics.summary.avgTtftMs).toBe(300);
     expect(analytics.summary.p50DurationMs).not.toBeNull();
@@ -166,8 +167,51 @@ describe("readAnalytics", () => {
 
     expect(analytics.summary.requests).toBe(0);
     expect(analytics.summary.avgTokensPerDay).toBe(0);
+    expect(analytics.summary.avgTokensPerRequest).toBeNull();
+    expect(analytics.summary.cacheHitRate).toBeNull();
     expect(analytics.summary.avgTps).toBeNull();
     expect(analytics.daily).toHaveLength(7);
+  });
+
+  test("divides cached tokens by the prompt of the requests that reported a split", () => {
+    const db = seeded();
+
+    recordRequest(db, event({ inputTokens: 100, cachedInputTokens: 40 }));
+    recordRequest(db, event({ inputTokens: 50, cachedInputTokens: 0 }));
+    recordRequest(
+      db,
+      event({
+        inputTokens: 1000,
+        cachedInputTokens: null,
+        startedAt: new Date("2026-10-26T09:00:00.000Z"),
+      }),
+    );
+
+    const analytics = readAnalytics(db, {
+      userId: "user-1",
+      days: 30,
+      filters: EMPTY_ANALYTICS_FILTERS,
+      now: NOW,
+    });
+
+    expect(analytics.summary.inputTokens).toBe(1150);
+    expect(analytics.summary.cacheHitRate).toBe(0.2667);
+  });
+
+  test("reports no cache hit rate when no request reported a split", () => {
+    const db = seeded();
+
+    recordRequest(db, event({ cachedInputTokens: null }));
+
+    const analytics = readAnalytics(db, {
+      userId: "user-1",
+      days: 30,
+      filters: EMPTY_ANALYTICS_FILTERS,
+      now: NOW,
+    });
+
+    expect(analytics.summary.requests).toBe(1);
+    expect(analytics.summary.cacheHitRate).toBeNull();
   });
 });
 

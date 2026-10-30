@@ -37,10 +37,12 @@ export type Analytics = {
     readonly requests: number;
     readonly errors: number;
     readonly errorRate: number;
+    readonly cacheHitRate: number | null;
     readonly inputTokens: number;
     readonly outputTokens: number;
     readonly totalTokens: number;
     readonly avgTokensPerDay: number;
+    readonly avgTokensPerRequest: number | null;
     readonly avgTps: number | null;
     readonly avgTtftMs: number | null;
     readonly p50DurationMs: number | null;
@@ -140,7 +142,10 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
        avg(ttft_ms) AS avg_ttft_ms,
        approx_quantile(duration_ms, 0.5) AS p50_duration_ms,
        approx_quantile(duration_ms, 0.95) AS p95_duration_ms,
-       avg(tokens_per_second) AS avg_tps
+       avg(tokens_per_second) AS avg_tps,
+       coalesce(sum(cached_input_tokens) FILTER (WHERE cached_input_tokens IS NOT NULL), 0)
+         / nullif(sum(input_tokens) FILTER (WHERE cached_input_tokens IS NOT NULL), 0)
+         AS cache_hit_rate
      FROM request_events
      WHERE user_id = ? AND started_at >= ?::TIMESTAMP${filterSql}`,
     [sqlText(query.userId), sqlText(start.toISOString()), ...filter.params],
@@ -149,6 +154,7 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
   if (summary === undefined) throw new Error("analytics summary returned no row");
 
   const requests = number(summary, "requests");
+  const cacheHitRate = nullableNumber(summary, "cache_hit_rate");
   const inputTokens = number(summary, "input_tokens");
   const outputTokens = number(summary, "output_tokens");
   const totalTokens = inputTokens + outputTokens;
@@ -196,10 +202,12 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
       requests,
       errors: number(summary, "errors"),
       errorRate: errorRate(number(summary, "errors"), requests),
+      cacheHitRate: cacheHitRate === null ? null : round(cacheHitRate, 4),
       inputTokens,
       outputTokens,
       totalTokens,
       avgTokensPerDay: round(totalTokens / query.days, 2),
+      avgTokensPerRequest: requests === 0 ? null : round(totalTokens / requests, 1),
       avgTps: nullableNumber(summary, "avg_tps"),
       avgTtftMs: nullableNumber(summary, "avg_ttft_ms"),
       p50DurationMs: nullableNumber(summary, "p50_duration_ms"),

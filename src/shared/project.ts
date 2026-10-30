@@ -24,6 +24,34 @@ export function projectUrlOf(value: string | null): string | null {
   return project.length > MAX_PROJECT_URL_LENGTH ? null : project;
 }
 
+export type GithubRepo = { readonly owner: string; readonly repo: string };
+
+export function githubRepoOf(value: string): GithubRepo | null {
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+
+  if (url.hostname !== "github.com") return null;
+
+  const segments = url.pathname.split("/").filter((segment) => segment !== "");
+
+  if (segments.length !== 2) return null;
+
+  const [owner, name] = segments;
+
+  if (owner === undefined || name === undefined) return null;
+
+  const repo = name.endsWith(".git") ? name.slice(0, -4) : name;
+
+  if (repo === "") return null;
+
+  return { owner, repo };
+}
+
 export const ProjectUrlSchema = v.pipe(
   v.string(),
   v.check((value) => projectUrlOf(value) !== null, "use a full http or https url"),

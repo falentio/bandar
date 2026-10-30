@@ -1,6 +1,12 @@
 import * as v from "valibot";
 import { describe, expect, test } from "vite-plus/test";
-import { MAX_PROJECT_URL_LENGTH, ProjectUrlSchema, projectUrlOf } from "./project";
+import {
+  MAX_PROJECT_URL_LENGTH,
+  ProjectUrlSchema,
+  type GithubRepo,
+  githubRepoOf,
+  projectUrlOf,
+} from "./project";
 
 const NORMALIZED: readonly (readonly [string, string])[] = [
   ["https://Example.com/app/?q=1#x", "https://example.com/app"],
@@ -56,6 +62,37 @@ describe("projectUrlOf", () => {
     expect(projectUrlOf(root + "a".repeat(room))).not.toBeNull();
     expect(projectUrlOf(root + "a".repeat(room + 1))).toBeNull();
   });
+});
+
+const REPOS: readonly (readonly [string, GithubRepo])[] = [
+  ["https://github.com/falentio/bandar", { owner: "falentio", repo: "bandar" }],
+  ["https://github.com/falentio/bandar/", { owner: "falentio", repo: "bandar" }],
+  ["https://github.com/falentio/bandar.git", { owner: "falentio", repo: "bandar" }],
+  ["https://GitHub.com/A/B", { owner: "A", repo: "B" }],
+  ["https://github.com/falentio/bandar?tab=readme", { owner: "falentio", repo: "bandar" }],
+];
+
+const NOT_REPOS: readonly string[] = [
+  "https://github.com/falentio",
+  "https://github.com/falentio/bandar/tree/main",
+  "https://gitlab.com/falentio/bandar",
+  "https://github.com//bandar",
+  "not a url",
+  "",
+];
+
+describe("githubRepoOf", () => {
+  for (const [value, repo] of REPOS) {
+    test(`parses ${value}`, () => {
+      expect(githubRepoOf(value)).toEqual(repo);
+    });
+  }
+
+  for (const value of NOT_REPOS) {
+    test(`ignores ${String(value)}`, () => {
+      expect(githubRepoOf(value)).toBeNull();
+    });
+  }
 });
 
 describe("ProjectUrlSchema", () => {

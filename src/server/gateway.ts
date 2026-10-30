@@ -1,13 +1,8 @@
 import { Elysia } from "elysia";
 import * as v from "valibot";
 import { GatewayRequestSchema, normalizeChatMessages, type ModelList } from "../shared/chat";
-import {
-  MessagesRequestSchema,
-  normalizeMessages,
-  promptText,
-  type MessagesRequest,
-  type NormalizedMessages,
-} from "../shared/messages";
+import { MessagesRequestSchema, normalizeMessages, promptText } from "../shared/messages";
+import type { ConversationMessage, ToolChoice, ToolDefinition } from "../shared/conversation";
 import { PROJECT_URL_HEADER, projectUrlOf } from "../shared/project";
 import { SESSION_ID_HEADER, sessionIdOf } from "../shared/session-id";
 import type { Auth, VerifiedKey } from "./auth";
@@ -87,13 +82,16 @@ export function createGateway(deps: GatewayDeps) {
 
       const input = parsed.output;
 
-      const canonical: CanonicalRequest = {
+      const canonical = canonicalRequestOf({
         messages: normalized.value,
+        system: "",
+        tools: input.tools,
+        toolChoice: input.toolChoice,
         temperature: input.temperature,
         topP: input.topP,
         maxTokens: input.maxTokens,
         stop: input.stop,
-      };
+      });
 
       return runChat(deps, {
         userId: caller.userId,
@@ -126,7 +124,16 @@ export function createGateway(deps: GatewayDeps) {
         projectUrl: projectUrlOf(request.headers.get(PROJECT_URL_HEADER)),
         sessionId: sessionIdOf(request.headers.get(SESSION_ID_HEADER)),
         ref: parsed.output.model,
-        request: canonicalRequestOf(parsed.output, normalized.value),
+        request: canonicalRequestOf({
+          messages: normalized.value.messages,
+          system: normalized.value.system,
+          tools: parsed.output.tools,
+          toolChoice: parsed.output.toolChoice,
+          temperature: parsed.output.temperature,
+          topP: parsed.output.top_p,
+          maxTokens: parsed.output.max_tokens,
+          stop: parsed.output.stop_sequences,
+        }),
         stream: parsed.output.stream ?? false,
         signal: request.signal,
         wire: anthropicWire,
@@ -153,23 +160,33 @@ export function createGateway(deps: GatewayDeps) {
     });
 }
 
-function canonicalRequestOf(
-  request: MessagesRequest,
-  normalized: NormalizedMessages,
-): CanonicalRequest {
+/** Both ingresses assemble their canonical request here, so neither handler knows a wire. */
+function canonicalRequestOf(input: {
+  readonly messages: readonly ConversationMessage[];
+  readonly system: string;
+  readonly tools: readonly ToolDefinition[];
+  readonly toolChoice: ToolChoice | null;
+  readonly temperature?: number | undefined;
+  readonly topP?: number | undefined;
+  readonly maxTokens?: number | undefined;
+  readonly stop?: readonly string[] | undefined;
+}): CanonicalRequest {
   const messages: CanonicalMessage[] = [];
 
-  if (normalized.system !== "") messages.push({ role: "system", content: normalized.system });
+  if (input.system !== "")
+    messages.push({ role: "system", content: [{ type: "text", text: input.system }] });
 
-  for (const message of normalized.messages)
-    messages.push({ role: message.role, content: message.text });
+  for (const message of input.messages)
+    messages.push({ role: message.role, content: message.content });
 
   return {
     messages,
-    temperature: request.temperature,
-    topP: request.top_p,
-    maxTokens: request.max_tokens,
-    stop: request.stop_sequences,
+    tools: input.tools,
+    toolChoice: input.toolChoice,
+    temperature: input.temperature,
+    topP: input.topP,
+    maxTokens: input.maxTokens,
+    stop: input.stop,
   };
 }
 

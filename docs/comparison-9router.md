@@ -2,6 +2,8 @@
 
 A feature comparison of `bandar` (this repo) against `decolua/9router`, built from reading both codebases rather than either README.
 
+Updated 2026-10-30, when tool calling shipped. This comparison was written before that, so the places that said bandar could not serve a coding agent now say what shipped and what is still missing.
+
 |                   | bandar                         | 9router                                                  |
 | ----------------- | ------------------------------ | -------------------------------------------------------- |
 | Source            | `./src` at HEAD                | `decolua/9router` v0.5.112, `1fe586b` (2026-10-28)       |
@@ -10,7 +12,7 @@ A feature comparison of `bandar` (this repo) against `decolua/9router`, built fr
 | Provider capacity | 8 built-in + 3 generic wires   | 147 registry entries                                     |
 | Tenancy           | multi-user                     | single-tenant                                            |
 | Runtime           | one compiled binary (~181 MB)  | Node process or Docker                                   |
-| Modalities        | chat text only                 | chat, embeddings, images, TTS, STT, video, search, fetch |
+| Modalities        | chat, tool calling             | chat, embeddings, images, TTS, STT, video, search, fetch |
 
 Both inventories below are cited to `path:line`. Every claim in this comparison I read in the source.
 
@@ -36,15 +38,15 @@ Per-key scoping exists in 9router and not in bandar, so credit where due, but ba
 
 **A real audit trail.** bandar writes one DuckDB row per attempt, failed attempts included, denormalized so deleting a provider keeps its history, and it keeps the client's original string as `reference` (`./src/server/router/record.ts:28-76`, `duckdb/0002_request_reference.sql:1`). p50 and p95 come from `approx_quantile` over `duration_ms` (`./src/server/analytics.ts:129-130`). 9router's `usageHistory` is one row per request with a JSON `meta` blob (`src/lib/db/schema.js:113-135`), and full request capture is off by default (`src/lib/db/repos/requestDetailsRepo.js:13-40`).
 
-**Honest docs.** 9router's README claims "Auto-route: Subscription → Cheap → Free" (line 40). I grepped `open-sse/` and `src/`: there is no `tier` field, no subscription/cheap/free enum, no cost ordering. `category: "freeTier"` on 20 registry entries drives UI grouping only. The tier ladder is you ordering your own combo. The README also claims "Set spending limits per provider" (line 945); no such setting exists in `DEFAULT_SETTINGS`. bandar's README says what it does not have ("Not in this version: tools, images, and embeddings") and that is true (`./src/shared/chat.ts:9-18`).
+**Honest docs.** 9router's README claims "Auto-route: Subscription → Cheap → Free" (line 40). I grepped `open-sse/` and `src/`: there is no `tier` field, no subscription/cheap/free enum, no cost ordering. `category: "freeTier"` on 20 registry entries drives UI grouping only. The tier ladder is you ordering your own combo. The README also claims "Set spending limits per provider" (line 945); no such setting exists in `DEFAULT_SETTINGS`. bandar's README lists what it does not have, and that list shrank to images and embeddings when tool calling shipped (`./README.md:58`).
 
 ---
 
 ## Where 9router is ahead, ranked by how much it costs bandar
 
-**Tools and images. This is the gap that matters.** bandar's `ChatMessageSchema` requires `content: string` (`./src/shared/chat.ts:6`) and `CanonicalRequest` has no `tools` field. A non-text Anthropic block is a 422, not a drop (`./src/shared/messages.ts:97`). Every coding agent that would use a gateway sends tools. 9router threads `tools` through 31 touchpoints in the OpenAI translator alone (`open-sse/translator/formats/openai.js`) and dedupes them per model at `open-sse/handlers/chatCore.js:233`.
+**Images. This is the gap that matters now.** Tool calling shipped on 2026-10-30: both ingresses take tool definitions and tool results, all four wires forward them, and a call comes back in the client's dialect, streaming or not (`./docs/adapters.md`, `./src/server/providers/types.ts:21-53`). What a coding agent still cannot do is show the model a screenshot. A non-text block is a 422 that names the block and its path (`./src/shared/messages.ts:271`), on both ingresses.
 
-The comparison is not flattering: bandar is a chat gateway that cannot serve the clients gateways exist for.
+A coding agent can connect and run a tool loop now. It cannot send an image, and 9router's 31 touchpoints say how much surface that takes.
 
 **Provider breadth.** 8 built-ins plus 3 generic wires versus 147 registry entries. bandar's custom-provider path is real but narrow: you pick one of three wires, and a vendor with its own auth scheme needs a new `kind` in code (`./src/shared/providers.ts:9-17`). 9router's is a data file (`open-sse/providers/REGISTRY_TEMPLATE.js:1-12`).
 
@@ -59,7 +61,7 @@ The comparison is not flattering: bandar is a chat gateway that cannot serve the
 
 9router's two-question error split is the single idea I would copy first. Free. It rides on a field bandar already has in `UpstreamError`.
 
-**Token savers.** RTK is on by default and compresses tool output before any format translation (`open-sse/rtk/index.js:30-118`), 12 filters, autodetected from content. bandar has nothing here, and given bandar has no tools either, RTK has nothing to compress. These are the same gap.
+**Token savers.** RTK is on by default and compresses tool output before any format translation (`open-sse/rtk/index.js:30-118`), 12 filters, autodetected from content. bandar has nothing here, and RTK's whole job is compressing tool output, which is now a gap bandar could close. They are separate gaps.
 
 **Modalities.** 9router ships embeddings, images, TTS, STT, video, web search, and web fetch against 131 embedding models, 117 image models, 44 video, 44 TTS, 26 STT in the registry. bandar is text-in-text-out by contract. Whether this matters depends on whether bandar's consumer is coding agents or an app backend.
 
@@ -81,7 +83,7 @@ The routing core proper, meaning combo, fallback, model resolution, and capabili
 
 Do not chase 9router's surface. Chase two things.
 
-**Tools, first.** bandar cannot serve Claude Code, Cursor, or Codex without them, and that is the entire market for a self-hosted gateway right now. The change is a widening of `CanonicalMessage` from `content: string` to a block union, plus a `tools` field on `CanonicalRequest`, plus the `tool_calls` mapping the adapter already half-implements (`./src/server/providers/anthropic/adapter.ts:229-230`). Design it as the foundational type from day one rather than bolting a second content path on.
+**Tools, first. Done.** `CanonicalMessage.content` is a part list now, `CanonicalRequest` carries `tools` and `toolChoice`, and all four wires answer a call (`./src/server/providers/types.ts:21-53`). That was the market for a self-hosted gateway, and bandar serves it. What is left of the same argument is images: a coding agent that pastes a screenshot still gets a 422.
 
 **The two-question error split, second.** It is a few dozen lines in `./src/server/health.ts` and it stops healthy credentials leaving rotation on a context-overflow 400.
 
@@ -91,7 +93,7 @@ Everything else I would skip. Multimodal, MITM, tunnels, proxy pools, cloud sync
 
 ## Open decisions
 
-1. Is bandar's consumer a coding agent or an app backend? Tools matter only for the first.
+1. Was bandar's consumer a coding agent or an app backend? Answered by shipping tool calling: a coding agent. The image gap asks the same question again for people who paste screenshots.
 2. Does bandar want to ship free-quota providers? That is the entire reason 9router exists, and it brings the MITM-shaped work with it.
 3. Should `apikey.permissions` (currently unread, `./src/server/db/auth-schema.ts:113`) become per-key model scoping? 9router proves the model works (`src/sse/services/keyAccess.js:1-24`). bandar already stores the column and ignores it.
 
@@ -397,37 +399,37 @@ Auth gating is client-side. An unauthenticated user hits `AppLayout`, which redi
 
 ### 6. Explicitly absent
 
-The adapter contract is a text-only chat contract, by construction.
+The adapter contract carries tools now. It is still a chat contract with no multimodal surface.
 
 From `src/server/providers/types.ts`:
 
-- `CanonicalMessage.content` is `string` (`src/server/providers/types.ts:10-13`).
-- `CanonicalRequest` carries only messages, temperature, topP, maxTokens, stop (`src/server/providers/types.ts:15-21`). No `tools`, `tool_choice`, `response_format`, `modalities`, `reasoning`, or `seed`.
-- `CanonicalResult` is text, finishReason, usage (`src/server/providers/types.ts:28-32`).
-- `CanonicalStreamEvent` has exactly three variants: text, usage, finish (`src/server/providers/types.ts:34-37`).
-- The adapter interface is `chat` and `stream` only (`src/server/providers/types.ts:53-57`). No embed, transcribe, speak, or image method.
+- `CanonicalMessage.content` is `readonly MessagePart[]`, where a part is text, a tool call, or a tool result (`src/server/providers/types.ts:21`).
+- `CanonicalRequest` carries messages, tools, toolChoice, temperature, topP, maxTokens, stop (`src/server/providers/types.ts:23-30`). No `response_format`, `modalities`, `reasoning`, or `seed`.
+- `CanonicalResult` is text, toolCalls, finishReason, usage (`src/server/providers/types.ts:40-45`).
+- `CanonicalStreamEvent` has five variants: text, tool_call_start, tool_call_delta, usage, finish (`src/server/providers/types.ts:47-53`).
+- The adapter interface is `chat` and `stream` only (`src/server/providers/types.ts:109-113`). No embed, transcribe, speak, or image method.
 
-From `src/shared/chat.ts`: the OpenAI request schema is model, messages, stream, temperature, top_p, max_tokens, max_completion_tokens, stop (`src/shared/chat.ts:9-18`). Roles are system, user, assistant (`src/shared/chat.ts:5`); no tool or function role.
+From `src/shared/chat.ts`: the OpenAI request schema adds `tools` and `tool_choice` to model, messages, stream, temperature, top_p, max_tokens, max_completion_tokens, stop (`src/shared/chat.ts:136-147`). Roles are system, developer, user, assistant, and tool (`src/shared/chat.ts:43`).
 
 Grep over `src/`, with results:
 
-| Capability             | Result                                                                                                                                                 | Evidence                                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| Embeddings             | zero matches for `embedding`                                                                                                                           | no hits                                                                                            |
-| TTS / audio            | zero matches for `tts`, `text-to-speech`, `speech`, `audio`                                                                                            | no hits                                                                                            |
-| STT / transcription    | zero matches for `transcri`, `whisper`, `stt` (the `latestTagUrl` hits are the CLI updater)                                                            | `src/server/cli/update.ts:191`                                                                     |
-| Images / vision        | no matches in server or provider code, except a Yeta pricing test fixture using the literal `"image"` as a model name, and the static-asset MIME table | `src/server/providers/yeta/pricing.test.ts:14`, `src/server/assets.ts:6-20`                        |
-| Video                  | no matches outside an unrelated test helper name                                                                                                       | `src/server/cli/update.test.ts:106`                                                                |
-| Web search / grounding | zero matches for `web_search`, `search_grounding`, `google_search`                                                                                     | no hits                                                                                            |
-| Tool calling           | `tool_calls` appears only in finish-reason string mapping, never as a request field or a streamed payload                                              | `src/server/providers/anthropic/adapter.ts:229-230`, `src/server/router/anthropic-wire.ts:157-159` |
+| Capability             | Result                                                                                                                                                 | Evidence                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Embeddings             | zero matches for `embedding`                                                                                                                           | no hits                                                                     |
+| TTS / audio            | zero matches for `tts`, `text-to-speech`, `speech`, `audio`                                                                                            | no hits                                                                     |
+| STT / transcription    | zero matches for `transcri`, `whisper`, `stt` (the `latestTagUrl` hits are the CLI updater)                                                            | `src/server/cli/update.ts:191`                                              |
+| Images / vision        | no matches in server or provider code, except a Yeta pricing test fixture using the literal `"image"` as a model name, and the static-asset MIME table | `src/server/providers/yeta/pricing.test.ts:14`, `src/server/assets.ts:6-20` |
+| Video                  | no matches outside an unrelated test helper name                                                                                                       | `src/server/cli/update.test.ts:106`                                         |
+| Web search / grounding | zero matches for `web_search`, `search_grounding`, `google_search`                                                                                     | no hits                                                                     |
+| Tool calling           | present on both ingresses and all four wires, streaming and not                                                                                        | `src/server/providers/types.ts:47-53`, `src/server/router/tools.test.ts`    |
 
 Two consequences worth naming.
 
-A non-text block is rejected, never dropped. An Anthropic request whose content includes an image block gets a 422 naming the block path and type (`src/shared/messages.ts:97`, `src/shared/messages.ts:111-112`). An OpenAI request with image content fails at the message schema, which requires `content: string` (`src/shared/chat.ts:6`).
+A non-text block is rejected, never dropped. An Anthropic request whose content includes an image block gets a 422 naming the block path and type (`src/shared/messages.ts:271`). An OpenAI request with an image part gets the same answer, `messages.0.content.1: image_url blocks are not supported by this text gateway`.
 
 Models are filtered upstream too. The Nous catalog drops any model whose `output_modalities` does not include `"text"` (`src/server/providers/nous/catalog.ts:43`), so image-output models never enter the list from that provider.
 
-The Responses adapter also declares text-only input: `content: { type: "input_text"; text: string }[]` (`src/server/providers/openai/responses.ts:52-55`). The README states the same scope: "Not in this version: tools, images, and embeddings. The adapter contract is text only." (`README.md:50`).
+The Responses adapter still sends a text part as `input_text` (`src/server/providers/openai/responses.ts:70`). The README reads "Not in this version: images and embeddings" (`./README.md:58`).
 
 ---
 

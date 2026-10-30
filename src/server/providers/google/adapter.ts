@@ -1,4 +1,15 @@
 import * as v from "valibot";
+import {
+  textOfParts,
+  toolNamesOf,
+  toolResultText,
+  type MessagePart,
+  type ToolCall,
+  type ToolChoice,
+  type ToolDefinition,
+  type ToolParameters,
+  type ToolResult,
+} from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -11,8 +22,10 @@ import {
 } from "../http";
 import {
   UpstreamError,
+  finishOf,
+  jsonObjectOf,
   type AdapterInput,
-  type CanonicalRequest,
+  type CanonicalMessage,
   type CanonicalResult,
   type CanonicalStreamEvent,
   type CanonicalUsage,
@@ -24,12 +37,22 @@ const UsageSchema = v.object({
   candidatesTokenCount: v.optional(v.nullable(v.number())),
 });
 
-const CandidateSchema = v.object({
-  content: v.optional(
-    v.object({
-      parts: v.optional(v.array(v.object({ text: v.optional(v.nullable(v.string())) }))),
-    }),
+const PartSchema = v.object({
+  text: v.optional(v.nullable(v.string())),
+  functionCall: v.optional(
+    v.nullable(
+      v.object({
+        name: v.string(),
+        args: v.optional(v.nullable(v.record(v.string(), v.unknown()))),
+      }),
+    ),
   ),
+});
+
+type Part = v.InferOutput<typeof PartSchema>;
+
+const CandidateSchema = v.object({
+  content: v.optional(v.object({ parts: v.optional(v.array(PartSchema)) })),
   finishReason: v.optional(v.nullable(v.string())),
 });
 
@@ -39,7 +62,18 @@ const ResponseSchema = v.object({
   error: v.optional(v.object({ message: v.optional(v.string()) })),
 });
 
-type Content = { role: "user" | "model"; parts: { text: string }[] };
+type RequestPart =
+  | { text: string }
+  | { functionCall: { name: string; args: ToolParameters } }
+  | { functionResponse: { name: string; response: ToolParameters } };
+
+type Content = { role: "user" | "model"; parts: RequestPart[] };
+
+type FunctionDeclaration = {
+  name: string;
+  description?: string;
+  parameters: ToolParameters;
+};
 
 type ChatBody = {
   contents: Content[];
@@ -49,6 +83,10 @@ type ChatBody = {
     topP?: number;
     maxOutputTokens?: number;
     stopSequences?: string[];
+  };
+  tools?: { functionDeclarations: FunctionDeclaration[] }[];
+  toolConfig?: {
+    functionCallingConfig: { mode: "AUTO" | "ANY" | "NONE"; allowedFunctionNames?: string[] };
   };
 };
 
@@ -84,9 +122,12 @@ export function googleAdapter<K extends ProviderKind>({
 
       if (candidate === undefined) throw protocolError(`${label} returned no candidates`);
 
+      const calls = callsOf(partsOf(candidate));
+
       return {
         text: textOf(candidate),
-        finishReason: finishReason(candidate.finishReason ?? null),
+        toolCalls: calls,
+        finishReason: finishOf(finishReason(candidate.finishReason ?? null), calls),
         usage: usageOf(parsed.output.usageMetadata),
       };
     },
@@ -103,6 +144,7 @@ export function googleAdapter<K extends ProviderKind>({
 
       let reason: string | null = null;
       let usage: CanonicalUsage | null = null;
+      const calls: ToolCall[] = [];
 
       for await (const data of sseData(requireBody(response), input.signal)) {
         let parsed: v.InferOutput<typeof ResponseSchema>;
@@ -129,9 +171,22 @@ export function googleAdapter<K extends ProviderKind>({
 
         if (candidate === undefined) continue;
 
-        const text = textOf(candidate);
+        for (const part of partsOf(candidate)) {
+          if (part.text !== undefined && part.text !== null && part.text !== "") {
+            yield { type: "text", text: part.text };
+            continue;
+          }
 
-        if (text !== "") yield { type: "text", text };
+          const functionCall = part.functionCall;
+
+          if (functionCall === undefined || functionCall === null) continue;
+
+          const call = callOf(functionCall, calls.length);
+
+          calls.push(call);
+          yield { type: "tool_call_start", call: { id: call.id, name: call.name } };
+          yield { type: "tool_call_delta", id: call.id, arguments: call.arguments };
+        }
 
         if (candidate.finishReason !== undefined && candidate.finishReason !== null) {
           reason = finishReason(candidate.finishReason);
@@ -140,7 +195,7 @@ export function googleAdapter<K extends ProviderKind>({
 
       if (usage !== null) yield { type: "usage", usage };
 
-      yield { type: "finish", reason };
+      yield { type: "finish", reason: finishOf(reason, calls) };
     },
   };
 }
@@ -160,7 +215,7 @@ function bodyFor(input: AdapterInput): ChatBody {
 
   const system = input.request.messages
     .filter((message) => message.role === "system")
-    .map((message) => message.content)
+    .map((message) => textOfParts(message.content))
     .join("\n\n");
 
   if (contents.length === 0) {
@@ -186,30 +241,131 @@ function bodyFor(input: AdapterInput): ChatBody {
 
   if (Object.keys(config).length > 0) body.generationConfig = config;
 
+  if (input.request.tools.length > 0)
+    body.tools = [{ functionDeclarations: input.request.tools.map(declarationOf) }];
+
+  if (input.request.toolChoice !== null) body.toolConfig = toolConfigOf(input.request.toolChoice);
+
   return body;
 }
 
-function contentsOf(messages: CanonicalRequest["messages"]): Content[] {
+function contentsOf(messages: readonly CanonicalMessage[]): Content[] {
+  const names = toolNamesOf(messages);
   const contents: Content[] = [];
 
   for (const message of messages) {
     if (message.role === "system") continue;
 
-    const role = message.role === "assistant" ? "model" : "user";
+    const role: Content["role"] = message.role === "assistant" ? "model" : "user";
     const last = contents.at(-1);
+    const turn: Content = last?.role === role ? last : { role, parts: [] };
 
-    if (last !== undefined && last.role === role) {
-      last.parts.push({ text: message.content });
-    } else {
-      contents.push({ role, parts: [{ text: message.content }] });
-    }
+    if (last?.role !== role) contents.push(turn);
+
+    for (const part of message.content) turn.parts.push(requestPartOf(part, names));
   }
 
   return contents;
 }
 
+function requestPartOf(part: MessagePart, names: ReadonlyMap<string, string>): RequestPart {
+  switch (part.type) {
+    case "text": {
+      return { text: part.text };
+    }
+
+    case "tool_call": {
+      return {
+        functionCall: {
+          name: part.call.name,
+          args: jsonObjectOf(part.call, "invalid_request"),
+        },
+      };
+    }
+
+    case "tool_result": {
+      return {
+        functionResponse: {
+          name: nameOf(names, part.result),
+          response: { result: toolResultText(part.result) },
+        },
+      };
+    }
+  }
+}
+
+/** This wire addresses a result by name, so a call the history never made cannot be answered. */
+function nameOf(names: ReadonlyMap<string, string>, result: ToolResult): string {
+  const name = names.get(result.toolCallId);
+
+  if (name === undefined)
+    throw new UpstreamError(
+      "google cannot address the tool result for call " +
+        result.toolCallId +
+        ": no earlier turn called it",
+      "invalid_request",
+    );
+
+  return name;
+}
+
+function declarationOf(tool: ToolDefinition): FunctionDeclaration {
+  const declaration: FunctionDeclaration = { name: tool.name, parameters: tool.parameters };
+
+  if (tool.description !== null) declaration.description = tool.description;
+
+  return declaration;
+}
+
+function toolConfigOf(choice: ToolChoice): NonNullable<ChatBody["toolConfig"]> {
+  switch (choice.mode) {
+    case "auto": {
+      return { functionCallingConfig: { mode: "AUTO" } };
+    }
+
+    case "none": {
+      return { functionCallingConfig: { mode: "NONE" } };
+    }
+
+    case "required": {
+      return { functionCallingConfig: { mode: "ANY" } };
+    }
+
+    case "tool": {
+      return { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [choice.name] } };
+    }
+  }
+}
+
+function partsOf(candidate: v.InferOutput<typeof CandidateSchema>): readonly Part[] {
+  return candidate.content?.parts ?? [];
+}
+
 function textOf(candidate: v.InferOutput<typeof CandidateSchema>): string {
-  return (candidate.content?.parts ?? []).map((part) => part.text ?? "").join("");
+  return partsOf(candidate)
+    .map((part) => part.text ?? "")
+    .join("");
+}
+
+function callsOf(parts: readonly Part[]): readonly ToolCall[] {
+  const calls: ToolCall[] = [];
+
+  for (const part of parts) {
+    if (part.functionCall === undefined || part.functionCall === null) continue;
+
+    calls.push(callOf(part.functionCall, calls.length));
+  }
+
+  return calls;
+}
+
+/** This wire carries no call id, so one is minted here; a result travels back by name. */
+function callOf(call: NonNullable<Part["functionCall"]>, index: number): ToolCall {
+  return {
+    id: "call_" + String(index),
+    name: call.name,
+    arguments: JSON.stringify(call.args ?? {}),
+  };
 }
 
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {

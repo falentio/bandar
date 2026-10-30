@@ -1,4 +1,13 @@
 import * as v from "valibot";
+import {
+  coalesceText,
+  textOfParts,
+  type MessagePart,
+  type ToolCall,
+  type ToolChoice,
+  type ToolDefinition,
+  type ToolParameters,
+} from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -11,8 +20,10 @@ import {
 } from "../http";
 import {
   UpstreamError,
+  finishOf,
+  jsonObjectOf,
   type AdapterInput,
-  type CanonicalRequest,
+  type CanonicalMessage,
   type CanonicalResult,
   type CanonicalStreamEvent,
   type CanonicalUsage,
@@ -24,19 +35,32 @@ const UsageSchema = v.object({
   output_tokens: v.optional(v.nullable(v.number())),
 });
 
+const ContentBlockSchema = v.object({
+  type: v.string(),
+  text: v.optional(v.nullable(v.string())),
+  id: v.optional(v.nullable(v.string())),
+  name: v.optional(v.nullable(v.string())),
+  input: v.optional(v.nullable(v.record(v.string(), v.unknown()))),
+});
+
+type ContentBlock = v.InferOutput<typeof ContentBlockSchema>;
+
 const ResponseSchema = v.object({
-  content: v.array(v.object({ type: v.string(), text: v.optional(v.nullable(v.string())) })),
+  content: v.array(ContentBlockSchema),
   stop_reason: v.optional(v.nullable(v.string())),
   usage: v.optional(v.nullable(UsageSchema)),
 });
 
 const StreamSchema = v.object({
   type: v.string(),
+  index: v.optional(v.number()),
   message: v.optional(v.object({ usage: v.optional(v.nullable(UsageSchema)) })),
+  content_block: v.optional(ContentBlockSchema),
   delta: v.optional(
     v.object({
       type: v.optional(v.string()),
       text: v.optional(v.nullable(v.string())),
+      partial_json: v.optional(v.nullable(v.string())),
       stop_reason: v.optional(v.nullable(v.string())),
     }),
   ),
@@ -44,7 +68,20 @@ const StreamSchema = v.object({
   error: v.optional(v.object({ message: v.optional(v.string()) })),
 });
 
-type MessageBody = { role: "user" | "assistant"; content: string };
+type RequestBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: ToolParameters }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+
+type MessageBody = { role: "user" | "assistant"; content: string | RequestBlock[] };
+
+type AnthropicToolBody = {
+  name: string;
+  description?: string;
+  input_schema: ToolParameters;
+};
+
+type AnthropicToolChoiceBody = { type: "auto" } | { type: "any" } | { type: "tool"; name: string };
 
 type ChatBody = {
   model: string;
@@ -55,6 +92,8 @@ type ChatBody = {
   temperature?: number;
   top_p?: number;
   stop_sequences?: string[];
+  tools?: readonly AnthropicToolBody[];
+  tool_choice?: AnthropicToolChoiceBody;
 };
 
 export type AnthropicOptions<K extends ProviderKind> = {
@@ -90,9 +129,12 @@ export function anthropicAdapter<K extends ProviderKind>({
         .map((block) => block.text ?? "")
         .join("");
 
+      const calls = callsOf(parsed.output.content, label);
+
       return {
         text,
-        finishReason: finishReason(parsed.output.stop_reason ?? null),
+        toolCalls: calls,
+        finishReason: finishOf(finishReason(parsed.output.stop_reason ?? null), calls),
         usage: usageOf(parsed.output.usage),
       };
     },
@@ -110,6 +152,8 @@ export function anthropicAdapter<K extends ProviderKind>({
       let inputTokens: number | null = null;
       let outputTokens: number | null = null;
       let reason: string | null = null;
+      const calls: ToolCall[] = [];
+      const blocks = new Map<number, ToolCall>();
 
       for await (const data of sseData(requireBody(response), input.signal)) {
         let parsed: v.InferOutput<typeof StreamSchema>;
@@ -135,9 +179,27 @@ export function anthropicAdapter<K extends ProviderKind>({
           outputTokens = startUsage.output_tokens ?? outputTokens;
         }
 
+        if (parsed.type === "content_block_start" && parsed.content_block?.type === "tool_use") {
+          const call = callOf(parsed.content_block, label);
+
+          blocks.set(parsed.index ?? 0, call);
+          calls.push(call);
+
+          yield { type: "tool_call_start", call: { id: call.id, name: call.name } };
+        }
+
         if (parsed.type === "content_block_delta" && parsed.delta !== undefined) {
           if (parsed.delta.type === "text_delta" && parsed.delta.text) {
             yield { type: "text", text: parsed.delta.text };
+          }
+
+          if (parsed.delta.type === "input_json_delta" && parsed.delta.partial_json) {
+            const call = blocks.get(parsed.index ?? 0);
+
+            if (call === undefined)
+              throw protocolError(label + " streamed arguments for a block it never opened");
+
+            yield { type: "tool_call_delta", id: call.id, arguments: parsed.delta.partial_json };
           }
         }
 
@@ -156,7 +218,7 @@ export function anthropicAdapter<K extends ProviderKind>({
       }
 
       yield { type: "usage", usage: { inputTokens, outputTokens } };
-      yield { type: "finish", reason };
+      yield { type: "finish", reason: finishOf(reason, calls) };
     },
   };
 }
@@ -166,7 +228,7 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
 
   const system = input.request.messages
     .filter((message) => message.role === "system")
-    .map((message) => message.content)
+    .map((message) => textOfParts(message.content))
     .join("\n\n");
 
   if (conversation.length === 0) {
@@ -191,25 +253,119 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
 
   if (input.request.stop !== undefined) body.stop_sequences = [...input.request.stop];
 
+  const toolChoice = input.request.toolChoice;
+
+  // No pinned anthropic-version promises a "none" mode, and omitting the definitions says the same.
+  if (input.request.tools.length > 0 && toolChoice?.mode !== "none")
+    body.tools = input.request.tools.map(toolBodyOf);
+
+  if (toolChoice !== null && toolChoice.mode !== "none")
+    body.tool_choice = toolChoiceOf(toolChoice);
+
   return body;
 }
 
-function conversationOf(messages: CanonicalRequest["messages"]): MessageBody[] {
-  const conversation: MessageBody[] = [];
+function conversationOf(messages: readonly CanonicalMessage[]): MessageBody[] {
+  const turns: { role: "user" | "assistant"; parts: MessagePart[] }[] = [];
 
   for (const message of messages) {
     if (message.role === "system") continue;
 
-    const last = conversation.at(-1);
+    const last = turns.at(-1);
 
-    if (last !== undefined && last.role === message.role) {
-      last.content += `\n\n${message.content}`;
-    } else {
-      conversation.push({ role: message.role, content: message.content });
+    if (last !== undefined && last.role === message.role) last.parts.push(...message.content);
+    else turns.push({ role: message.role, parts: [...message.content] });
+  }
+
+  return turns.map((turn) => ({ role: turn.role, content: contentOf(turn.parts) }));
+}
+
+/** A text-only turn stays the plain string this wire received before tools existed. */
+function contentOf(parts: readonly MessagePart[]): string | RequestBlock[] {
+  const coalesced = coalesceText(parts, "\n\n");
+
+  if (coalesced.every((part) => part.type === "text")) return textOfParts(coalesced);
+
+  const blocks: RequestBlock[] = [];
+
+  for (const part of coalesced) {
+    switch (part.type) {
+      case "text": {
+        if (part.text !== "") blocks.push({ type: "text", text: part.text });
+        break;
+      }
+
+      case "tool_call": {
+        blocks.push({
+          type: "tool_use",
+          id: part.call.id,
+          name: part.call.name,
+          input: jsonObjectOf(part.call, "invalid_request"),
+        });
+        break;
+      }
+
+      case "tool_result": {
+        const block: RequestBlock = {
+          type: "tool_result",
+          tool_use_id: part.result.toolCallId,
+          content: part.result.content,
+        };
+
+        if (part.result.isError) block.is_error = true;
+
+        blocks.push(block);
+        break;
+      }
     }
   }
 
-  return conversation;
+  return blocks;
+}
+
+function toolBodyOf(tool: ToolDefinition): AnthropicToolBody {
+  const body: AnthropicToolBody = { name: tool.name, input_schema: tool.parameters };
+
+  if (tool.description !== null) body.description = tool.description;
+
+  return body;
+}
+
+function toolChoiceOf(choice: Exclude<ToolChoice, { mode: "none" }>): AnthropicToolChoiceBody {
+  switch (choice.mode) {
+    case "auto": {
+      return { type: "auto" };
+    }
+
+    case "required": {
+      return { type: "any" };
+    }
+
+    case "tool": {
+      return { type: "tool", name: choice.name };
+    }
+  }
+}
+
+function callsOf(blocks: readonly ContentBlock[], label: string): readonly ToolCall[] {
+  const calls: ToolCall[] = [];
+
+  for (const block of blocks) {
+    if (block.type === "tool_use") calls.push(callOf(block, label));
+  }
+
+  return calls;
+}
+
+/** The one place a canonical argument string is built from an object. */
+function callOf(block: ContentBlock, label: string): ToolCall {
+  if (block.id === undefined || block.id === null)
+    throw protocolError(label + " returned a tool_use block with no id");
+
+  if (block.name === undefined || block.name === null)
+    throw protocolError(label + " returned a tool_use block with no name");
+
+  return { id: block.id, name: block.name, arguments: JSON.stringify(block.input ?? {}) };
 }
 
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {

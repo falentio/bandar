@@ -671,7 +671,11 @@ function chatInput(
     projectUrl,
     sessionId,
     ref,
-    request: { messages: [{ role: "user" as const, content: "hello" }] },
+    request: {
+      messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      tools: [],
+      toolChoice: null,
+    },
     stream,
     signal: new AbortController().signal,
   };

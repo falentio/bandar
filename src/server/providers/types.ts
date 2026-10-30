@@ -1,3 +1,4 @@
+import * as v from "valibot";
 import type {
   BuiltInProviderKind,
   Compat,
@@ -6,15 +7,27 @@ import type {
   ProviderAuthMode,
   ProviderKind,
 } from "../../shared/providers";
+import type { JsonValue } from "../../shared/json";
+import {
+  ToolParametersSchema,
+  type ConversationMessage,
+  type ToolCall,
+  type ToolCallDraft,
+  type ToolChoice,
+  type ToolDefinition,
+  type ToolParameters,
+} from "../../shared/conversation";
 import type { Credential, OAuthCredential } from "../credential";
 
-export type CanonicalMessage = {
-  readonly role: "system" | "user" | "assistant";
-  readonly content: string;
-};
+/** A wire-neutral turn: one role and its parts, the same shape both ingresses produce. */
+export type CanonicalMessage = ConversationMessage;
 
 export type CanonicalRequest = {
   readonly messages: readonly CanonicalMessage[];
+  /** Normalized definitions. Empty when the client declared no tools. */
+  readonly tools: readonly ToolDefinition[];
+  /** Null means "send nothing and let the wire's own default stand". */
+  readonly toolChoice: ToolChoice | null;
   readonly temperature?: number;
   readonly topP?: number;
   readonly maxTokens?: number;
@@ -28,14 +41,60 @@ export type CanonicalUsage = {
 
 export type CanonicalResult = {
   readonly text: string;
+  readonly toolCalls: readonly ToolCall[];
   readonly finishReason: string | null;
   readonly usage: CanonicalUsage;
 };
 
 export type CanonicalStreamEvent =
   | { readonly type: "text"; readonly text: string }
+  | { readonly type: "tool_call_start"; readonly call: ToolCallDraft }
+  | { readonly type: "tool_call_delta"; readonly id: string; readonly arguments: string }
   | { readonly type: "usage"; readonly usage: CanonicalUsage }
   | { readonly type: "finish"; readonly reason: string | null };
+
+/**
+ * A wire that reports a plain stop for a turn that called tools still finishes as tool_calls.
+ * A truncated or filtered turn passes through: a truncated call stayed truncated.
+ */
+export function finishOf(reason: string | null, toolCalls: readonly ToolCall[]): string | null {
+  if (toolCalls.length === 0) return reason;
+
+  if (reason === "length" || reason === "content_filter") return reason;
+
+  return "tool_calls";
+}
+
+/** The arguments text as the JSON it holds; what a model emits is not always JSON. */
+function jsonValueOf(call: ToolCall, kind: "invalid_request" | "protocol"): JsonValue {
+  try {
+    const value: JsonValue = JSON.parse(call.arguments);
+
+    return value;
+  } catch {
+    throw new UpstreamError(
+      `tool call ${call.id} (${call.name}) has arguments that are not JSON`,
+      kind,
+    );
+  }
+}
+
+/**
+ * Canonical arguments are raw JSON text, so the three sites that need an object parse here and
+ * say whose contract broke: what a client sent is its own bad request, what a model emitted is not.
+ */
+export function jsonObjectOf(call: ToolCall, kind: "invalid_request" | "protocol"): ToolParameters {
+  const parsed = jsonValueOf(call, kind);
+  const object = v.safeParse(ToolParametersSchema, parsed);
+
+  if (!object.success || Array.isArray(parsed))
+    throw new UpstreamError(
+      `tool call ${call.id} (${call.name}) has arguments that are not a JSON object`,
+      kind,
+    );
+
+  return object.output;
+}
 
 export type ProviderTarget = {
   readonly providerId: string;

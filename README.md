@@ -53,8 +53,10 @@ subject also writes one row to the cooldown history, which the Errors page lists
 migrations, the DuckDB migrations, and the DuckDB shared library. The binary serves
 the client and the API on one port, and holds both databases in `BANDAR_HOME`.
 
-Not in this version: tools, images, and embeddings. The adapter contract is text
-only. Prices come from a provider catalog import, not from a form.
+Every wire carries tool calling: definitions, tool choice, the calls a model
+makes, and the results a client sends back. A canonical turn is text plus tool
+blocks. Not in this version: images and embeddings. Prices come from a provider
+catalog import, not from a form.
 
 ## Install
 

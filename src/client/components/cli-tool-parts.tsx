@@ -47,13 +47,11 @@ type ProviderModelLike = {
 
 const STATUS_LABEL: Record<CliToolStatus["status"], string> = {
   ready: "Ready",
-  partial: "Partial",
   blocked: "Blocked",
 };
 
 const STATUS_CLASS: Record<CliToolStatus["status"], string> = {
   ready: "text-foreground",
-  partial: "text-muted-foreground",
   blocked: "text-destructive",
 };
 

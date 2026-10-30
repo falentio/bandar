@@ -261,6 +261,18 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
                 break;
               }
 
+              case "tool_call_start": {
+                if (ttftMs === null) ttftMs = performance.now() - context.start;
+
+                writer.toolCall(event.call);
+                break;
+              }
+
+              case "tool_call_delta": {
+                writer.toolArguments(event.id, event.arguments);
+                break;
+              }
+
               case "usage": {
                 usage = event.usage;
                 break;

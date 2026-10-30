@@ -2,25 +2,22 @@
 
 `/cli-tools` lists the five supported coding CLIs. Each one has a page at `/cli-tools/<tool id>` with the base URL, a key, and the config file that points it at bandar. You copy the text into place. bandar never writes a file on your machine, because the gateway is usually not on the same host as the editor.
 
-Two gateway gaps decide what works today:
+One gateway gap decides what works today: there is no `/v1/responses` route.
 
-- The canonical request carries text only. A client that sends `tools` reaches the model without them, and an Anthropic request that sends a `tool_result` block gets a 422.
-- There is no `/v1/responses` route.
+The list and the detail page read that fact from `GATEWAY_SURFACE` in `./src/shared/cli-tools.ts` and print `ready` or `blocked` for each tool. A test in `./src/server/gateway-surface.test.ts` compares that constant with `./src/server/gateway.ts` and `./src/server/providers/types.ts`, and fails when they disagree, so the page cannot drift away from the server.
 
-The list and the detail page read both facts from `GATEWAY_SURFACE` in `./src/shared/cli-tools.ts` and print `ready`, `partial`, or `blocked` for each tool. A test in `./src/server/gateway-surface.test.ts` compares that constant with `./src/server/gateway.ts` and `./src/server/providers/types.ts`, and fails when they disagree, so the page cannot drift away from the server.
-
-So every tool here connects and answers a prompt. None of them finishes a tool call yet, and Codex fails at the first request because it speaks only the Responses API. The repair list is at the end of this file.
+So every tool here connects, answers a prompt, calls a tool, and sends the result back. Codex fails at the first request because it speaks only the Responses API. The repair list is at the end of this file.
 
 ## What the gateway serves
 
 | Ingress                 | Path                        | Shape                              |
 | ----------------------- | --------------------------- | ---------------------------------- |
-| OpenAI chat completions | `/v1/chat/completions`      | text in, text out, streaming       |
-| Anthropic messages      | `/v1/messages`              | text blocks, streaming             |
+| OpenAI chat completions | `/v1/chat/completions`      | text and tool calls, streaming     |
+| Anthropic messages      | `/v1/messages`              | text and tool blocks, streaming    |
 | Anthropic token count   | `/v1/messages/count_tokens` | estimate                           |
 | Model list              | `/v1/models`                | addresses, provider refs, tag refs |
 
-Not served: `/v1/responses`, tool definitions, tool results, images, prompt caching headers. A key travels as `Authorization: Bearer <key>` or `x-api-key: <key>`.
+Not served: `/v1/responses`, images, prompt caching headers. Every other wire here carries tool definitions, tool choice, and tool results. A key travels as `Authorization: Bearer <key>` or `x-api-key: <key>`.
 
 ## Model refs
 
@@ -101,7 +98,7 @@ opencode
 
 Every key in `models` is a model opencode offers, and the top-level `model` is the one it starts on. `/models` opens the list, so a second ref costs one map entry and no restart. A ref whose context window and max output are known carries a `limit`; a tag ref never does, because the tag picks the model at request time.
 
-Status: partial. opencode sends `tools` with every turn, bandar drops them, so the agent answers but never calls a tool.
+Status: ready. opencode sends `tools` with every turn, and bandar forwards them and answers with the call it asked for.
 
 ## opencode (v2)
 
@@ -132,7 +129,7 @@ Global config: `~/.config/opencode/opencode.jsonc`. v2 moves providers under `pr
 
 v2 stores credentials in its own database and imports the old `auth.json` on migration, so the `env` entry is the whole credential path here. Do not add a key field; the schema has none.
 
-Status: partial, same reason as v1.
+Status: ready, same path as v1.
 
 ## Codex
 
@@ -200,7 +197,7 @@ The key file holds one line and no trailing newline. Run `claude`, then `/status
 
 `ANTHROPIC_MODEL` pins the model the session starts on. `/model` switches among Claude's own entries, and `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, and `ANTHROPIC_DEFAULT_HAIKU_MODEL` each point one of those entries at a bandar ref. Gateway discovery is not the path here: Claude Code keeps a discovered entry only when its id contains `claude` or `anthropic`, and bandar serves refs, so most refs would never appear.
 
-Status: partial. The first prompt streams. As soon as Claude Code sends a `tool_result` block, bandar answers 422, because the text path rejects non-text blocks instead of dropping them.
+Status: ready. Claude Code calls a tool, and the `tool_result` block it sends back reaches the model.
 
 ## pi coding agent
 
@@ -238,33 +235,32 @@ pi --list-models
 
 Each entry in `models` appears under `/model`, and pi keeps the one you used last, so the file carries no default. pi takes `contextWindow` and `maxTokens` from the model's stored limits, and leaves both out for a tag.
 
-Status: partial, same reason as opencode.
+Status: ready, same path as opencode.
 
 ## Planned tools
 
-9router carries about eighteen integrations. These are the rest, kept out of the page until the gaps below close:
+9router carries about eighteen integrations. These are the rest, kept out of the page until each one has an entry:
 
 | Tool                      | Config                                 | What it needs first                |
 | ------------------------- | -------------------------------------- | ---------------------------------- |
-| GitHub Copilot            | VS Code extension, base URL and key    | tool calling                       |
-| Cline, Roo, Continue      | project config with an OpenAI base URL | tool calling                       |
-| Kilo Code, Droid, Amp     | CLI or extension config                | tool calling                       |
-| Open Claw, Hermes, jcode  | own config file                        | tool calling                       |
-| Qwen Code                 | `~/.qwen/settings.json`                | tool calling                       |
-| DeepSeek TUI, Grok Build  | `config.toml` with a custom model      | tool calling                       |
+| GitHub Copilot            | VS Code extension, base URL and key    | an entry                           |
+| Cline, Roo, Continue      | project config with an OpenAI base URL | an entry                           |
+| Kilo Code, Droid, Amp     | CLI or extension config                | an entry                           |
+| Open Claw, Hermes, jcode  | own config file                        | an entry                           |
+| Qwen Code                 | `~/.qwen/settings.json`                | an entry                           |
+| DeepSeek TUI, Grok Build  | `config.toml` with a custom model      | an entry                           |
 | Devin CLI                 | local binary through ACP               | nothing, it is not a routed client |
 | Antigravity, Kiro, Cursor | MITM proxy and a root CA               | a decision, not code               |
 
 The blockers, in the order they pay off:
 
-1. Tool calling in the canonical layer. `CanonicalMessage.content` is a string and `CanonicalRequest` has no `tools`. Widen both to a block union, map `tool_calls` and `tool_use`, and forward `tools` on both ingresses. This one change turns every `partial` above into `ready`.
-2. `/v1/responses` for Codex. It needs the same block work plus its own wire.
-3. Vision blocks, so a CLI can attach a screenshot.
-4. An optional local config writer. 9router edits files through its own API because it runs on the same machine as the CLI. Do this only for a gateway that runs locally, and gate it behind a flag, because a remote gateway writing into a laptop is not a feature.
+1. `/v1/responses` for Codex. It needs its own wire for the item list, the function-call items, and the typed stream.
+2. Vision blocks, so a CLI can attach a screenshot.
+3. An optional local config writer. 9router edits files through its own API because it runs on the same machine as the CLI. Do this only for a gateway that runs locally, and gate it behind a flag, because a remote gateway writing into a laptop is not a feature.
 
 ## Adding a tool
 
-Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, whether it needs tool calls, the base URL shape, the key variable, `modelCapacity`, the steps, and the snippets. `modelCapacity: "many"` means one file holds every picked ref, and the combobox appends each pick as a chip; `"one"` means the file pins a single ref and the tool lists the rest itself, so the page renders a select instead. A snippet reads `refsOf(input)` for the refs to write and `activeOf(input)` for the default, so a blank pick still renders the placeholder. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status. Add the tool's mark to `CliToolLogo` in `./src/client/components/cli-tool-logo.tsx`; the paths there come from [svgl.app](https://svgl.app), which serves single-color marks, so a two-tone one carries an opacity instead of a second color.
+Add an entry to `CLI_TOOLS` in `./src/shared/cli-tools.ts`: the ingress it needs, the base URL shape, the key variable, `modelCapacity`, the steps, and the snippets. `modelCapacity: "many"` means one file holds every picked ref, and the combobox appends each pick as a chip; `"one"` means the file pins a single ref and the tool lists the rest itself, so the page renders a select instead. A snippet reads `refsOf(input)` for the refs to write and `activeOf(input)` for the default, so a blank pick still renders the placeholder. The list page renders a row for it, `/cli-tools/<id>` renders the guide, and `toolStatus` computes the badge, so a new entry never hand-writes a status. Add the tool's mark to `CliToolLogo` in `./src/client/components/cli-tool-logo.tsx`; the paths there come from [svgl.app](https://svgl.app), which serves single-color marks, so a two-tone one carries an opacity instead of a second color.
 
 Five rules the tests enforce, so keep them true:
 
@@ -291,4 +287,4 @@ curl -sS "${ANTHROPIC_BASE_URL:-http://localhost:4133}/v1/chat/completions" \
   -d '{"model":"sonnet","messages":[{"role":"user","content":"say hi"}]}'
 ```
 
-A 404 names an unresolvable model ref. A 401 names the key. A 422 on a tool result means the text-only limit above, not a broken key.
+A 404 names an unresolvable model ref. A 401 names the key. A 422 names a block type bandar does not carry, not a broken key.

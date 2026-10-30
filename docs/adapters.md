@@ -1,9 +1,9 @@
 # Provider adapters
 
-The gateway speaks one canonical, text-only chat shape. An adapter owns
-everything between that shape and one upstream wire: URLs, headers, request
-translation, response parsing, SSE event parsing, usage extraction, and finish
-reason normalization.
+The gateway speaks one canonical chat shape, built from text parts and tool
+parts. An adapter owns everything between that shape and one upstream wire:
+URLs, headers, request translation, response parsing, SSE event parsing, usage
+extraction, and finish reason normalization.
 
 Every adapter is synchronous to the registry but asynchronous to the network:
 
@@ -75,20 +75,32 @@ renews; the Nous Portal login fills both. A bundle sealed before those fields
 existed parses with both null, so an old row keeps working
 (`src/server/credential.test.ts`).
 
-`CanonicalRequest` carries `messages` (`system | user | assistant`), `temperature`,
-`topP`, `maxTokens`, and `stop`. `CanonicalResult` carries `text`, `finishReason`,
-and `usage` (`inputTokens`, `outputTokens`, each `number | null`).
-`CanonicalStreamEvent` is one of:
+A message is a role and a list of parts, defined in
+`src/shared/conversation.ts`: `{type: "text"}`, `{type: "tool_call"}` with the
+call's id, name, and raw argument text, and `{type: "tool_result"}` with the id
+it answers, its text, and whether the tool failed. Parts keep the order a turn
+carried, which is the only way an Anthropic or GenAI turn that speaks, calls,
+then speaks again survives the trip.
+
+`CanonicalRequest` carries `messages` (`system | user | assistant`), `tools` (the
+normalized definitions, empty when the client declared none), `toolChoice`
+(`auto`, `none`, `required`, one named tool, or `null` for the wire's own
+default), `temperature`, `topP`, `maxTokens`, and `stop`. `CanonicalResult` carries
+`text`, `toolCalls` (empty for a text answer), `finishReason`, and `usage`
+(`inputTokens`, `outputTokens`, each `number | null`). `CanonicalStreamEvent` is
+one of:
 
 ```ts
 | { type: "text"; text: string }
+| { type: "tool_call_start"; call: ToolCallDraft }
+| { type: "tool_call_delta"; id: string; arguments: string }
 | { type: "usage"; usage: CanonicalUsage }
 | { type: "finish"; reason: string | null }
 ```
 
-The gateway does not read provider JSON. It sees text, usage, finish, or a thrown
-`UpstreamError`. That boundary is the extension point: a new wire format changes
-one adapter file and the routes that name it.
+The gateway does not read provider JSON. It sees text, a tool call, usage,
+finish, or a thrown `UpstreamError`. That boundary is the extension point: a new
+wire format changes one adapter file and the routes that name it.
 
 ## Ingress
 
@@ -105,16 +117,22 @@ error envelope, its completed response, and its stream frames:
 ### OpenAI chat ingress
 
 `POST /v1/chat/completions` reads `messages` whose `role` is `system`,
-`developer`, `user`, or `assistant`, and whose `content` is a string or an array
-of `{type: "text", text}` parts. `developer` becomes `system`, and several text
-parts in one message join with a newline, so a pi transcript posts unchanged.
+`developer`, `user`, `assistant`, or `tool`, and whose `content` is a string,
+an array of `{type: "text", text}` parts, or `null` on an assistant turn that
+only called tools. `developer` becomes `system`, and several text parts in one
+message join with a newline, so a pi transcript posts unchanged. An empty part
+array is accepted as an empty turn.
 
-`content` is required, and an empty part array is accepted as an empty turn.
+A `tool` message answers an earlier call and carries that call's id as
+`tool_call_id`. An `assistant` message may carry `tool_calls`, each with its id,
+function name, and arguments as JSON text. `tool_call_id` on any other role, and
+`tool_calls` on any other role, answer 422 naming the field.
 
 The route reads `model`, `messages`, `stream`, `temperature`, `top_p`,
-`max_tokens` or `max_completion_tokens`, and `stop`. Every other field is
-ignored, including `tools` and `tool_choice`, so a client that sends `tools`
-reaches the model without them.
+`max_tokens` or `max_completion_tokens`, `stop`, `tools`, and `tool_choice`.
+A `tools` entry is `{type: "function", function: {name, description?,
+parameters?}}`, and `tool_choice` is `auto`, `none`, `required`, or
+`{type: "function", function: {name}}`.
 
 A part whose type is not `text` is a rejection, never a silent drop. It answers
 422 with the message and `param` naming the part's position:
@@ -134,25 +152,32 @@ messages.0.content.1: image_url blocks are not supported by this text gateway
 | `system`                                               | A string or an array of text blocks; becomes the leading system message       |
 | `stream`                                               | `true` answers SSE, `false` or absent answers one message                     |
 | `max_tokens`, `temperature`, `top_p`, `stop_sequences` | Passed through as `maxTokens`, `temperature`, `topP`, `stop`                  |
+| `tools`                                                | `{name, description?, input_schema?}`, forwarded to every upstream wire       |
+| `tool_choice`                                          | `auto`, `any`, `none`, or `{type: "tool", name}`                              |
 
-Every other field is ignored, including `metadata`, `thinking`, `top_k`,
-`tools`, and `tool_choice`. Multiple text blocks in one message join with a
-newline, and multiple `system` blocks join the same way.
+Every other field is ignored, including `metadata`, `thinking`, and `top_k`.
+Multiple text blocks in one message join with a newline, and multiple `system`
+blocks join the same way.
 
-bandar is a text gateway, so a block whose type is not `text` is a rejection,
-never a silent drop. A `tool_use`, `tool_result`, `image`, or `document`
-block anywhere in `messages` or `system` answers 422 and names the block type
-and its position:
+Two block types carry tool calling and are accepted: `tool_use` in an
+`assistant` turn and `tool_result` in a `user` turn. Each keeps its order among
+the turn's text blocks. A `tool_use` anywhere else, or a `tool_result` in an
+assistant turn, answers 422.
+
+Every other block type is a rejection, never a silent drop. An `image`,
+`document`, or any other non-text block in `messages` or `system` answers 422
+and names the block type and its position. A block inside a `tool_result` must
+also be text, named at its own path:
 
 ```text
-messages.1.content.0: tool_use blocks are not supported by this text gateway
+messages.2.content.0.content.0: image blocks are not supported by this text gateway
 ```
 
-Because `tools` is ignored, a client such as Claude Code connects and receives
-text only. It gets no tool calls back.
+A client such as Claude Code connects, calls a tool, and sends the result back.
 
 A completed answer is an Anthropic message object: `type: "message"`,
-`role: "assistant"`, one `text` block, `stop_reason`, and
+`role: "assistant"`, one text block then one `tool_use` block per call,
+`stop_reason`, and
 `usage: {input_tokens, output_tokens}`. `stop_reason` maps from the canonical
 reason: `stop` becomes `end_turn`, `length` becomes `max_tokens`,
 `tool_calls` becomes `tool_use`, and `content_filter` becomes `refusal`.
@@ -162,12 +187,16 @@ line. The order is fixed:
 
 ```text
 message_start
-content_block_start
-content_block_delta   (one per text delta)
+content_block_start   (one per text or tool_use block)
+content_block_delta   (text_delta, or input_json_delta for a tool call)
 content_block_stop
 message_delta         (stop_reason and usage)
 message_stop
 ```
+
+A `tool_use` block opens as soon as the upstream names the call, so a client
+shows the call before its arguments finish. A stream that produced nothing still
+writes one empty text block and closes it.
 
 The canonical stream reports usage when the upstream finishes, so
 `message_start` carries `input_tokens: 0` and `message_delta` carries the
@@ -517,12 +546,45 @@ optional fields the canonical request does not carry. That is one adapter
 implementation, not six: Kilo Code, Token Harbor, Yeta, River, Nous Portal, and
 Hyper all differ only in their headers and their catalogs.
 
+### Tool calling
+
+Every compatibility carries tools in both directions. The canonical request
+holds the definitions, the choice, the calls already in the history, and the
+results the client sent back. Each wire translates them:
+
+|              | chat                                   | Responses                    | messages                                                 | genai                                     |
+| ------------ | -------------------------------------- | ---------------------------- | -------------------------------------------------------- | ----------------------------------------- |
+| Definitions  | `tools[].function`                   | `tools[]`, flat            | `tools[].input_schema`                                 | `tools[0].functionDeclarations`         |
+| `auto`       | `"auto"`                             | `"auto"`                   | `{type: "auto"}`                                       | `mode: "AUTO"`                          |
+| `none`       | `"none"`                             | `"none"`                   | `tools` omitted, since no pinned version serves the mode | `mode: "NONE"`                          |
+| `required`   | `"required"`                         | `"required"`               | `{type: "any"}`                                        | `mode: "ANY"`                           |
+| one tool     | `{type: "function", function: {name}}` | `{type: "function", name}` | `{type: "tool", name}`                                  | `mode: "ANY"` plus `allowedFunctionNames` |
+| A call       | `tool_calls` on the assistant message | a `function_call` item      | a `tool_use` block                                      | a `functionCall` part                   |
+| A result     | its own `role: "tool"` message        | a `function_call_output` item | a `tool_result` block in the user turn                  | a `functionResponse` part, by name       |
+
+Three details are per wire rather than universal:
+
+- Arguments travel as the upstream's raw JSON text. Anthropic's `input` and
+  GenAI's `args` want an object, so those two adapters parse at their own edge.
+  Arguments a client sent that do not parse answer 400; arguments a model
+  emitted that do not parse answer 502.
+- Only Anthropic has an error flag on a result. The other three write
+  `"Error: "` in front of the result text, so a failed tool still reads as a
+  failure to the model.
+- GenAI carries no call id, so its adapter mints `call_0`, `call_1`, and so on.
+  A result comes back addressed by the function's name. A result whose call is
+  not in the history answers 400, because that wire cannot address it at all.
+
 ### Responses wire
 
 `POST {base}/responses` with `{ model, input, stream?, max_output_tokens?,
-temperature?, top_p? }`. `input` is the canonical messages, one item per message:
-`{ role, content: [{ type: "input_text", text }] }`. A system message stays an
-item; the wire's `instructions` field is not used.
+temperature?, top_p?, tools?, tool_choice? }`. `input` is a list of items: one
+per text run, `{ role, content: [{ type: "input_text", text }] }`, one
+`{type: "function_call", call_id, name, arguments}` per call in the history, and
+one `{type: "function_call_output", call_id, output}` per result. A system
+message stays an item; the wire's `instructions` field is not used. A `tools`
+entry is flat, `{type: "function", name, description?, parameters?}`, and a
+named `tool_choice` is `{type: "function", name}`.
 
 The canonical `stop` has no Responses equivalent, so the adapter drops it. A model
 that only speaks this wire cannot honour a stop sequence.
@@ -531,10 +593,16 @@ A non-streamed answer is the concatenation of every `output[]` item whose `type`
 is `"message"`, through the `content[]` parts whose `type` is `"output_text"`.
 Usage comes from `input_tokens` and `output_tokens`.
 
+Every `output[]` item whose type is `"function_call"` becomes a tool call, with
+its arguments kept as the JSON text the model wrote.
+
 A stream carries typed events. `response.output_text.delta` is text;
-`response.completed` and `response.incomplete` carry the response's `usage` and
-`status`; `response.failed` and `error` throw a `protocolError`; any other event
-type is ignored. `[DONE]` ends the stream when a proxy sends one.
+`response.output_item.added` opens a function call and
+`response.function_call_arguments.delta` appends to it;
+`response.output_item.done` supplies the whole call for a provider that sends no
+deltas; `response.completed` and `response.incomplete` carry the response's
+`usage` and `status`; `response.failed` and `error` throw a `protocolError`;
+any other event type is ignored. `[DONE]` ends the stream when a proxy sends one.
 
 The finish reason maps `completed` to `stop`, `incomplete` with
 `max_output_tokens` to `length`, and passes any other incomplete reason through.
@@ -648,17 +716,24 @@ while a write is in flight.
 ## Streaming rules
 
 1. `stream()` yields text events only for non-empty deltas.
-2. Yield `usage` as soon as the provider reports it. The gateway keeps the last
+2. A tool call yields one `tool_call_start` once its id and name are both known,
+   then one `tool_call_delta` per argument fragment. A fragment carries the call
+   id, never the upstream's own index: that index dies inside the adapter. A
+   fragment that arrives before the call can be named is held, then flushed
+   after the start.
+3. Yield `usage` as soon as the provider reports it. The gateway keeps the last
    value it saw and writes one usage chunk at the end.
-3. Yield exactly one `finish` before returning, even when the provider omitted a
-   reason; use `null`.
-4. A provider error frame throws `UpstreamError`. The gateway sends an SSE error
+4. Yield exactly one `finish` before returning, even when the provider omitted a
+   reason; use `null`. A turn that called a tool finishes as `tool_calls`, unless
+   the upstream said `length` or `content_filter`: a truncated call stayed
+   truncated.
+5. A provider error frame throws `UpstreamError`. The gateway sends an SSE error
    object and `[DONE]`, records the failure, and closes.
-5. Respect `input.signal`. The gateway aborts it when the client disconnects, and
+6. Respect `input.signal`. The gateway aborts it when the client disconnects, and
    records the attempt as `aborted`.
 
-TTFT is measured by the gateway at the first non-empty text event. Adapters do
-not measure time, and non-streaming requests have no TTFT.
+TTFT is measured by the gateway at the first output of any kind, text or tool
+call. Adapters do not measure time, and non-streaming requests have no TTFT.
 
 ## Adding a kind
 

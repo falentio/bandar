@@ -61,7 +61,6 @@ export type CliTool = {
   readonly summary: string;
   readonly docsUrl: string;
   readonly needs: readonly GatewayNeed[];
-  readonly needsTools: boolean;
   /** "many": one file lists every ref. "one": the file pins one ref and the tool lists the rest itself. */
   readonly modelCapacity: "one" | "many";
   /** Claude Code appends /v1/messages itself, every other tool wants /v1. */
@@ -72,7 +71,7 @@ export type CliTool = {
 };
 
 export type CliToolStatus = {
-  readonly status: "ready" | "partial" | "blocked";
+  readonly status: "ready" | "blocked";
   readonly reason: string;
 };
 
@@ -87,14 +86,6 @@ export function toolStatus(tool: CliTool): CliToolStatus {
     return {
       status: "blocked",
       reason: `bandar does not serve ${missing.map((need) => GATEWAY_NEED_LABEL[need]).join(", ")} yet`,
-    };
-
-  if (tool.needsTools && !GATEWAY_SURFACE.tools)
-    return {
-      status: "partial",
-      reason: tool.needs.includes("messages")
-        ? "a tool_result block answers 422, so this tool fails at its first tool call"
-        : "requests reach the model, but this gateway forwards text only, so the tool loop stalls",
     };
 
   return { status: "ready", reason: "requests and tool calls reach the model" };
@@ -123,7 +114,6 @@ export const CLI_TOOLS: readonly CliTool[] = [
     summary: "openai-compatible provider block in opencode.json",
     docsUrl: "https://opencode.ai/docs/providers/",
     needs: ["chatCompletions"],
-    needsTools: true,
     modelCapacity: "many",
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
@@ -168,7 +158,6 @@ export const CLI_TOOLS: readonly CliTool[] = [
     summary: "providers block with an env credential in opencode.jsonc",
     docsUrl: "https://opencode.ai/v2/docs/providers/",
     needs: ["chatCompletions"],
-    needsTools: true,
     modelCapacity: "many",
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
@@ -211,7 +200,6 @@ export const CLI_TOOLS: readonly CliTool[] = [
     summary: "custom model provider in config.toml",
     docsUrl: "https://developers.openai.com/codex/config-reference/",
     needs: ["responses"],
-    needsTools: true,
     modelCapacity: "many",
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",
@@ -252,7 +240,6 @@ export const CLI_TOOLS: readonly CliTool[] = [
     summary: "Anthropic message endpoint through a credential helper",
     docsUrl: "https://code.claude.com/docs/en/llm-gateway-connect",
     needs: ["messages"],
-    needsTools: true,
     modelCapacity: "one",
     baseUrl: (origin) => origin,
     keyVariable: "ANTHROPIC_AUTH_TOKEN",
@@ -294,7 +281,6 @@ export const CLI_TOOLS: readonly CliTool[] = [
     summary: "compatible endpoint in models.json",
     docsUrl: "https://pi.dev/models",
     needs: ["chatCompletions"],
-    needsTools: true,
     modelCapacity: "many",
     baseUrl: (origin) => `${origin}/v1`,
     keyVariable: "BANDAR_API_KEY",

@@ -81,10 +81,7 @@ type AnthropicToolBody = {
   input_schema: ToolParameters;
 };
 
-type AnthropicToolChoiceBody =
-  | { type: "auto" }
-  | { type: "any" }
-  | { type: "tool"; name: string };
+type AnthropicToolChoiceBody = { type: "auto" } | { type: "any" } | { type: "tool"; name: string };
 
 type ChatBody = {
   model: string;

@@ -244,8 +244,7 @@ function bodyFor(input: AdapterInput): ChatBody {
   if (input.request.tools.length > 0)
     body.tools = [{ functionDeclarations: input.request.tools.map(declarationOf) }];
 
-  if (input.request.toolChoice !== null)
-    body.toolConfig = toolConfigOf(input.request.toolChoice);
+  if (input.request.toolChoice !== null) body.toolConfig = toolConfigOf(input.request.toolChoice);
 
   return body;
 }
@@ -301,7 +300,9 @@ function nameOf(names: ReadonlyMap<string, string>, result: ToolResult): string 
 
   if (name === undefined)
     throw new UpstreamError(
-      "google cannot address the tool result for call " + result.toolCallId + ": no earlier turn called it",
+      "google cannot address the tool result for call " +
+        result.toolCallId +
+        ": no earlier turn called it",
       "invalid_request",
     );
 

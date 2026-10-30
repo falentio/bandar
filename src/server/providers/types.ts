@@ -69,16 +69,16 @@ const JsonObjectSchema = v.record(v.string(), v.unknown());
  * Canonical arguments are raw JSON text, so the three sites that need an object parse here and
  * say whose contract broke: what a client sent is its own bad request, what a model emitted is not.
  */
-export function jsonObjectOf(
-  call: ToolCall,
-  kind: "invalid_request" | "protocol",
-): ToolParameters {
+export function jsonObjectOf(call: ToolCall, kind: "invalid_request" | "protocol"): ToolParameters {
   let parsed: unknown = null;
 
   try {
     parsed = JSON.parse(call.arguments);
   } catch {
-    throw new UpstreamError(`tool call ${call.id} (${call.name}) has arguments that are not JSON`, kind);
+    throw new UpstreamError(
+      `tool call ${call.id} (${call.name}) has arguments that are not JSON`,
+      kind,
+    );
   }
 
   const object = v.safeParse(JsonObjectSchema, parsed);

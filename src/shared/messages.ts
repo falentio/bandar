@@ -114,10 +114,7 @@ export function normalizeMessages(request: MessagesRequest): Normalized<Normaliz
 }
 
 /** The text of one content value, rejecting any non-text block at its dotted path. */
-export function contentText(
-  content: Content | null | undefined,
-  at: string,
-): Normalized<string> {
+export function contentText(content: Content | null | undefined, at: string): Normalized<string> {
   if (content === undefined || content === null) return { ok: true, value: "" };
 
   if (typeof content === "string") return { ok: true, value: content };
@@ -138,9 +135,7 @@ export function contentText(
 }
 
 export function promptText({ system, messages }: NormalizedMessages): string {
-  return [system, ...messages.map(promptTextOf)]
-    .filter((part) => part !== "")
-    .join("\n");
+  return [system, ...messages.map(promptTextOf)].filter((part) => part !== "").join("\n");
 }
 
 /** Tool text counts toward the estimate, but tool definitions do not. It stays an estimate. */

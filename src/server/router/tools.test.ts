@@ -9,7 +9,12 @@ import { openDatabase } from "../db/client";
 import { applyMigrations, type Migration } from "../db/migrate";
 import { DuckDb } from "../duck/client";
 import { applyDuckMigrations } from "../duck/migrate";
-import { addProviderModel, createProvider, updateProviderModel, type ProviderDeps } from "../providers";
+import {
+  addProviderModel,
+  createProvider,
+  updateProviderModel,
+  type ProviderDeps,
+} from "../providers";
 import { DEFAULT_PROVIDER_ENDPOINTS } from "../providers/endpoints";
 import { createSealer } from "../seal";
 import { createGateway } from "../gateway";
@@ -138,14 +143,22 @@ describe("the chat wire", () => {
       const body = call.body as { messages: { role: string }[] };
 
       return body.messages.some((message) => message.role === "tool")
-        ? json({ choices: [{ message: { role: "assistant", content: "a list" }, finish_reason: "stop" }] })
+        ? json({
+            choices: [{ message: { role: "assistant", content: "a list" }, finish_reason: "stop" }],
+          })
         : json({
             choices: [
               {
                 message: {
                   role: "assistant",
                   content: null,
-                  tool_calls: [{ id: "call_1", type: "function", function: { name: "read_file", arguments: ARGUMENTS } }],
+                  tool_calls: [
+                    {
+                      id: "call_1",
+                      type: "function",
+                      function: { name: "read_file", arguments: ARGUMENTS },
+                    },
+                  ],
                 },
                 finish_reason: "tool_calls",
               },
@@ -176,7 +189,11 @@ describe("the chat wire", () => {
       tools: [
         {
           type: "function",
-          function: { name: "read_file", description: "read one file", parameters: { type: "object" } },
+          function: {
+            name: "read_file",
+            description: "read one file",
+            parameters: { type: "object" },
+          },
         },
       ],
       tool_choice: "required",
@@ -199,7 +216,13 @@ describe("the chat wire", () => {
         {
           role: "assistant",
           content: "",
-          tool_calls: [{ id: "call_1", type: "function", function: { name: "read_file", arguments: ARGUMENTS } }],
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "read_file", arguments: ARGUMENTS },
+            },
+          ],
         },
         { role: "tool", tool_call_id: "call_1", content: "chat.ts\nmessages.ts" },
       ],
@@ -214,7 +237,13 @@ describe("the chat wire", () => {
             message: {
               role: "assistant",
               content: "",
-              tool_calls: [{ id: "call_1", type: "function", function: { name: "read_file", arguments: '{"path":' } }],
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: { name: "read_file", arguments: '{"path":' },
+                },
+              ],
             },
             finish_reason: "length",
           },
@@ -250,7 +279,12 @@ describe("the responses wire", () => {
             })
           : json({
               output: [
-                { type: "function_call", call_id: "call_9", name: "read_file", arguments: ARGUMENTS },
+                {
+                  type: "function_call",
+                  call_id: "call_9",
+                  name: "read_file",
+                  arguments: ARGUMENTS,
+                },
               ],
               status: "completed",
             });
@@ -277,7 +311,11 @@ describe("the responses wire", () => {
       model: "fast",
       messages: [
         { role: "user", content: "what is in ./src?" },
-        { role: "assistant", content: "", tool_calls: [answer.choices[0]?.message.tool_calls?.[0]] },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [answer.choices[0]?.message.tool_calls?.[0]],
+        },
         { role: "tool", tool_call_id: "call_9", content: "a list" },
       ],
       tools: [READ_FILE],
@@ -298,14 +336,16 @@ describe("the messages wire", () => {
     const harness = await harnessOn("anthropic", (call) => {
       // SAFETY: the fake upstream records the JSON body the adapter posted.
       const body = call.body as { messages: { content: unknown }[] };
-      const answered = body.messages.some(
-        (message) => JSON.stringify(message.content).includes("tool_result"),
+      const answered = body.messages.some((message) =>
+        JSON.stringify(message.content).includes("tool_result"),
       );
 
       return answered
         ? json({ content: [{ type: "text", text: "a list" }], stop_reason: "end_turn" })
         : json({
-            content: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "./src" } }],
+            content: [
+              { type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "./src" } },
+            ],
             stop_reason: "tool_use",
           });
     });
@@ -314,7 +354,9 @@ describe("the messages wire", () => {
       model: "fast",
       max_tokens: 64,
       messages: [{ role: "user", content: "what is in ./src?" }],
-      tools: [{ name: "read_file", description: "read one file", input_schema: { type: "object" } }],
+      tools: [
+        { name: "read_file", description: "read one file", input_schema: { type: "object" } },
+      ],
       tool_choice: { type: "auto" },
     });
 
@@ -327,7 +369,9 @@ describe("the messages wire", () => {
     expect(block).toMatchObject({ id: "toolu_1", name: "read_file", input: { path: "./src" } });
 
     expect(harness.upstream.calls[0]?.body).toMatchObject({
-      tools: [{ name: "read_file", description: "read one file", input_schema: { type: "object" } }],
+      tools: [
+        { name: "read_file", description: "read one file", input_schema: { type: "object" } },
+      ],
       tool_choice: { type: "auto" },
     });
 
@@ -336,7 +380,12 @@ describe("the messages wire", () => {
       max_tokens: 64,
       messages: [
         { role: "user", content: "what is in ./src?" },
-        { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "./src" } }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "./src" } },
+          ],
+        },
         {
           role: "user",
           content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "a list" }],
@@ -350,7 +399,9 @@ describe("the messages wire", () => {
         { role: "user", content: "what is in ./src?" },
         {
           role: "assistant",
-          content: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "./src" } }],
+          content: [
+            { type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "./src" } },
+          ],
         },
         {
           role: "user",
@@ -372,14 +423,14 @@ describe("the genai wire", () => {
 
       return answered
         ? json({
-            candidates: [
-              { content: { parts: [{ text: "a list" }] }, finishReason: "STOP" },
-            ],
+            candidates: [{ content: { parts: [{ text: "a list" }] }, finishReason: "STOP" }],
           })
         : json({
             candidates: [
               {
-                content: { parts: [{ functionCall: { name: "read_file", args: { path: "./src" } } }] },
+                content: {
+                  parts: [{ functionCall: { name: "read_file", args: { path: "./src" } } }],
+                },
                 finishReason: "STOP",
               },
             ],
@@ -417,7 +468,10 @@ describe("the genai wire", () => {
     expect(harness.upstream.calls[1]?.body).toMatchObject({
       contents: [
         { role: "user", parts: [{ text: "what is in ./src?" }] },
-        { role: "model", parts: [{ functionCall: { name: "read_file", args: { path: "./src" } } }] },
+        {
+          role: "model",
+          parts: [{ functionCall: { name: "read_file", args: { path: "./src" } } }],
+        },
         {
           role: "user",
           parts: [{ functionResponse: { name: "read_file", response: { result: "a list" } } }],
@@ -434,7 +488,14 @@ describe("streaming tool calls", () => {
       choices: [
         {
           delta: {
-            tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "read_file", arguments: "" } }],
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_1",
+                type: "function",
+                function: { name: "read_file", arguments: "" },
+              },
+            ],
           },
         },
       ],
@@ -528,7 +589,9 @@ describe("streaming tool calls", () => {
     const harness = await harnessOn("openai", () =>
       stream([
         { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1" }] } }] },
-        { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] } }] },
+        {
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] } }],
+        },
         {
           choices: [
             {
@@ -629,7 +692,10 @@ async function harnessOn(
 
   applyDuckMigrations(duck, duckMigrations());
 
-  cleanup.push(() => database.sqlite.close(), () => duck.close());
+  cleanup.push(
+    () => database.sqlite.close(),
+    () => duck.close(),
+  );
 
   const providers: ProviderDeps = {
     db: database.db,

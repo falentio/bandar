@@ -85,7 +85,11 @@ type CompletionBody = {
 };
 
 function toolCallBody(call: ToolCall): ToolCallBody {
-  return { id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } };
+  return {
+    id: call.id,
+    type: "function",
+    function: { name: call.name, arguments: call.arguments },
+  };
 }
 
 /** The response frames one ingress dialect writes into a streamed chat. */

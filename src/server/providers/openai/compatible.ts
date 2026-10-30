@@ -199,7 +199,12 @@ export function chatAdapter<K extends ProviderKind>({
 
         for (const fragment of choice.delta.tool_calls ?? []) {
           const index = fragment.index ?? 0;
-          const draft = drafts.get(index) ?? { id: null, name: null, pending: [], announced: false };
+          const draft = drafts.get(index) ?? {
+            id: null,
+            name: null,
+            pending: [],
+            announced: false,
+          };
 
           drafts.set(index, draft);
 
@@ -350,7 +355,11 @@ function flattenedBodies(message: CanonicalMessage): ChatMessageBody[] {
 }
 
 function toolCallBody(call: ToolCall): ChatToolCallBody {
-  return { id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } };
+  return {
+    id: call.id,
+    type: "function",
+    function: { name: call.name, arguments: call.arguments },
+  };
 }
 
 function toolBodyOf(tool: ToolDefinition): ChatToolBody {

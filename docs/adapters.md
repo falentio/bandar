@@ -552,15 +552,15 @@ Every compatibility carries tools in both directions. The canonical request
 holds the definitions, the choice, the calls already in the history, and the
 results the client sent back. Each wire translates them:
 
-|              | chat                                   | Responses                    | messages                                                 | genai                                     |
-| ------------ | -------------------------------------- | ---------------------------- | -------------------------------------------------------- | ----------------------------------------- |
-| Definitions  | `tools[].function`                   | `tools[]`, flat            | `tools[].input_schema`                                 | `tools[0].functionDeclarations`         |
-| `auto`       | `"auto"`                             | `"auto"`                   | `{type: "auto"}`                                       | `mode: "AUTO"`                          |
-| `none`       | `"none"`                             | `"none"`                   | `tools` omitted, since no pinned version serves the mode | `mode: "NONE"`                          |
-| `required`   | `"required"`                         | `"required"`               | `{type: "any"}`                                        | `mode: "ANY"`                           |
-| one tool     | `{type: "function", function: {name}}` | `{type: "function", name}` | `{type: "tool", name}`                                  | `mode: "ANY"` plus `allowedFunctionNames` |
-| A call       | `tool_calls` on the assistant message | a `function_call` item      | a `tool_use` block                                      | a `functionCall` part                   |
-| A result     | its own `role: "tool"` message        | a `function_call_output` item | a `tool_result` block in the user turn                  | a `functionResponse` part, by name       |
+|             | chat                                   | Responses                     | messages                                                 | genai                                     |
+| ----------- | -------------------------------------- | ----------------------------- | -------------------------------------------------------- | ----------------------------------------- |
+| Definitions | `tools[].function`                     | `tools[]`, flat               | `tools[].input_schema`                                   | `tools[0].functionDeclarations`           |
+| `auto`      | `"auto"`                               | `"auto"`                      | `{type: "auto"}`                                         | `mode: "AUTO"`                            |
+| `none`      | `"none"`                               | `"none"`                      | `tools` omitted, since no pinned version serves the mode | `mode: "NONE"`                            |
+| `required`  | `"required"`                           | `"required"`                  | `{type: "any"}`                                          | `mode: "ANY"`                             |
+| one tool    | `{type: "function", function: {name}}` | `{type: "function", name}`    | `{type: "tool", name}`                                   | `mode: "ANY"` plus `allowedFunctionNames` |
+| A call      | `tool_calls` on the assistant message  | a `function_call` item        | a `tool_use` block                                       | a `functionCall` part                     |
+| A result    | its own `role: "tool"` message         | a `function_call_output` item | a `tool_result` block in the user turn                   | a `functionResponse` part, by name        |
 
 Three details are per wire rather than universal:
 

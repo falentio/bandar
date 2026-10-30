@@ -1,16 +1,8 @@
 import { Elysia } from "elysia";
 import * as v from "valibot";
 import { GatewayRequestSchema, normalizeChatMessages, type ModelList } from "../shared/chat";
-import {
-  MessagesRequestSchema,
-  normalizeMessages,
-  promptText,
-} from "../shared/messages";
-import type {
-  ConversationMessage,
-  ToolChoice,
-  ToolDefinition,
-} from "../shared/conversation";
+import { MessagesRequestSchema, normalizeMessages, promptText } from "../shared/messages";
+import type { ConversationMessage, ToolChoice, ToolDefinition } from "../shared/conversation";
 import { PROJECT_URL_HEADER, projectUrlOf } from "../shared/project";
 import { SESSION_ID_HEADER, sessionIdOf } from "../shared/session-id";
 import type { Auth, VerifiedKey } from "./auth";

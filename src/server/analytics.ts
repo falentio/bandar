@@ -24,23 +24,18 @@ export type RequestsQuery = {
   readonly providerId?: string;
 };
 
-export type ProviderUsageQuery = {
-  readonly userId: string;
-  readonly providerId: string;
-  readonly days: number;
-  readonly now?: Date;
-};
-
 export type Analytics = {
   readonly days: number;
   readonly summary: {
     readonly requests: number;
     readonly errors: number;
     readonly errorRate: number;
+    readonly cacheHitRate: number | null;
     readonly inputTokens: number;
     readonly outputTokens: number;
     readonly totalTokens: number;
     readonly avgTokensPerDay: number;
+    readonly avgTokensPerRequest: number | null;
     readonly avgTps: number | null;
     readonly avgTtftMs: number | null;
     readonly p50DurationMs: number | null;
@@ -63,21 +58,6 @@ export type Analytics = {
     readonly avgTps: number | null;
     readonly costUsd: number;
   }[];
-};
-
-export type ProviderUsage = {
-  readonly days: number;
-  readonly requests: number;
-  readonly errors: number;
-  readonly errorRate: number;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly totalTokens: number;
-  readonly avgTokensPerDay: number;
-  readonly avgTps: number | null;
-  readonly avgTtftMs: number | null;
-  readonly costUsd: number;
-  readonly lastRequestAt: string | null;
 };
 
 export type RequestEvent = {
@@ -140,7 +120,10 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
        avg(ttft_ms) AS avg_ttft_ms,
        approx_quantile(duration_ms, 0.5) AS p50_duration_ms,
        approx_quantile(duration_ms, 0.95) AS p95_duration_ms,
-       avg(tokens_per_second) AS avg_tps
+       avg(tokens_per_second) AS avg_tps,
+       coalesce(sum(cached_input_tokens) FILTER (WHERE cached_input_tokens IS NOT NULL), 0)
+         / nullif(sum(input_tokens) FILTER (WHERE cached_input_tokens IS NOT NULL), 0)
+         AS cache_hit_rate
      FROM request_events
      WHERE user_id = ? AND started_at >= ?::TIMESTAMP${filterSql}`,
     [sqlText(query.userId), sqlText(start.toISOString()), ...filter.params],
@@ -149,6 +132,7 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
   if (summary === undefined) throw new Error("analytics summary returned no row");
 
   const requests = number(summary, "requests");
+  const cacheHitRate = nullableNumber(summary, "cache_hit_rate");
   const inputTokens = number(summary, "input_tokens");
   const outputTokens = number(summary, "output_tokens");
   const totalTokens = inputTokens + outputTokens;
@@ -196,10 +180,12 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
       requests,
       errors: number(summary, "errors"),
       errorRate: errorRate(number(summary, "errors"), requests),
+      cacheHitRate: cacheHitRate === null ? null : round(cacheHitRate, 4),
       inputTokens,
       outputTokens,
       totalTokens,
       avgTokensPerDay: round(totalTokens / query.days, 2),
+      avgTokensPerRequest: requests === 0 ? null : round(totalTokens / requests, 1),
       avgTps: nullableNumber(summary, "avg_tps"),
       avgTtftMs: nullableNumber(summary, "avg_ttft_ms"),
       p50DurationMs: nullableNumber(summary, "p50_duration_ms"),
@@ -297,49 +283,6 @@ export function readSessionIds(db: DuckDb, query: FilterValuesQuery): readonly s
   );
 
   return rows.map((row) => string(row, "session_id"));
-}
-
-export function readProviderUsage(db: DuckDb, query: ProviderUsageQuery): ProviderUsage {
-  const end = startOfUtcDay(query.now ?? new Date());
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - (query.days - 1));
-
-  const row = db.query(
-    `SELECT
-       count(*) AS requests,
-       count(*) FILTER (WHERE status <> 'success') AS errors,
-       coalesce(sum(input_tokens), 0) AS input_tokens,
-       coalesce(sum(output_tokens), 0) AS output_tokens,
-       coalesce(sum(cost_usd), 0) AS cost_usd,
-       avg(ttft_ms) AS avg_ttft_ms,
-       avg(tokens_per_second) AS avg_tps,
-       max(started_at) AS last_request_at
-     FROM request_events
-     WHERE user_id = ? AND provider_id = ? AND started_at >= ?::TIMESTAMP`,
-    [sqlText(query.userId), sqlText(query.providerId), sqlText(start.toISOString())],
-  )[0];
-
-  if (row === undefined) throw new Error("provider usage returned no row");
-
-  const requests = number(row, "requests");
-  const inputTokens = number(row, "input_tokens");
-  const outputTokens = number(row, "output_tokens");
-  const lastRequestAt = stringOrNull(row, "last_request_at");
-
-  return {
-    days: query.days,
-    requests,
-    errors: number(row, "errors"),
-    errorRate: errorRate(number(row, "errors"), requests),
-    inputTokens,
-    outputTokens,
-    totalTokens: inputTokens + outputTokens,
-    avgTokensPerDay: round((inputTokens + outputTokens) / query.days, 2),
-    avgTps: nullableNumber(row, "avg_tps"),
-    avgTtftMs: nullableNumber(row, "avg_ttft_ms"),
-    costUsd: round(number(row, "cost_usd"), 6),
-    lastRequestAt: lastRequestAt === null ? null : new Date(lastRequestAt).toISOString(),
-  };
 }
 
 function filterClause(filters: AnalyticsFilters): FilterClause {

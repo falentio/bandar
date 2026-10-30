@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import * as v from "valibot";
 import {
   AnalyticsSchema,
+  EMPTY_ANALYTICS_FILTERS,
   ProjectListSchema,
   RequestListSchema,
   SessionListSchema,
@@ -28,13 +29,7 @@ import {
   ProviderParamsSchema,
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
-import {
-  readAnalytics,
-  readProjectUrls,
-  readProviderUsage,
-  readRequests,
-  readSessionIds,
-} from "./analytics";
+import { readAnalytics, readProjectUrls, readRequests, readSessionIds } from "./analytics";
 import { AnalyticsFiltersInputSchema, filterParams, isBlank } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import { createBackup } from "./backup";
@@ -186,10 +181,10 @@ export function createApi(deps: ApiDeps) {
 
       return v.parse(ProviderDetailSchema, {
         provider,
-        usage: readProviderUsage(deps.duck, {
+        usage: readAnalytics(deps.duck, {
           userId: caller.userId,
-          providerId: id,
           days,
+          filters: { ...EMPTY_ANALYTICS_FILTERS, providerId: [id] },
         }),
       });
     })

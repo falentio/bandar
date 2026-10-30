@@ -48,11 +48,13 @@ export function OverviewStats({
           <span>spent</span>
         </p>
 
-        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-4">
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-3 lg:grid-cols-6">
           <RailStat label="Avg speed" value={formatTps(summary.avgTps)} />
           <RailStat label="Avg TTFT" value={formatMs(summary.avgTtftMs)} />
           <RailStat label="p95 latency" value={formatMs(summary.p95DurationMs)} />
           <RailStat label="Error rate" value={formatPercent(summary.errorRate)} />
+          <RailStat label="Cache hit rate" value={formatPercent(summary.cacheHitRate)} />
+          <RailStat label="Tokens / request" value={formatTokens(summary.avgTokensPerRequest)} />
         </dl>
       </CardContent>
     </Card>

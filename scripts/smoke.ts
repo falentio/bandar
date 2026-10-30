@@ -666,9 +666,8 @@ try {
 
     assert.equal(detail.provider.id, id);
     assert.equal(detail.usage.days, 30);
-    assert.equal(detail.usage.requests, 1);
-    assert.ok(detail.usage.inputTokens > 0);
-    assert.ok(detail.usage.lastRequestAt !== null);
+    assert.equal(detail.usage.summary.requests, 1);
+    assert.ok(detail.usage.summary.inputTokens > 0);
 
     const requests = await getJson(
       `${analyticsPaths.requests}?limit=10&providerId=${id}`,

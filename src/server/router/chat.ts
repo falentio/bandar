@@ -59,6 +59,7 @@ type Outcome = {
   httpStatus: number | null;
   errorKind: string | null;
   inputTokens: number | null;
+  cachedInputTokens: number | null;
   outputTokens: number | null;
   ttftMs: number | null;
   durationMs: number;
@@ -138,6 +139,7 @@ async function complete(
         httpStatus: 200,
         errorKind: null,
         inputTokens: result.usage.inputTokens,
+        cachedInputTokens: result.usage.cachedInputTokens,
         outputTokens: result.usage.outputTokens,
         ttftMs: null,
         durationMs: performance.now() - started,
@@ -157,6 +159,7 @@ async function complete(
         httpStatus: failed.status,
         errorKind: aborted ? "aborted" : failed.kind,
         inputTokens: null,
+        cachedInputTokens: null,
         outputTokens: null,
         ttftMs: null,
         durationMs: performance.now() - started,
@@ -240,7 +243,12 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         const base = eventBase(input, plan.ref, attempt, startedAt);
         const writer = writerOf();
 
-        let usage: CanonicalUsage = { inputTokens: null, outputTokens: null };
+        let usage: CanonicalUsage = {
+          inputTokens: null,
+          cachedInputTokens: null,
+          outputTokens: null,
+        };
+
         let finishReason: string | null = null;
 
         try {
@@ -300,6 +308,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             httpStatus: 200,
             errorKind: null,
             inputTokens: usage.inputTokens,
+            cachedInputTokens: usage.cachedInputTokens,
             outputTokens: usage.outputTokens,
             ttftMs,
             durationMs: performance.now() - started,
@@ -319,6 +328,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             httpStatus: failed.status,
             errorKind: aborted ? "aborted" : failed.kind,
             inputTokens: usage.inputTokens,
+            cachedInputTokens: usage.cachedInputTokens,
             outputTokens: usage.outputTokens,
             ttftMs: null,
             durationMs: performance.now() - started,
@@ -517,6 +527,7 @@ function recordSafe(deps: ChatDeps, base: EventBase, outcome: Outcome): void {
     httpStatus: outcome.httpStatus,
     errorKind: outcome.errorKind,
     inputTokens: outcome.inputTokens,
+    cachedInputTokens: outcome.cachedInputTokens,
     outputTokens: outcome.outputTokens,
     ttftMs: outcome.ttftMs,
     durationMs: outcome.durationMs,

@@ -20,6 +20,8 @@ import { runChat, type ChatDeps, type ChatInput } from "./chat";
 import type { Auth } from "../auth";
 import { createGateway } from "../gateway";
 import { ChatCompletionRequestSchema } from "../../shared/chat";
+import type { GenericProviderKind } from "../../shared/providers";
+import { anthropicWire } from "./anthropic-wire";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 const DUCK_DIR = fileURLToPath(new URL("../../../duckdb", import.meta.url));
@@ -35,6 +37,22 @@ const CompletionSchema = v.object({
 });
 
 const ErrorSchema = v.object({ error: v.object({ message: v.string(), code: v.string() }) });
+
+const CompletionUsageSchema = v.object({
+  usage: v.object({
+    prompt_tokens: v.number(),
+    completion_tokens: v.number(),
+    total_tokens: v.number(),
+  }),
+});
+
+const MessageUsageSchema = v.object({
+  usage: v.object({
+    input_tokens: v.number(),
+    output_tokens: v.number(),
+    cache_read_input_tokens: v.optional(v.number()),
+  }),
+});
 
 type ChatCompletionBody = v.InferInput<typeof ChatCompletionRequestSchema>;
 
@@ -553,6 +571,79 @@ describe("runChat recording", () => {
   });
 });
 
+describe("runChat usage normalization", () => {
+  test("adds the cache tiers to a cached prompt in the OpenAI dialect", async () => {
+    const harness = await freshHarness(() => anthropicSuccess());
+
+    const seeded = await providerWithModel(harness, {
+      name: "Cached",
+      kind: "anthropic",
+      slug: "claude",
+      upstreamModel: "claude-x",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, chatInput("claude"));
+
+    expect(response.status).toBe(200);
+    expect(v.parse(CompletionUsageSchema, await response.json()).usage).toEqual({
+      prompt_tokens: 45,
+      completion_tokens: 2,
+      total_tokens: 47,
+    });
+    expect(cachedTokensOf(harness.deps.duck)).toEqual([30]);
+  });
+
+  test("reports only the non-cached prompt in the Anthropic dialect", async () => {
+    const harness = await freshHarness(() => anthropicSuccess());
+
+    const seeded = await providerWithModel(harness, {
+      name: "Cached",
+      kind: "anthropic",
+      slug: "claude",
+      upstreamModel: "claude-x",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, { ...chatInput("claude"), wire: anthropicWire });
+
+    expect(response.status).toBe(200);
+    expect(v.parse(MessageUsageSchema, await response.json()).usage).toEqual({
+      input_tokens: 15,
+      cache_read_input_tokens: 30,
+      output_tokens: 2,
+    });
+  });
+
+  test("keeps the cache read a streamed turn reports", async () => {
+    const harness = await freshHarness(() => anthropicStream());
+
+    const seeded = await providerWithModel(harness, {
+      name: "Cached",
+      kind: "anthropic",
+      slug: "claude",
+      upstreamModel: "claude-x",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, {
+      ...chatInput("claude", true),
+      wire: anthropicWire,
+    });
+
+    expect(response.status).toBe(200);
+
+    const text = await response.text();
+
+    expect(text).toContain('"input_tokens":15');
+    expect(text).toContain('"cache_read_input_tokens":30');
+    expect(cachedTokensOf(harness.deps.duck)).toEqual([30]);
+  });
+});
+
 describe("chat ingress", () => {
   async function gatewayFor(harness: Harness) {
     const seeded = await providerWithModel(harness, {
@@ -753,6 +844,42 @@ function openAiSuccess(): Response {
   });
 }
 
+function anthropicSuccess(): Response {
+  return Response.json({
+    content: [{ type: "text", text: "hello" }],
+    stop_reason: "end_turn",
+    usage: {
+      input_tokens: 10,
+      output_tokens: 2,
+      cache_read_input_tokens: 30,
+      cache_creation_input_tokens: 5,
+    },
+  });
+}
+
+function anthropicStream(): Response {
+  return sse([
+    {
+      type: "message_start",
+      message: {
+        usage: {
+          input_tokens: 10,
+          output_tokens: 0,
+          cache_read_input_tokens: 30,
+          cache_creation_input_tokens: 5,
+        },
+      },
+    },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hello" } },
+    {
+      type: "message_delta",
+      delta: { stop_reason: "end_turn" },
+      usage: { output_tokens: 2 },
+    },
+    { type: "message_stop" },
+  ]);
+}
+
 function openAiStream(): Response {
   return sse([
     { choices: [{ delta: { content: "hello" } }] },
@@ -789,6 +916,16 @@ function requestEvents(duck: DuckDb): readonly QueryRow[] {
   return duck.query(
     "SELECT status, error_kind, http_status, reference, model, project_url FROM request_events ORDER BY started_at",
   );
+}
+
+function cachedTokensOf(duck: DuckDb): readonly (number | null)[] {
+  return duck
+    .query("SELECT cached_input_tokens FROM request_events ORDER BY started_at")
+    .map((row) =>
+      row.cached_input_tokens === null || row.cached_input_tokens === undefined
+        ? null
+        : Number(row.cached_input_tokens),
+    );
 }
 
 function projectUrls(duck: DuckDb): readonly (string | null)[] {
@@ -880,16 +1017,17 @@ async function providerWithModel(
   harness: Harness,
   options: {
     readonly name: string;
-    readonly path: string;
+    readonly path?: string;
     readonly slug: string;
     readonly upstreamModel: string;
     readonly origin?: string;
+    readonly kind?: GenericProviderKind;
   },
 ): Promise<Seeded> {
   const provider = await createProvider(harness.providers, "user-1", {
     name: options.name,
-    kind: "openai",
-    baseUrl: (options.origin ?? harness.upstream.origin) + options.path,
+    kind: options.kind ?? "openai",
+    baseUrl: (options.origin ?? harness.upstream.origin) + (options.path ?? ""),
     apiKey: "",
   });
 

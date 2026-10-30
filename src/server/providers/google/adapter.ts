@@ -35,6 +35,7 @@ import {
 const UsageSchema = v.object({
   promptTokenCount: v.optional(v.nullable(v.number())),
   candidatesTokenCount: v.optional(v.nullable(v.number())),
+  cachedContentTokenCount: v.optional(v.nullable(v.number())),
 });
 
 const PartSchema = v.object({
@@ -371,6 +372,7 @@ function callOf(call: NonNullable<Part["functionCall"]>, index: number): ToolCal
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {
   return {
     inputTokens: usage?.promptTokenCount ?? null,
+    cachedInputTokens: usage?.cachedContentTokenCount ?? null,
     outputTokens: usage?.candidatesTokenCount ?? null,
   };
 }

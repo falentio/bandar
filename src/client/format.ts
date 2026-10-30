@@ -25,8 +25,8 @@ export function formatMs(value: number | null): string {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`;
 }
 
-export function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
+export function formatPercent(value: number | null): string {
+  return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
 /**

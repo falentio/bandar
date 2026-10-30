@@ -1,5 +1,5 @@
 import * as v from "valibot";
-import { ProviderUsageSchema } from "./analytics";
+import { AnalyticsSchema } from "./analytics";
 import { MAX_UPSTREAM_MODEL_LENGTH, ModelSlugSchema, SlugSchema } from "./slugs";
 
 // Generic wires are the kinds a user can add as a custom provider.
@@ -182,7 +182,7 @@ export const ProviderListSchema = v.object({
 
 export const ProviderDetailSchema = v.object({
   provider: ProviderSchema,
-  usage: ProviderUsageSchema,
+  usage: AnalyticsSchema,
 });
 
 const ModelLabelSchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(100));

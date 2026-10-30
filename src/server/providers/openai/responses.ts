@@ -29,6 +29,9 @@ import type {
 const UsageSchema = v.object({
   input_tokens: v.optional(v.nullable(v.number())),
   output_tokens: v.optional(v.nullable(v.number())),
+  input_tokens_details: v.optional(
+    v.nullable(v.object({ cached_tokens: v.optional(v.nullable(v.number())) })),
+  ),
 });
 
 const ErrorSchema = v.object({ message: v.optional(v.string()) });
@@ -443,6 +446,7 @@ function failureOf(response: v.InferOutput<typeof ResponseSchema>, label: string
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {
   return {
     inputTokens: usage?.input_tokens ?? null,
+    cachedInputTokens: usage?.input_tokens_details?.cached_tokens ?? null,
     outputTokens: usage?.output_tokens ?? null,
   };
 }

@@ -47,10 +47,12 @@ export const AnalyticsSummarySchema = v.object({
   requests: v.number(),
   errors: v.number(),
   errorRate: v.number(),
+  cacheHitRate: v.nullable(v.number()),
   inputTokens: v.number(),
   outputTokens: v.number(),
   totalTokens: v.number(),
   avgTokensPerDay: v.number(),
+  avgTokensPerRequest: v.nullable(v.number()),
   avgTps: v.nullable(v.number()),
   avgTtftMs: v.nullable(v.number()),
   p50DurationMs: v.nullable(v.number()),
@@ -81,21 +83,6 @@ export const AnalyticsSchema = v.object({
   summary: AnalyticsSummarySchema,
   daily: v.array(DailyUsageSchema),
   models: v.array(ModelUsageSchema),
-});
-
-export const ProviderUsageSchema = v.object({
-  days: v.number(),
-  requests: v.number(),
-  errors: v.number(),
-  errorRate: v.number(),
-  inputTokens: v.number(),
-  outputTokens: v.number(),
-  totalTokens: v.number(),
-  avgTokensPerDay: v.number(),
-  avgTps: v.nullable(v.number()),
-  avgTtftMs: v.nullable(v.number()),
-  costUsd: v.number(),
-  lastRequestAt: v.nullable(v.string()),
 });
 
 export const RequestEventSchema = v.object({
@@ -147,8 +134,6 @@ export type Analytics = v.InferOutput<typeof AnalyticsSchema>;
 export type AnalyticsFilterDimension = (typeof ANALYTICS_FILTER_DIMENSIONS)[number];
 
 export type AnalyticsFilters = Readonly<Record<AnalyticsFilterDimension, readonly string[]>>;
-
-export type ProviderUsage = v.InferOutput<typeof ProviderUsageSchema>;
 
 export type RequestEvent = v.InferOutput<typeof RequestEventSchema>;
 

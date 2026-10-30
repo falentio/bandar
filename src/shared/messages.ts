@@ -92,7 +92,9 @@ export type MessagesRejection = {
 };
 
 export type Accepted<T> = { readonly ok: true; readonly value: T };
+
 export type Rejected = { readonly ok: false; readonly rejection: MessagesRejection };
+
 export type Normalized<T> = Accepted<T> | Rejected;
 
 export function normalizeMessages(request: MessagesRequest): Normalized<NormalizedMessages> {

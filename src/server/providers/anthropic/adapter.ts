@@ -343,6 +343,7 @@ function toolChoiceOf(choice: Exclude<ToolChoice, { mode: "none" }>): AnthropicT
     }
   }
 }
+
 function callsOf(blocks: readonly ContentBlock[], label: string): readonly ToolCall[] {
   const calls: ToolCall[] = [];
 

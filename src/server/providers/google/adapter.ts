@@ -336,6 +336,7 @@ function toolConfigOf(choice: ToolChoice): NonNullable<ChatBody["toolConfig"]> {
     }
   }
 }
+
 function partsOf(candidate: v.InferOutput<typeof CandidateSchema>): readonly Part[] {
   return candidate.content?.parts ?? [];
 }

@@ -336,6 +336,7 @@ describe("the messages wire", () => {
     const harness = await harnessOn("anthropic", (call) => {
       // SAFETY: the fake upstream records the JSON body the adapter posted.
       const body = call.body as { messages: { content: unknown }[] };
+
       const answered = body.messages.some((message) =>
         JSON.stringify(message.content).includes("tool_result"),
       );
@@ -417,6 +418,7 @@ describe("the genai wire", () => {
     const harness = await harnessOn("google", (call) => {
       // SAFETY: the fake upstream records the JSON body the adapter posted.
       const body = call.body as { contents: { parts: unknown[] }[] };
+
       const answered = body.contents.some((turn) =>
         JSON.stringify(turn.parts).includes("functionResponse"),
       );
@@ -521,6 +523,7 @@ describe("streaming tool calls", () => {
 
     const text = await response.text();
     const chunks = chatChunks(text).map((chunk) => v.parse(StreamChunkSchema, chunk));
+
     const deltas = chunks.flatMap((chunk) =>
       chunk.choices.flatMap((choice) => choice.delta.tool_calls ?? []),
     );
@@ -616,6 +619,7 @@ describe("streaming tool calls", () => {
     const chunks = chatChunks(await response.text()).map((chunk) =>
       v.parse(StreamChunkSchema, chunk),
     );
+
     const deltas = chunks.flatMap((chunk) =>
       chunk.choices.flatMap((choice) => choice.delta.tool_calls ?? []),
     );

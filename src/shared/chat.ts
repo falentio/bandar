@@ -95,6 +95,7 @@ function turnOf(message: ChatMessage, at: string): Normalized<ConversationMessag
 
     case "assistant": {
       const calls = (message.tool_calls ?? []).map(callPart);
+
       const parts: MessagePart[] =
         calls.length > 0 && text.value === "" ? calls : [{ type: "text", text: text.value }];
 

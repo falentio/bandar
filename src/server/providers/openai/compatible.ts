@@ -199,6 +199,7 @@ export function chatAdapter<K extends ProviderKind>({
 
         for (const fragment of choice.delta.tool_calls ?? []) {
           const index = fragment.index ?? 0;
+
           const draft = drafts.get(index) ?? {
             id: null,
             name: null,

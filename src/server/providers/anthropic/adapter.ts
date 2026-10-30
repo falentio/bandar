@@ -306,12 +306,15 @@ function contentOf(parts: readonly MessagePart[]): string | RequestBlock[] {
       }
 
       case "tool_result": {
-        blocks.push({
+        const block: RequestBlock = {
           type: "tool_result",
           tool_use_id: part.result.toolCallId,
           content: part.result.content,
-          ...(part.result.isError ? { is_error: true } : {}),
-        });
+        };
+
+        if (part.result.isError) block.is_error = true;
+
+        blocks.push(block);
         break;
       }
     }

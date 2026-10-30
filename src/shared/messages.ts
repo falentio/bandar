@@ -62,7 +62,7 @@ export function normalizeMessages(request: MessagesRequest): MessagesNormalizati
     ok: true,
     value: {
       system: system.value,
-      messages: messages.value.map(({ role, text }) => ({ role, text })),
+      messages: messages.value,
     },
   };
 }
@@ -73,7 +73,7 @@ export function promptText({ system, messages }: NormalizedMessages): string {
     .join("\n");
 }
 
-export function textOf(
+function textOf(
   content: Content | undefined,
   at: string,
 ):

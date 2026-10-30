@@ -7,6 +7,7 @@ import type {
   ProviderAuthMode,
   ProviderKind,
 } from "../../shared/providers";
+import type { JsonValue } from "../../shared/json";
 import {
   ToolParametersSchema,
   type ConversationMessage,
@@ -64,22 +65,26 @@ export function finishOf(reason: string | null, toolCalls: readonly ToolCall[]):
   return "tool_calls";
 }
 
-/**
- * Canonical arguments are raw JSON text, so the three sites that need an object parse here and
- * say whose contract broke: what a client sent is its own bad request, what a model emitted is not.
- */
-export function jsonObjectOf(call: ToolCall, kind: "invalid_request" | "protocol"): ToolParameters {
-  let parsed: unknown = null;
-
+/** The arguments text as the JSON it holds; what a model emits is not always JSON. */
+function jsonValueOf(call: ToolCall, kind: "invalid_request" | "protocol"): JsonValue {
   try {
-    parsed = JSON.parse(call.arguments);
+    const value: JsonValue = JSON.parse(call.arguments);
+
+    return value;
   } catch {
     throw new UpstreamError(
       `tool call ${call.id} (${call.name}) has arguments that are not JSON`,
       kind,
     );
   }
+}
 
+/**
+ * Canonical arguments are raw JSON text, so the three sites that need an object parse here and
+ * say whose contract broke: what a client sent is its own bad request, what a model emitted is not.
+ */
+export function jsonObjectOf(call: ToolCall, kind: "invalid_request" | "protocol"): ToolParameters {
+  const parsed = jsonValueOf(call, kind);
   const object = v.safeParse(ToolParametersSchema, parsed);
 
   if (!object.success || Array.isArray(parsed))

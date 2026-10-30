@@ -60,7 +60,7 @@ export type ConversationMessage = {
 };
 
 /** What a tool with no declared parameters means on every wire. */
-export const DEFAULT_TOOL_PARAMETERS: ToolParameters = { type: "object", properties: {} };
+export const DEFAULT_TOOL_PARAMETERS = { type: "object", properties: {} } satisfies ToolParameters;
 
 /** Folds neighbouring text parts into one, joining their text with the separator the caller's wire uses. */
 export function coalesceText(

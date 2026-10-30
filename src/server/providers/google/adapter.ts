@@ -1,5 +1,14 @@
 import * as v from "valibot";
-import { textOfParts } from "../../../shared/conversation";
+import {
+  textOfParts,
+  toolNamesOf,
+  toolResultText,
+  type MessagePart,
+  type ToolChoice,
+  type ToolDefinition,
+  type ToolParameters,
+  type ToolResult,
+} from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -12,8 +21,9 @@ import {
 } from "../http";
 import {
   UpstreamError,
+  jsonObjectOf,
   type AdapterInput,
-  type CanonicalRequest,
+  type CanonicalMessage,
   type CanonicalResult,
   type CanonicalStreamEvent,
   type CanonicalUsage,
@@ -40,7 +50,18 @@ const ResponseSchema = v.object({
   error: v.optional(v.object({ message: v.optional(v.string()) })),
 });
 
-type Content = { role: "user" | "model"; parts: { text: string }[] };
+type RequestPart =
+  | { text: string }
+  | { functionCall: { name: string; args: ToolParameters } }
+  | { functionResponse: { name: string; response: ToolParameters } };
+
+type Content = { role: "user" | "model"; parts: RequestPart[] };
+
+type FunctionDeclaration = {
+  name: string;
+  description?: string;
+  parameters: ToolParameters;
+};
 
 type ChatBody = {
   contents: Content[];
@@ -50,6 +71,10 @@ type ChatBody = {
     topP?: number;
     maxOutputTokens?: number;
     stopSequences?: string[];
+  };
+  tools?: { functionDeclarations: FunctionDeclaration[] }[];
+  toolConfig?: {
+    functionCallingConfig: { mode: "AUTO" | "ANY" | "NONE"; allowedFunctionNames?: string[] };
   };
 };
 
@@ -188,28 +213,100 @@ function bodyFor(input: AdapterInput): ChatBody {
 
   if (Object.keys(config).length > 0) body.generationConfig = config;
 
+  if (input.request.tools.length > 0)
+    body.tools = [{ functionDeclarations: input.request.tools.map(declarationOf) }];
+
+  if (input.request.toolChoice !== null)
+    body.toolConfig = toolConfigOf(input.request.toolChoice);
+
   return body;
 }
 
-function contentsOf(messages: CanonicalRequest["messages"]): Content[] {
+function contentsOf(messages: readonly CanonicalMessage[]): Content[] {
+  const names = toolNamesOf(messages);
   const contents: Content[] = [];
 
   for (const message of messages) {
     if (message.role === "system") continue;
 
-    const role = message.role === "assistant" ? "model" : "user";
+    const role: Content["role"] = message.role === "assistant" ? "model" : "user";
     const last = contents.at(-1);
+    const turn: Content = last?.role === role ? last : { role, parts: [] };
 
-    if (last !== undefined && last.role === role) {
-      last.parts.push({ text: textOfParts(message.content) });
-    } else {
-      contents.push({ role, parts: [{ text: textOfParts(message.content) }] });
-    }
+    if (last?.role !== role) contents.push(turn);
+
+    for (const part of message.content) turn.parts.push(requestPartOf(part, names));
   }
 
   return contents;
 }
 
+function requestPartOf(part: MessagePart, names: ReadonlyMap<string, string>): RequestPart {
+  switch (part.type) {
+    case "text": {
+      return { text: part.text };
+    }
+
+    case "tool_call": {
+      return {
+        functionCall: {
+          name: part.call.name,
+          args: jsonObjectOf(part.call, "invalid_request"),
+        },
+      };
+    }
+
+    case "tool_result": {
+      return {
+        functionResponse: {
+          name: nameOf(names, part.result),
+          response: { result: toolResultText(part.result) },
+        },
+      };
+    }
+  }
+}
+
+/** This wire addresses a result by name, so a call the history never made cannot be answered. */
+function nameOf(names: ReadonlyMap<string, string>, result: ToolResult): string {
+  const name = names.get(result.toolCallId);
+
+  if (name === undefined)
+    throw new UpstreamError(
+      "google cannot address the tool result for call " + result.toolCallId + ": no earlier turn called it",
+      "invalid_request",
+    );
+
+  return name;
+}
+
+function declarationOf(tool: ToolDefinition): FunctionDeclaration {
+  const declaration: FunctionDeclaration = { name: tool.name, parameters: tool.parameters };
+
+  if (tool.description !== null) declaration.description = tool.description;
+
+  return declaration;
+}
+
+function toolConfigOf(choice: ToolChoice): NonNullable<ChatBody["toolConfig"]> {
+  switch (choice.mode) {
+    case "auto": {
+      return { functionCallingConfig: { mode: "AUTO" } };
+    }
+
+    case "none": {
+      return { functionCallingConfig: { mode: "NONE" } };
+    }
+
+    case "required": {
+      return { functionCallingConfig: { mode: "ANY" } };
+    }
+
+    case "tool": {
+      return { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [choice.name] } };
+    }
+  }
+}
 function textOf(candidate: v.InferOutput<typeof CandidateSchema>): string {
   return (candidate.content?.parts ?? []).map((part) => part.text ?? "").join("");
 }

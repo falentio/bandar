@@ -1,5 +1,12 @@
 import * as v from "valibot";
-import { textOfParts } from "../../../shared/conversation";
+import {
+  coalesceText,
+  textOfParts,
+  type MessagePart,
+  type ToolChoice,
+  type ToolDefinition,
+  type ToolParameters,
+} from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -12,8 +19,9 @@ import {
 } from "../http";
 import {
   UpstreamError,
+  jsonObjectOf,
   type AdapterInput,
-  type CanonicalRequest,
+  type CanonicalMessage,
   type CanonicalResult,
   type CanonicalStreamEvent,
   type CanonicalUsage,
@@ -45,7 +53,23 @@ const StreamSchema = v.object({
   error: v.optional(v.object({ message: v.optional(v.string()) })),
 });
 
-type MessageBody = { role: "user" | "assistant"; content: string };
+type RequestBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: ToolParameters }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+
+type MessageBody = { role: "user" | "assistant"; content: string | RequestBlock[] };
+
+type AnthropicToolBody = {
+  name: string;
+  description?: string;
+  input_schema: ToolParameters;
+};
+
+type AnthropicToolChoiceBody =
+  | { type: "auto" }
+  | { type: "any" }
+  | { type: "tool"; name: string };
 
 type ChatBody = {
   model: string;
@@ -56,6 +80,8 @@ type ChatBody = {
   temperature?: number;
   top_p?: number;
   stop_sequences?: string[];
+  tools?: readonly AnthropicToolBody[];
+  tool_choice?: AnthropicToolChoiceBody;
 };
 
 export type AnthropicOptions<K extends ProviderKind> = {
@@ -193,28 +219,96 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
 
   if (input.request.stop !== undefined) body.stop_sequences = [...input.request.stop];
 
+  const toolChoice = input.request.toolChoice;
+
+  // No pinned anthropic-version promises a "none" mode, and omitting the definitions says the same.
+  if (input.request.tools.length > 0 && toolChoice?.mode !== "none")
+    body.tools = input.request.tools.map(toolBodyOf);
+
+  if (toolChoice !== null && toolChoice.mode !== "none")
+    body.tool_choice = toolChoiceOf(toolChoice);
+
   return body;
 }
 
-function conversationOf(messages: CanonicalRequest["messages"]): MessageBody[] {
-  const conversation: MessageBody[] = [];
+function conversationOf(messages: readonly CanonicalMessage[]): MessageBody[] {
+  const turns: { role: "user" | "assistant"; parts: MessagePart[] }[] = [];
 
   for (const message of messages) {
     if (message.role === "system") continue;
 
-    const text = textOfParts(message.content);
-    const last = conversation.at(-1);
+    const last = turns.at(-1);
 
-    if (last !== undefined && last.role === message.role) {
-      last.content += `\n\n${text}`;
-    } else {
-      conversation.push({ role: message.role, content: text });
+    if (last !== undefined && last.role === message.role) last.parts.push(...message.content);
+    else turns.push({ role: message.role, parts: [...message.content] });
+  }
+
+  return turns.map((turn) => ({ role: turn.role, content: contentOf(turn.parts) }));
+}
+
+/** A text-only turn stays the plain string this wire received before tools existed. */
+function contentOf(parts: readonly MessagePart[]): string | RequestBlock[] {
+  const coalesced = coalesceText(parts, "\n\n");
+
+  if (coalesced.every((part) => part.type === "text")) return textOfParts(coalesced);
+
+  const blocks: RequestBlock[] = [];
+
+  for (const part of coalesced) {
+    switch (part.type) {
+      case "text": {
+        if (part.text !== "") blocks.push({ type: "text", text: part.text });
+        break;
+      }
+
+      case "tool_call": {
+        blocks.push({
+          type: "tool_use",
+          id: part.call.id,
+          name: part.call.name,
+          input: jsonObjectOf(part.call, "invalid_request"),
+        });
+        break;
+      }
+
+      case "tool_result": {
+        blocks.push({
+          type: "tool_result",
+          tool_use_id: part.result.toolCallId,
+          content: part.result.content,
+          ...(part.result.isError ? { is_error: true } : {}),
+        });
+        break;
+      }
     }
   }
 
-  return conversation;
+  return blocks;
 }
 
+function toolBodyOf(tool: ToolDefinition): AnthropicToolBody {
+  const body: AnthropicToolBody = { name: tool.name, input_schema: tool.parameters };
+
+  if (tool.description !== null) body.description = tool.description;
+
+  return body;
+}
+
+function toolChoiceOf(choice: Exclude<ToolChoice, { mode: "none" }>): AnthropicToolChoiceBody {
+  switch (choice.mode) {
+    case "auto": {
+      return { type: "auto" };
+    }
+
+    case "required": {
+      return { type: "any" };
+    }
+
+    case "tool": {
+      return { type: "tool", name: choice.name };
+    }
+  }
+}
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {
   return {
     inputTokens: usage?.input_tokens ?? null,

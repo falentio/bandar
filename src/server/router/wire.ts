@@ -1,3 +1,4 @@
+import type { ToolCall } from "../../shared/conversation";
 import type { CanonicalResult, CanonicalUsage } from "../providers/types";
 
 export function openAiError(
@@ -21,18 +22,17 @@ export type CompletionInput = {
 };
 
 export function completionResponse(input: CompletionInput): Response {
+  const message: CompletionMessage = { role: "assistant", content: input.result.text };
+
+  if (input.result.toolCalls.length > 0)
+    message.tool_calls = input.result.toolCalls.map(toolCallBody);
+
   const body: CompletionBody = {
     id: input.id,
     object: "chat.completion",
     created: input.created,
     model: input.model,
-    choices: [
-      {
-        index: 0,
-        message: { role: "assistant", content: input.result.text },
-        finish_reason: input.result.finishReason ?? "stop",
-      },
-    ],
+    choices: [{ index: 0, message, finish_reason: input.result.finishReason ?? "stop" }],
   };
 
   const usage = usageBody(input.result.usage);
@@ -58,6 +58,19 @@ export type UsageBody = {
   total_tokens: number;
 };
 
+/** One assistant tool call as this dialect spells it on the completed message. */
+export type ToolCallBody = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+type CompletionMessage = {
+  role: "assistant";
+  content: string;
+  tool_calls?: ToolCallBody[];
+};
+
 type CompletionBody = {
   id: string;
   object: "chat.completion";
@@ -65,11 +78,15 @@ type CompletionBody = {
   model: string;
   choices: {
     index: number;
-    message: { role: "assistant"; content: string };
+    message: CompletionMessage;
     finish_reason: string;
   }[];
   usage?: UsageBody;
 };
+
+function toolCallBody(call: ToolCall): ToolCallBody {
+  return { id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } };
+}
 
 /** The response frames one ingress dialect writes into a streamed chat. */
 export type ChatStreamWriter = {

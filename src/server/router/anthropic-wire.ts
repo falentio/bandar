@@ -1,4 +1,4 @@
-import type { CanonicalUsage } from "../providers/types";
+import { jsonObjectOf, type CanonicalUsage } from "../providers/types";
 import type { ChatStreamInput, ChatStreamWriter, ChatWire, CompletionInput } from "./wire";
 
 /** Characters per token for the count_tokens estimate. It is an estimate, not a tokenizer. */
@@ -23,14 +23,33 @@ export const anthropicWire: ChatWire = {
 
 type MessageUsage = { readonly input_tokens: number; readonly output_tokens: number };
 
+type MessageBlock =
+  | { readonly type: "text"; readonly text: string }
+  | {
+      readonly type: "tool_use";
+      readonly id: string;
+      readonly name: string;
+      readonly input: Readonly<Record<string, unknown>>;
+    };
+
 function messageResponse({ id, model, result }: CompletionInput): Response {
+  const content: MessageBlock[] = [{ type: "text", text: result.text }];
+
+  for (const call of result.toolCalls)
+    content.push({
+      type: "tool_use",
+      id: call.id,
+      name: call.name,
+      input: jsonObjectOf(call, "protocol"),
+    });
+
   return Response.json(
     {
       id: messageIdOf(id),
       type: "message",
       role: "assistant",
       model,
-      content: [{ type: "text", text: result.text }],
+      content,
       stop_reason: stopReasonOf(result.finishReason),
       stop_sequence: null,
       usage: usageOf(result.usage),

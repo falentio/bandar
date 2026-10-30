@@ -87,6 +87,11 @@ export function toolResultsOf(parts: readonly MessagePart[]): readonly ToolResul
   return parts.flatMap((part) => (part.type === "tool_result" ? [part.result] : []));
 }
 
+/** The flagless wires say a failed tool in the content, rather than in a field they do not have. */
+export function toolResultText(result: ToolResult): string {
+  return result.isError ? `Error: ${result.content}` : result.content;
+}
+
 /** Call id to tool name, from the assistant turns already in the conversation. */
 export function toolNamesOf(messages: readonly ConversationMessage[]): ReadonlyMap<string, string> {
   const names = new Map<string, string>();

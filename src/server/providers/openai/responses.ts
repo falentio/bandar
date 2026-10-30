@@ -1,5 +1,10 @@
 import * as v from "valibot";
-import { textOfParts } from "../../../shared/conversation";
+import {
+  toolResultText,
+  type ToolChoice,
+  type ToolDefinition,
+  type ToolParameters,
+} from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -12,6 +17,7 @@ import {
 } from "../http";
 import type {
   AdapterInput,
+  CanonicalMessage,
   CanonicalResult,
   CanonicalStreamEvent,
   CanonicalUsage,
@@ -50,10 +56,25 @@ const EventSchema = v.object({
   message: v.optional(v.string()),
 });
 
-type InputItem = {
+type InputMessage = {
   role: "system" | "user" | "assistant";
   content: { type: "input_text"; text: string }[];
 };
+
+type InputItem =
+  | InputMessage
+  | { type: "function_call"; call_id: string; name: string; arguments: string }
+  | { type: "function_call_output"; call_id: string; output: string };
+
+type ResponsesToolBody = {
+  type: "function";
+  name: string;
+  description?: string;
+  parameters: ToolParameters;
+};
+
+/** This wire spells a named tool choice flat, unlike the chat wire's nested function object. */
+type ResponsesToolChoiceBody = { type: "function"; name: string };
 
 type ResponsesBody = {
   model: string;
@@ -62,6 +83,8 @@ type ResponsesBody = {
   max_output_tokens?: number;
   temperature?: number;
   top_p?: number;
+  tools?: readonly ResponsesToolBody[];
+  tool_choice?: string | ResponsesToolChoiceBody;
 };
 
 export type ResponsesOptions<K extends ProviderKind> = {
@@ -176,10 +199,7 @@ export function responsesAdapter<K extends ProviderKind>({
 function bodyFor(input: AdapterInput, stream: boolean): ResponsesBody {
   const body: ResponsesBody = {
     model: input.target.upstreamModel,
-    input: input.request.messages.map((message) => ({
-      role: message.role,
-      content: [{ type: "input_text", text: textOfParts(message.content) }],
-    })),
+    input: itemsOf(input.request.messages),
   };
 
   if (stream) body.stream = true;
@@ -190,7 +210,93 @@ function bodyFor(input: AdapterInput, stream: boolean): ResponsesBody {
 
   if (input.request.maxTokens !== undefined) body.max_output_tokens = input.request.maxTokens;
 
+  if (input.request.tools.length > 0) body.tools = input.request.tools.map(toolBodyOf);
+
+  if (input.request.toolChoice !== null) body.tool_choice = toolChoiceOf(input.request.toolChoice);
+
   return body;
+}
+
+/** A call and a result are items of their own here, so a turn becomes several in part order. */
+function itemsOf(messages: readonly CanonicalMessage[]): InputItem[] {
+  const items: InputItem[] = [];
+
+  for (const message of messages) {
+    let text: string[] = [];
+
+    const flush = () => {
+      if (text.length === 0) return;
+
+      items.push({ role: message.role, content: [{ type: "input_text", text: text.join("\n") }] });
+      text = [];
+    };
+
+    for (const part of message.content) {
+      switch (part.type) {
+        case "text": {
+          text.push(part.text);
+          break;
+        }
+
+        case "tool_call": {
+          flush();
+          items.push({
+            type: "function_call",
+            call_id: part.call.id,
+            name: part.call.name,
+            arguments: part.call.arguments,
+          });
+          break;
+        }
+
+        case "tool_result": {
+          flush();
+          items.push({
+            type: "function_call_output",
+            call_id: part.result.toolCallId,
+            output: toolResultText(part.result),
+          });
+          break;
+        }
+      }
+    }
+
+    flush();
+  }
+
+  return items;
+}
+
+function toolBodyOf(tool: ToolDefinition): ResponsesToolBody {
+  const body: ResponsesToolBody = {
+    type: "function",
+    name: tool.name,
+    parameters: tool.parameters,
+  };
+
+  if (tool.description !== null) body.description = tool.description;
+
+  return body;
+}
+
+function toolChoiceOf(choice: ToolChoice): string | ResponsesToolChoiceBody {
+  switch (choice.mode) {
+    case "auto": {
+      return "auto";
+    }
+
+    case "none": {
+      return "none";
+    }
+
+    case "required": {
+      return "required";
+    }
+
+    case "tool": {
+      return { type: "function", name: choice.name };
+    }
+  }
 }
 
 function parseEvent(data: string): v.InferOutput<typeof EventSchema> | null {

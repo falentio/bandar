@@ -6,7 +6,7 @@ export const GATEWAY_SURFACE = {
   chatCompletions: true,
   messages: true,
   responses: false,
-  tools: false,
+  tools: true,
 } as const;
 
 export type GatewayNeed = keyof typeof GATEWAY_SURFACE;

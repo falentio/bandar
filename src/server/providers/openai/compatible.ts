@@ -1,5 +1,13 @@
 import * as v from "valibot";
-import { textOfParts } from "../../../shared/conversation";
+import {
+  textOfParts,
+  toolCallsOf,
+  toolResultText,
+  type ToolCall,
+  type ToolChoice,
+  type ToolDefinition,
+  type ToolParameters,
+} from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   bearerHeaders,
@@ -13,7 +21,7 @@ import {
 } from "../http";
 import type {
   AdapterInput,
-  CanonicalRequest,
+  CanonicalMessage,
   CanonicalResult,
   CanonicalStreamEvent,
   CanonicalUsage,
@@ -48,10 +56,23 @@ const ChunkSchema = v.object({
   error: v.optional(v.object({ message: v.optional(v.string()) })),
 });
 
-type ChatMessageBody = {
-  role: "system" | "user" | "assistant";
-  content: string;
+export type ChatToolBody = {
+  type: "function";
+  function: { name: string; description?: string; parameters: ToolParameters };
 };
+
+type ChatToolChoiceBody = { type: "function"; function: { name: string } };
+
+type ChatToolCallBody = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+type ChatMessageBody =
+  | { role: "system" | "user"; content: string }
+  | { role: "assistant"; content: string; tool_calls?: ChatToolCallBody[] }
+  | { role: "tool"; tool_call_id: string; content: string };
 
 type ChatBody = {
   model: string;
@@ -62,6 +83,8 @@ type ChatBody = {
   top_p?: number;
   max_tokens?: number;
   stop?: readonly string[];
+  tools?: readonly ChatToolBody[];
+  tool_choice?: string | ChatToolChoiceBody;
 };
 
 export type CompatibleOptions<K extends ProviderKind> = {
@@ -164,10 +187,7 @@ export function bearerAdapter<K extends ProviderKind>(
 function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
   const body: ChatBody = {
     model: input.target.upstreamModel,
-    messages: input.request.messages.map((message) => ({
-      role: message.role,
-      content: textOfParts(message.content),
-    })),
+    messages: messagesOf(input.request.messages),
     stream,
   };
 
@@ -181,7 +201,102 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
 
   if (input.request.stop !== undefined) body.stop = input.request.stop;
 
+  if (input.request.tools.length > 0) body.tools = input.request.tools.map(toolBodyOf);
+
+  if (input.request.toolChoice !== null) body.tool_choice = toolChoiceOf(input.request.toolChoice);
+
   return body;
+}
+
+/** One canonical turn becomes one message, or several: a result is its own role on this wire. */
+function messagesOf(messages: readonly CanonicalMessage[]): ChatMessageBody[] {
+  return messages.flatMap((message) =>
+    message.role === "assistant" ? [assistantBody(message)] : flattenedBodies(message),
+  );
+}
+
+function assistantBody(message: CanonicalMessage): ChatMessageBody {
+  const calls = toolCallsOf(message.content);
+  const body: ChatMessageBody = { role: "assistant", content: textOfParts(message.content) };
+
+  if (calls.length > 0) body.tool_calls = calls.map(toolCallBody);
+
+  return body;
+}
+
+/** A result splits the turn: this wire addresses one with a message of its own, at the part's position. */
+function flattenedBodies(message: CanonicalMessage): ChatMessageBody[] {
+  const bodies: ChatMessageBody[] = [];
+  const role = message.role === "system" ? "system" : "user";
+  let text: string[] = [];
+
+  const flush = () => {
+    if (text.length === 0) return;
+
+    bodies.push({ role, content: text.join("\n") });
+    text = [];
+  };
+
+  for (const part of message.content) {
+    switch (part.type) {
+      case "text": {
+        text.push(part.text);
+        break;
+      }
+
+      case "tool_result": {
+        flush();
+        bodies.push({
+          role: "tool",
+          tool_call_id: part.result.toolCallId,
+          content: toolResultText(part.result),
+        });
+        break;
+      }
+
+      case "tool_call": {
+        flush();
+        bodies.push({ role: "assistant", content: "", tool_calls: [toolCallBody(part.call)] });
+        break;
+      }
+    }
+  }
+
+  flush();
+
+  return bodies;
+}
+
+function toolCallBody(call: ToolCall): ChatToolCallBody {
+  return { id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } };
+}
+
+function toolBodyOf(tool: ToolDefinition): ChatToolBody {
+  const fn: ChatToolBody["function"] = { name: tool.name, parameters: tool.parameters };
+
+  if (tool.description !== null) fn.description = tool.description;
+
+  return { type: "function", function: fn };
+}
+
+function toolChoiceOf(choice: ToolChoice): string | ChatToolChoiceBody {
+  switch (choice.mode) {
+    case "auto": {
+      return "auto";
+    }
+
+    case "none": {
+      return "none";
+    }
+
+    case "required": {
+      return "required";
+    }
+
+    case "tool": {
+      return { type: "function", function: { name: choice.name } };
+    }
+  }
 }
 
 function parseChunk(data: string): v.InferOutput<typeof ChunkSchema> | null {

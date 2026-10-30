@@ -209,9 +209,9 @@ describe("status", () => {
     expect(codex.reason).toContain("/v1/responses");
   });
 
-  test("a chat tool names the stall and an Anthropic tool names the rejection", () => {
-    expect(toolStatus(toolById("opencode-v1")).reason).toContain("tool loop stalls");
-    expect(toolStatus(toolById("claude-code")).reason).toContain("422");
+  test("a tool whose path and tools are served is ready", () => {
+    for (const id of ["opencode-v1", "opencode-v2", "pi", "claude-code"] as const)
+      expect(toolStatus(toolById(id)).status, id).toBe("ready");
   });
 
   test("nothing is ready while the gateway drops tools", () => {

@@ -109,6 +109,13 @@ error envelope, its completed response, and its stream frames:
 of `{type: "text", text}` parts. `developer` becomes `system`, and several text
 parts in one message join with a newline, so a pi transcript posts unchanged.
 
+`content` is required, and an empty part array is accepted as an empty turn.
+
+The route reads `model`, `messages`, `stream`, `temperature`, `top_p`,
+`max_tokens` or `max_completion_tokens`, and `stop`. Every other field is
+ignored, including `tools` and `tool_choice`, so a client that sends `tools`
+reaches the model without them.
+
 A part whose type is not `text` is a rejection, never a silent drop. It answers
 422 with the message and `param` naming the part's position:
 

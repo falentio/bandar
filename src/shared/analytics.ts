@@ -85,21 +85,6 @@ export const AnalyticsSchema = v.object({
   models: v.array(ModelUsageSchema),
 });
 
-export const ProviderUsageSchema = v.object({
-  days: v.number(),
-  requests: v.number(),
-  errors: v.number(),
-  errorRate: v.number(),
-  inputTokens: v.number(),
-  outputTokens: v.number(),
-  totalTokens: v.number(),
-  avgTokensPerDay: v.number(),
-  avgTps: v.nullable(v.number()),
-  avgTtftMs: v.nullable(v.number()),
-  costUsd: v.number(),
-  lastRequestAt: v.nullable(v.string()),
-});
-
 export const RequestEventSchema = v.object({
   id: v.string(),
   model: v.string(),
@@ -149,8 +134,6 @@ export type Analytics = v.InferOutput<typeof AnalyticsSchema>;
 export type AnalyticsFilterDimension = (typeof ANALYTICS_FILTER_DIMENSIONS)[number];
 
 export type AnalyticsFilters = Readonly<Record<AnalyticsFilterDimension, readonly string[]>>;
-
-export type ProviderUsage = v.InferOutput<typeof ProviderUsageSchema>;
 
 export type RequestEvent = v.InferOutput<typeof RequestEventSchema>;
 

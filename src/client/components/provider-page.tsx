@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ANALYTICS_RANGES, type ProviderUsage } from "../../shared/analytics";
+import { ANALYTICS_RANGES, type Analytics } from "../../shared/analytics";
 import { type Tag } from "../../shared/tags";
 import {
   BUILT_IN_PROVIDERS,
@@ -33,16 +33,7 @@ import {
 } from "../../shared/providers";
 import { modelLabelOf, modelLabels, modelSecondaryOf } from "../model-labels";
 import { ModelName } from "../model-name";
-import {
-  formatExactTokens,
-  formatMs,
-  formatPercent,
-  formatRate,
-  formatTokens,
-  formatTps,
-  formatUsd,
-  formatWhen,
-} from "../format";
+import { formatExactTokens, formatRate, formatTps, formatWhen } from "../format";
 import { providerApi } from "../api";
 import { describeError, isError } from "../errors";
 import { useProviderDetail } from "../use-provider-detail";
@@ -52,6 +43,7 @@ import { useTags } from "../use-tags";
 import { CredentialsCard } from "./credentials-card";
 import { HealthBadge } from "./health-badge";
 import { EditModelDialog } from "./model-edit-dialog";
+import { OverviewStats } from "./overview-stats";
 import { ProviderLogo } from "./provider-logo";
 
 export const PROVIDER_TABS = ["overview", "settings", "models", "credentials"] as const;
@@ -246,41 +238,20 @@ export function ProviderPage({
   );
 }
 
-function UsageSection({ usage }: { usage: ProviderUsage | null }) {
+function UsageSection({ usage }: { usage: Analytics | null }) {
   if (usage === null) return <Skeleton className="h-24 w-full rounded-xl" />;
 
-  return (
-    <>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat
-          label="Requests"
-          value={formatTokens(usage.requests)}
-          hint={`last ${usage.days} days`}
-        />
-        <Stat
-          label="Tokens"
-          value={formatTokens(usage.totalTokens)}
-          hint={`${formatTokens(usage.inputTokens)} in · ${formatTokens(usage.outputTokens)} out`}
-        />
-        <Stat
-          label="Error rate"
-          value={formatPercent(usage.errorRate)}
-          hint={`${usage.errors} failed`}
-        />
-        <Stat label="Cost" value={formatUsd(usage.costUsd)} hint="priced models only" />
-      </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Avg / day" value={formatTokens(usage.avgTokensPerDay)} />
-        <Stat label="Avg speed" value={formatTps(usage.avgTps)} hint="generation only" />
-        <Stat label="Avg TTFT" value={formatMs(usage.avgTtftMs)} hint="first token" />
-        <Stat
-          label="Last request"
-          value={usage.lastRequestAt === null ? "—" : formatWhen(usage.lastRequestAt)}
-          hint="in this window"
-        />
-      </div>
-    </>
-  );
+  if (usage.summary.requests === 0)
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>No requests to this provider</CardTitle>
+          <CardDescription>No traffic in the last {String(usage.days)} days.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+
+  return <OverviewStats summary={usage.summary} daily={usage.daily} days={usage.days} />;
 }
 
 function SettingsCard({
@@ -853,20 +824,6 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
               </tbody>
             </table>
           </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-1 truncate text-2xl font-semibold tracking-tight">{value}</p>
-        {hint === undefined ? null : (
-          <p className="mt-1 truncate text-xs text-muted-foreground">{hint}</p>
         )}
       </CardContent>
     </Card>

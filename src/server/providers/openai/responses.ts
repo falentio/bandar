@@ -398,7 +398,7 @@ function parseEvent(data: string): v.InferOutput<typeof EventSchema> | null {
 }
 
 function callsOf(output: readonly Output[], label: string): readonly ToolCall[] {
-  return output.filter((item) => item.type === "function_call").map((item) => callOf(item, label));
+  return output.flatMap((item) => (item.type === "function_call" ? [callOf(item, label)] : []));
 }
 
 function callOf(item: Output, label: string): ToolCall {

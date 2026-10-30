@@ -70,20 +70,20 @@ export function createGateway(deps: GatewayDeps) {
         return openAiError(422, text.message, "validation", "invalid_request_error", text.param);
       }
 
+      const caller = await callerOf(deps.auth, request);
+
+      if (caller === null) return unauthorized();
+
       const normalized = normalizeChatMessages(parsed.output.messages);
 
       if (!normalized.ok)
         return openAiError(
-          422,
+          normalized.rejection.status,
           normalized.rejection.message,
           "validation",
           "invalid_request_error",
           normalized.rejection.param,
         );
-
-      const caller = await callerOf(deps.auth, request);
-
-      if (caller === null) return unauthorized();
 
       const input = parsed.output;
 

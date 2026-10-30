@@ -97,10 +97,7 @@ function turnOf(message: ChatMessage, at: string): Normalized<ConversationMessag
     case "assistant": {
       const calls = (message.tool_calls ?? []).map(callPart);
 
-      const parts: MessagePart[] =
-        calls.length > 0 && text.value === "" ? calls : [{ type: "text", text: text.value }];
-
-      return turn("assistant", coalesceText(parts, "\n"));
+      return turn("assistant", coalesceText(assistantParts(text.value, calls), "\n"));
     }
 
     case "tool": {
@@ -118,6 +115,13 @@ function turnOf(message: ChatMessage, at: string): Normalized<ConversationMessag
       ]);
     }
   }
+}
+
+/** A turn that spoke and then called keeps both: OpenAI sends them as siblings, not alternatives. */
+function assistantParts(text: string, calls: readonly MessagePart[]): MessagePart[] {
+  if (calls.length === 0) return [{ type: "text", text }];
+
+  return text === "" ? [...calls] : [{ type: "text", text }, ...calls];
 }
 
 function callPart(call: v.InferOutput<typeof ChatToolCallSchema>): MessagePart {

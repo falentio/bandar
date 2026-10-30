@@ -247,6 +247,53 @@ describe("the chat wire", () => {
     });
   });
 
+  test("an assistant turn that spoke and then called keeps both", async () => {
+    const harness = await harnessOn("openai", () =>
+      json({
+        choices: [{ message: { role: "assistant", content: "a list" }, finish_reason: "stop" }],
+      }),
+    );
+
+    const response = await postChat(harness.gateway, {
+      model: "fast",
+      messages: [
+        { role: "user", content: "what is in ./src?" },
+        {
+          role: "assistant",
+          content: "Let me look.",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "read_file", arguments: ARGUMENTS },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "chat.ts" },
+      ],
+      tools: [READ_FILE],
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      messages: [
+        { role: "user", content: "what is in ./src?" },
+        {
+          role: "assistant",
+          content: "Let me look.",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "read_file", arguments: ARGUMENTS },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "chat.ts" },
+      ],
+    });
+  });
+
   test("keeps length on a truncated call instead of calling it a tool turn", async () => {
     const harness = await harnessOn("openai", () =>
       json({

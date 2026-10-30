@@ -17,6 +17,8 @@ import { ensureBuiltInProviders } from "../providers/seeding";
 import { createSealer } from "../seal";
 import { createTag, setTagModels } from "../tags";
 import { runChat, type ChatDeps, type ChatInput } from "./chat";
+import type { Auth } from "../auth";
+import { createGateway } from "../gateway";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 const DUCK_DIR = fileURLToPath(new URL("../../../duckdb", import.meta.url));
@@ -547,6 +549,114 @@ describe("runChat recording", () => {
     expect(sessionIds(harness.deps.duck)).toEqual([null]);
   });
 });
+
+describe("chat ingress", () => {
+  async function gatewayFor(harness: Harness) {
+    const provider = await createProvider(harness.providers, "user-1", {
+      name: "Primary",
+      kind: "openai",
+      baseUrl: harness.upstream.origin,
+      apiKey: "",
+    });
+
+    await addProviderModel(harness.providers, "user-1", provider.id, {
+      upstreamModel: "m",
+      slug: "fast",
+    });
+    await addCredential(harness.providers, provider.id, "primary", "key");
+
+    return createGateway({ ...harness.deps, auth });
+  }
+
+  async function post(gateway: ReturnType<typeof createGateway>, body: unknown): Promise<Response> {
+    return gateway.handle(
+      new Request("http://gateway.test/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  test("accepts a pi content-part array and joins its text parts", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      messages: [
+        { role: "system", content: "You are pi." },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is" },
+            { type: "text", text: "2+2" },
+          ],
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      messages: [
+        { role: "system", content: "You are pi." },
+        { role: "user", content: "what is\n2+2" },
+      ],
+    });
+  });
+
+  test("sends the developer role as system", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      messages: [
+        { role: "developer", content: "You are pi." },
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      messages: [
+        { role: "system", content: "You are pi." },
+        { role: "user", content: "hi" },
+      ],
+    });
+  });
+
+  test("rejects a non-text part at its path", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+          ],
+        },
+      ],
+    });
+
+    const body = v.parse(
+      v.object({ error: v.object({ message: v.string(), param: v.nullable(v.string()) }) }),
+      await response.json(),
+    );
+
+    expect(response.status).toBe(422);
+    expect(body.error.param).toBe("messages.0.content.1");
+    expect(body.error.message).toContain("image_url");
+    expect(harness.upstream.calls).toHaveLength(0);
+  });
+});
+
+const auth = {
+  handler: () => Promise.resolve(new Response(null)),
+  getSession: () => Promise.resolve(null),
+  verifyApiKey: () => Promise.resolve({ userId: "user-1", keyId: "key-1" }),
+} satisfies Auth;
 
 function chatInput(
   ref: string,

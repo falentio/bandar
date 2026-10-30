@@ -848,13 +848,20 @@ function namedNames(deltas: readonly NonNullable<ToolDelta>[number][]): readonly
   );
 }
 
+/** A frame's data as the JSON value it parsed to; JSON.parse itself types as any. */
+function parsedJson(text: string): JsonValue {
+  const value: JsonValue = JSON.parse(text);
+
+  return value;
+}
+
 function chatChunks(text: string): readonly unknown[] {
   return text
     .split("\n\n")
     .filter((block) => block.trim() !== "")
     .map((block) => block.replace(/^data: /u, ""))
     .filter((data) => data !== "[DONE]")
-    .map((data) => JSON.parse(data) as unknown);
+    .map((data) => parsedJson(data));
 }
 
 type AnthropicFrame = { readonly event: string; readonly data: unknown };
@@ -868,9 +875,9 @@ function anthropicFrames(text: string): readonly AnthropicFrame[] {
 
       return {
         event: lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) ?? "",
-        data: JSON.parse(
+        data: parsedJson(
           lines.find((line) => line.startsWith("data: "))?.slice("data: ".length) ?? "{}",
-        ) as unknown,
+        ),
       };
     });
 }

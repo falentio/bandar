@@ -54,17 +54,17 @@ export function normalizeMessages(request: MessagesRequest): MessagesNormalizati
 
   if (!system.ok) return system;
 
-  const messages: MessagesTurn[] = [];
+  const messages = textsOf(request.messages);
 
-  for (const [index, message] of request.messages.entries()) {
-    const text = textOf(message.content, `messages.${String(index)}.content`);
+  if (!messages.ok) return messages;
 
-    if (!text.ok) return text;
-
-    messages.push({ role: message.role, text: text.value });
-  }
-
-  return { ok: true, value: { system: system.value, messages } };
+  return {
+    ok: true,
+    value: {
+      system: system.value,
+      messages: messages.value.map(({ role, text }) => ({ role, text })),
+    },
+  };
 }
 
 export function promptText({ system, messages }: NormalizedMessages): string {
@@ -110,6 +110,24 @@ export function textOf(
   }
 
   return { ok: true, value: parts.join("\n") };
+}
+
+export function textsOf<Message extends { readonly content: Content }>(
+  messages: readonly Message[],
+):
+  | { readonly ok: true; readonly value: readonly (Message & { readonly text: string })[] }
+  | { readonly ok: false; readonly rejection: MessagesRejection } {
+  const texts: (Message & { text: string })[] = [];
+
+  for (const [index, message] of messages.entries()) {
+    const text = textOf(message.content, `messages.${String(index)}.content`);
+
+    if (!text.ok) return text;
+
+    texts.push({ ...message, text: text.value });
+  }
+
+  return { ok: true, value: texts };
 }
 
 function unsupported(at: string, type: string): MessagesRejection {

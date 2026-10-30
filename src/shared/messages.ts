@@ -5,7 +5,7 @@ const BlockSchema = v.object({ type: v.string(), text: v.optional(v.string()) })
 
 export const ContentSchema = v.union([v.string(), v.array(BlockSchema)]);
 
-export type Content = v.InferOutput<typeof ContentSchema>;
+type Content = v.InferOutput<typeof ContentSchema>;
 
 export const MessagesRequestSchema = v.object({
   model: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH)),

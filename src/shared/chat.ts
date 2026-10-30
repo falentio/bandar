@@ -7,12 +7,12 @@ export const ChatMessageSchema = v.object({
   content: ContentSchema,
 });
 
-export type ChatTurn = {
+type ChatTurn = {
   readonly role: "system" | "user" | "assistant";
   readonly content: string;
 };
 
-export type ChatNormalization =
+type ChatNormalization =
   | { readonly ok: true; readonly value: readonly ChatTurn[] }
   | { readonly ok: false; readonly rejection: MessagesRejection };
 

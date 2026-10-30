@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,12 +9,14 @@ import {
   type AnalyticsFilterDimension,
   type AnalyticsFilters,
 } from "../../shared/analytics";
+import { githubRepoOf } from "../../shared/project";
 import { PROVIDER_KIND_LABELS, PROVIDER_KINDS, type Provider } from "../../shared/providers";
 import type { Tag } from "../../shared/tags";
 import { modelLabelOf } from "../model-labels";
 import { useAnalyticsValues } from "../use-analytics-values";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
+import { GithubLogo } from "./github-logo";
 
 const SEARCH_THRESHOLD = 8;
 
@@ -22,6 +24,14 @@ type FilterOption = {
   readonly value: string;
   readonly label: string;
   readonly hint?: string;
+  readonly icon?: ReactNode;
+  readonly title?: string;
+};
+
+type TriggerLabel = {
+  readonly text: string;
+  readonly title: string;
+  readonly icon: ReactNode;
 };
 
 type AnalyticsFilterBarProps = {
@@ -77,7 +87,7 @@ export function AnalyticsFilterBar({ filters, onChange }: AnalyticsFilterBarProp
       />
       <FilterMenu
         label="Project"
-        options={valueOptions(projects.values)}
+        options={projectOptions(projects.values)}
         selected={filters.projectUrl}
         onChange={(values) => update("projectUrl", values)}
         onOpen={projects.refresh}
@@ -130,8 +140,9 @@ function FilterMenu({
     >
       <PopoverTrigger asChild>
         <Button variant={selected.length === 0 ? "outline" : "default"} size="sm">
-          <span className="max-w-48 truncate" title={label}>
-            {label}
+          {label.icon}
+          <span className="max-w-48 truncate" title={label.title}>
+            {label.text}
           </span>
           <ChevronDownIcon data-icon="inline-end" className="opacity-60" />
         </Button>
@@ -163,7 +174,10 @@ function FilterMenu({
                 checked={selected.includes(row.value)}
                 onChange={() => toggle(row.value)}
               />
-              <span className="min-w-0 flex-1 truncate">{row.label}</span>
+              {row.icon === undefined ? null : <span className="shrink-0">{row.icon}</span>}
+              <span className="min-w-0 flex-1 truncate" title={row.title ?? row.value}>
+                {row.label}
+              </span>
               {row.hint === undefined ? null : (
                 <span className="shrink-0 text-xs text-muted-foreground">{row.hint}</span>
               )}
@@ -213,24 +227,53 @@ function valueOptions(values: readonly string[]): readonly FilterOption[] {
   return values.map((value) => ({ value, label: value }));
 }
 
+function projectOptions(values: readonly string[]): readonly FilterOption[] {
+  return values.map((url) => {
+    const repo = githubRepoOf(url);
+
+    if (repo === null) return { value: url, label: withoutScheme(url), title: url };
+
+    return {
+      value: url,
+      label: `${repo.owner}/${repo.repo}`,
+      title: url,
+      icon: <GithubLogo />,
+    };
+  });
+}
+
+function withoutScheme(url: string): string {
+  return url.replace(/^https?:\/\//, "");
+}
+
 function triggerLabel(
   label: string,
   options: readonly FilterOption[],
   selected: readonly string[],
-): string {
-  if (selected.length === 0) return label;
+): TriggerLabel {
+  if (selected.length === 0) return { text: label, title: label, icon: null };
 
-  if (selected.length > 1) return `${label} (${String(selected.length)})`;
+  if (selected.length > 1) {
+    const text = `${label} (${String(selected.length)})`;
+
+    return { text, title: text, icon: null };
+  }
 
   const [value] = selected;
 
-  if (value === undefined) return label;
+  if (value === undefined) return { text: label, title: label, icon: null };
 
   for (const option of options) {
-    if (option.value === value) return `${label}: ${option.label}`;
+    if (option.value === value) {
+      const text = `${label}: ${option.label}`;
+
+      return { text, title: option.title ?? text, icon: option.icon ?? null };
+    }
   }
 
-  return `${label}: ${value}`;
+  const text = `${label}: ${value}`;
+
+  return { text, title: text, icon: null };
 }
 
 function visibleOptions(

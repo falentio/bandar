@@ -21,12 +21,17 @@ import { createGateway } from "../gateway";
 import type { Auth } from "../auth";
 import type { Compat } from "../../shared/providers";
 import type { ToolCall, ToolResult } from "../../shared/conversation";
+import type { JsonValue } from "../../shared/json";
+import { ChatCompletionRequestSchema } from "../../shared/chat";
+import { MessagesRequestSchema } from "../../shared/messages";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 const DUCK_DIR = fileURLToPath(new URL("../../../duckdb", import.meta.url));
 const DUCK_LIB = fileURLToPath(new URL("../../../vendor/duckdb/libduckdb.so", import.meta.url));
 
-const READ_FILE = {
+type ChatToolInput = NonNullable<v.InferInput<typeof ChatCompletionRequestSchema>["tools"]>[number];
+
+const READ_FILE: ChatToolInput = {
   type: "function",
   function: {
     name: "read_file",
@@ -39,7 +44,7 @@ const ARGUMENTS = '{"path":"./src"}';
 
 const CallSchema = v.object({
   id: v.string(),
-  type: v.string(),
+  type: v.literal("function"),
   function: v.object({ name: v.string(), arguments: v.string() }),
 });
 
@@ -55,6 +60,19 @@ const ChatReplySchema = v.object({
     }),
   ),
 });
+
+type ChatCall = NonNullable<
+  v.InferOutput<typeof ChatReplySchema>["choices"][number]["message"]["tool_calls"]
+>[number];
+
+/** The one tool call the gateway answered, which the client echoes back on its next turn. */
+function firstCall(answer: v.InferOutput<typeof ChatReplySchema>): ChatCall {
+  const call = answer.choices[0]?.message.tool_calls?.[0];
+
+  if (call === undefined) throw new Error("the gateway answered no tool call");
+
+  return call;
+}
 
 const ChatIngressSchema = v.object({
   type: v.literal("message"),
@@ -176,7 +194,7 @@ describe("the chat wire", () => {
     expect(first.status).toBe(200);
 
     const answer = v.parse(ChatReplySchema, await first.json());
-    const call = answer.choices[0]?.message.tool_calls?.[0];
+    const call = firstCall(answer);
 
     expect(answer.choices[0]?.finish_reason).toBe("tool_calls");
     expect(call).toEqual({
@@ -314,7 +332,7 @@ describe("the responses wire", () => {
         {
           role: "assistant",
           content: "",
-          tool_calls: [answer.choices[0]?.message.tool_calls?.[0]],
+          tool_calls: [firstCall(answer)],
         },
         { role: "tool", tool_call_id: "call_9", content: "a list" },
       ],
@@ -447,7 +465,7 @@ describe("the genai wire", () => {
     });
 
     const answer = v.parse(ChatReplySchema, await first.json());
-    const call = answer.choices[0]?.message.tool_calls?.[0];
+    const call = firstCall(answer);
 
     expect(answer.choices[0]?.finish_reason).toBe("tool_calls");
     expect(call?.function).toEqual({ name: "read_file", arguments: ARGUMENTS });
@@ -462,7 +480,7 @@ describe("the genai wire", () => {
       messages: [
         { role: "user", content: "what is in ./src?" },
         { role: "assistant", content: "", tool_calls: [call] },
-        { role: "tool", tool_call_id: call?.id, content: "a list" },
+        { role: "tool", tool_call_id: call.id, content: "a list" },
       ],
       tools: [READ_FILE],
     });
@@ -769,7 +787,10 @@ async function startUpstream(
   return { origin: "http://127.0.0.1:" + String(server.port), calls };
 }
 
-function postChat(gateway: Harness["gateway"], body: unknown): Promise<Response> {
+function postChat(
+  gateway: Harness["gateway"],
+  body: v.InferInput<typeof ChatCompletionRequestSchema>,
+): Promise<Response> {
   return gateway.handle(
     new Request("http://gateway.test/v1/chat/completions", {
       method: "POST",
@@ -779,7 +800,10 @@ function postChat(gateway: Harness["gateway"], body: unknown): Promise<Response>
   );
 }
 
-function postMessages(gateway: Harness["gateway"], body: unknown): Promise<Response> {
+function postMessages(
+  gateway: Harness["gateway"],
+  body: v.InferInput<typeof MessagesRequestSchema>,
+): Promise<Response> {
   return gateway.handle(
     new Request("http://gateway.test/v1/messages", {
       method: "POST",
@@ -789,7 +813,7 @@ function postMessages(gateway: Harness["gateway"], body: unknown): Promise<Respo
   );
 }
 
-function json(body: unknown): Response {
+function json(body: JsonValue): Response {
   return Response.json(body);
 }
 

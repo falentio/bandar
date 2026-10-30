@@ -22,7 +22,11 @@ export const anthropicWire: ChatWire = {
   stream: anthropicStream,
 };
 
-type MessageUsage = { readonly input_tokens: number; readonly output_tokens: number };
+type MessageUsage = {
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+  readonly cache_read_input_tokens?: number;
+};
 
 type MessageBlock =
   | { readonly type: "text"; readonly text: string }
@@ -220,10 +224,12 @@ function messageIdOf(id: string): string {
   return `msg_${id.replaceAll("-", "")}`;
 }
 
+/** This dialect counts input_tokens without its cache reads, so the cached part comes off again. */
 function usageOf(usage: CanonicalUsage): MessageUsage {
   return {
-    input_tokens: usage.inputTokens ?? 0,
+    input_tokens: (usage.inputTokens ?? 0) - (usage.cachedInputTokens ?? 0),
     output_tokens: usage.outputTokens ?? 0,
+    cache_read_input_tokens: usage.cachedInputTokens ?? undefined,
   };
 }
 

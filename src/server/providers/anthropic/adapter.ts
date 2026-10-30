@@ -33,7 +33,11 @@ import {
 const UsageSchema = v.object({
   input_tokens: v.optional(v.nullable(v.number())),
   output_tokens: v.optional(v.nullable(v.number())),
+  cache_read_input_tokens: v.optional(v.nullable(v.number())),
+  cache_creation_input_tokens: v.optional(v.nullable(v.number())),
 });
+
+type Usage = v.InferOutput<typeof UsageSchema>;
 
 const ContentBlockSchema = v.object({
   type: v.string(),
@@ -149,8 +153,7 @@ export function anthropicAdapter<K extends ProviderKind>({
 
       await requireOk(response);
 
-      let inputTokens: number | null = null;
-      let outputTokens: number | null = null;
+      let usage: Usage = {};
       let reason: string | null = null;
       const calls: ToolCall[] = [];
       const blocks = new Map<number, ToolCall>();
@@ -174,10 +177,7 @@ export function anthropicAdapter<K extends ProviderKind>({
 
         const startUsage = parsed.message?.usage;
 
-        if (startUsage !== undefined && startUsage !== null) {
-          inputTokens = startUsage.input_tokens ?? inputTokens;
-          outputTokens = startUsage.output_tokens ?? outputTokens;
-        }
+        if (startUsage !== undefined && startUsage !== null) usage = mergedUsage(usage, startUsage);
 
         if (parsed.type === "content_block_start" && parsed.content_block?.type === "tool_use") {
           const call = callOf(parsed.content_block, label);
@@ -208,16 +208,14 @@ export function anthropicAdapter<K extends ProviderKind>({
             reason = finishReason(parsed.delta.stop_reason);
           }
 
-          if (parsed.usage !== undefined && parsed.usage !== null) {
-            inputTokens = parsed.usage.input_tokens ?? inputTokens;
-            outputTokens = parsed.usage.output_tokens ?? outputTokens;
-          }
+          if (parsed.usage !== undefined && parsed.usage !== null)
+            usage = mergedUsage(usage, parsed.usage);
         }
 
         if (parsed.type === "message_stop") break;
       }
 
-      yield { type: "usage", usage: { inputTokens, outputTokens } };
+      yield { type: "usage", usage: usageOf(usage) };
       yield { type: "finish", reason: finishOf(reason, calls) };
     },
   };
@@ -368,10 +366,27 @@ function callOf(block: ContentBlock, label: string): ToolCall {
   return { id: block.id, name: block.name, arguments: JSON.stringify(block.input ?? {}) };
 }
 
-function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {
+/** This wire counts input_tokens without its cache tiers, so both are added back for the sum. */
+function usageOf(usage: Usage | null | undefined): CanonicalUsage {
+  const input = usage?.input_tokens ?? null;
+  const cached = usage?.cache_read_input_tokens ?? null;
+
   return {
-    inputTokens: usage?.input_tokens ?? null,
+    inputTokens:
+      input === null ? null : input + (cached ?? 0) + (usage?.cache_creation_input_tokens ?? 0),
+    cachedInputTokens: input === null ? null : cached,
     outputTokens: usage?.output_tokens ?? null,
+  };
+}
+
+/** Later stream events repeat the same counters, so a field one omits keeps its earlier value. */
+function mergedUsage(current: Usage, next: Usage): Usage {
+  return {
+    input_tokens: next.input_tokens ?? current.input_tokens,
+    output_tokens: next.output_tokens ?? current.output_tokens,
+    cache_read_input_tokens: next.cache_read_input_tokens ?? current.cache_read_input_tokens,
+    cache_creation_input_tokens:
+      next.cache_creation_input_tokens ?? current.cache_creation_input_tokens,
   };
 }
 

@@ -19,6 +19,7 @@ export type RequestEventInput = {
   readonly errorKind: string | null;
   readonly streamed: boolean;
   readonly inputTokens: number | null;
+  readonly cachedInputTokens: number | null;
   readonly outputTokens: number | null;
   readonly ttftMs: number | null;
   readonly durationMs: number;
@@ -50,8 +51,8 @@ export function recordRequest(db: DuckDb, event: RequestEventInput): void {
     `INSERT INTO request_events (
        id, user_id, api_key_id, provider_id, provider_kind, model, reference, project_url, session_id,
        upstream_model, status, http_status, error_kind, streamed, input_tokens, output_tokens,
-       total_tokens, cost_usd, ttft_ms, duration_ms, tokens_per_second, started_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP)`,
+       cached_input_tokens, total_tokens, cost_usd, ttft_ms, duration_ms, tokens_per_second, started_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP)`,
     [
       sqlText(crypto.randomUUID()),
       sqlText(event.userId),
@@ -69,6 +70,7 @@ export function recordRequest(db: DuckDb, event: RequestEventInput): void {
       sqlBool(event.streamed),
       event.inputTokens === null ? SQL_NULL : sqlInt(event.inputTokens),
       event.outputTokens === null ? SQL_NULL : sqlInt(event.outputTokens),
+      event.cachedInputTokens === null ? SQL_NULL : sqlInt(event.cachedInputTokens),
       totalTokens === null ? SQL_NULL : sqlInt(totalTokens),
       cost === null ? SQL_NULL : sqlReal(cost),
       event.ttftMs === null ? SQL_NULL : sqlInt(Math.round(event.ttftMs)),

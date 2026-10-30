@@ -32,6 +32,9 @@ import type {
 const UsageSchema = v.object({
   prompt_tokens: v.optional(v.nullable(v.number())),
   completion_tokens: v.optional(v.nullable(v.number())),
+  prompt_tokens_details: v.optional(
+    v.nullable(v.object({ cached_tokens: v.optional(v.nullable(v.number())) })),
+  ),
 });
 
 const ToolCallSchema = v.object({
@@ -421,6 +424,7 @@ function callsOf(
 function usageOf(usage: v.InferOutput<typeof UsageSchema> | null | undefined): CanonicalUsage {
   return {
     inputTokens: usage?.prompt_tokens ?? null,
+    cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? null,
     outputTokens: usage?.completion_tokens ?? null,
   };
 }

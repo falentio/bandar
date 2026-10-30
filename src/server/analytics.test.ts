@@ -58,6 +58,7 @@ function event(overrides: Partial<RequestEventInput>): RequestEventInput {
     errorKind: null,
     streamed: true,
     inputTokens: 100,
+    cachedInputTokens: null,
     outputTokens: 50,
     ttftMs: 200,
     durationMs: 1200,

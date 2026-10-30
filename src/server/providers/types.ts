@@ -36,6 +36,8 @@ export type CanonicalRequest = {
 
 export type CanonicalUsage = {
   readonly inputTokens: number | null;
+  /** The part of inputTokens the wire counted as a cache read; null when it reported no split. */
+  readonly cachedInputTokens: number | null;
   readonly outputTokens: number | null;
 };
 

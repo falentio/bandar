@@ -1,9 +1,18 @@
+import * as v from "valibot";
+import { JsonValueSchema, type JsonValue } from "./json";
+
 /** The vocabulary a conversation is made of, independent of any dialect. */
 
 export type MessageRole = "system" | "user" | "assistant";
 
 /** A tool's input schema, verbatim as the client sent it. The canonical layer never inspects it. */
-export type ToolParameters = Readonly<Record<string, unknown>>;
+export type ToolParameters = Readonly<Record<string, JsonValue>>;
+
+/** A tool's input schema as a wire sends it: any JSON object, read no further. */
+export const ToolParametersSchema: v.GenericSchema<ToolParameters> = v.record(
+  v.string(),
+  JsonValueSchema,
+);
 
 export type ToolDefinition = {
   readonly name: string;

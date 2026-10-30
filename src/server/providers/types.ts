@@ -7,13 +7,14 @@ import type {
   ProviderAuthMode,
   ProviderKind,
 } from "../../shared/providers";
-import type {
-  ConversationMessage,
-  ToolCall,
-  ToolCallDraft,
-  ToolChoice,
-  ToolDefinition,
-  ToolParameters,
+import {
+  ToolParametersSchema,
+  type ConversationMessage,
+  type ToolCall,
+  type ToolCallDraft,
+  type ToolChoice,
+  type ToolDefinition,
+  type ToolParameters,
 } from "../../shared/conversation";
 import type { Credential, OAuthCredential } from "../credential";
 
@@ -63,8 +64,6 @@ export function finishOf(reason: string | null, toolCalls: readonly ToolCall[]):
   return "tool_calls";
 }
 
-const JsonObjectSchema = v.record(v.string(), v.unknown());
-
 /**
  * Canonical arguments are raw JSON text, so the three sites that need an object parse here and
  * say whose contract broke: what a client sent is its own bad request, what a model emitted is not.
@@ -81,7 +80,7 @@ export function jsonObjectOf(call: ToolCall, kind: "invalid_request" | "protocol
     );
   }
 
-  const object = v.safeParse(JsonObjectSchema, parsed);
+  const object = v.safeParse(ToolParametersSchema, parsed);
 
   if (!object.success || Array.isArray(parsed))
     throw new UpstreamError(

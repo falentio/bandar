@@ -1,6 +1,7 @@
 import * as v from "valibot";
 import {
   DEFAULT_TOOL_PARAMETERS,
+  ToolParametersSchema,
   coalesceText,
   type ConversationMessage,
   type MessagePart,
@@ -16,7 +17,7 @@ const BlockSchema = v.object({
   text: v.optional(v.string()),
   id: v.optional(v.string()),
   name: v.optional(v.string()),
-  input: v.optional(v.record(v.string(), v.unknown())),
+  input: v.optional(ToolParametersSchema),
   tool_use_id: v.optional(v.string()),
   content: v.optional(v.union([v.string(), v.array(TextBlockSchema)])),
   is_error: v.optional(v.boolean()),
@@ -41,7 +42,7 @@ function blocksOf(content: TextContent): readonly TextBlock[] {
 const AnthropicToolSchema = v.object({
   name: v.pipe(v.string(), v.minLength(1)),
   description: v.optional(v.string()),
-  input_schema: v.optional(v.record(v.string(), v.unknown())),
+  input_schema: v.optional(ToolParametersSchema),
 });
 
 const AnthropicToolChoiceSchema = v.variant("type", [

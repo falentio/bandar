@@ -1,3 +1,4 @@
+import type { ToolParameters } from "../../shared/conversation";
 import { jsonObjectOf, type CanonicalUsage } from "../providers/types";
 import type { ChatStreamInput, ChatStreamWriter, ChatWire, CompletionInput } from "./wire";
 
@@ -29,7 +30,7 @@ type MessageBlock =
       readonly type: "tool_use";
       readonly id: string;
       readonly name: string;
-      readonly input: Readonly<Record<string, unknown>>;
+      readonly input: ToolParameters;
     };
 
 function messageResponse({ id, model, result }: CompletionInput): Response {

@@ -1,6 +1,7 @@
 import * as v from "valibot";
 import {
   DEFAULT_TOOL_PARAMETERS,
+  ToolParametersSchema,
   coalesceText,
   type ConversationMessage,
   type MessagePart,
@@ -14,7 +15,7 @@ import { MAX_MODEL_REF_LENGTH } from "./slugs";
 const ChatFunctionSchema = v.object({
   name: v.pipe(v.string(), v.minLength(1)),
   description: v.optional(v.string()),
-  parameters: v.optional(v.record(v.string(), v.unknown())),
+  parameters: v.optional(ToolParametersSchema),
 });
 
 const ChatToolSchema = v.object({

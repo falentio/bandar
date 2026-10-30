@@ -2660,7 +2660,7 @@ try {
     assert.equal(rows.find((request) => request.status === "success")?.model, "wire-openai");
   });
 
-  await check("POST /v1/messages rejects a tool_use block with 422", async () => {
+  await check("POST /v1/messages carries a tool_use turn and its result", async () => {
     const response = await postMessages({
       model: "wire-openai",
       max_tokens: 64,
@@ -2673,6 +2673,28 @@ try {
             { type: "tool_use", id: "toolu_1", name: "look", input: {} },
           ],
         },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "looked" }],
+        },
+      ],
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  await check("POST /v1/messages still rejects an image block with 422", async () => {
+    const response = await postMessages({
+      model: "wire-openai",
+      max_tokens: 64,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "hello" },
+            { type: "image", source: {} },
+          ],
+        },
       ],
     });
 
@@ -2681,8 +2703,8 @@ try {
     const body = v.parse(MessageErrorSchema, await response.json());
 
     assert.equal(body.error.type, "invalid_request_error");
-    assert.match(body.error.message, /tool_use/);
-    assert.match(body.error.message, /messages\.1\.content\.1/);
+    assert.match(body.error.message, /image/);
+    assert.match(body.error.message, /messages\.0\.content\.1/);
   });
 
   await check(

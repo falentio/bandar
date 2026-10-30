@@ -9,7 +9,12 @@ import { routeAttempt } from "./route";
 import { UpstreamError } from "./types";
 
 /** One token of one model is the cheapest read every wire answers the same way. */
-const PROBE_REQUEST = { messages: [{ role: "user", content: "ping" }], maxTokens: 1 } as const;
+const PROBE_REQUEST = {
+  messages: [{ role: "user", content: [{ type: "text", text: "ping" }] }],
+  tools: [],
+  toolChoice: null,
+  maxTokens: 1,
+} as const;
 
 const NO_MODEL = "add a model to this provider before testing the credential";
 

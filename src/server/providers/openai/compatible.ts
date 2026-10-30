@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { textOfParts } from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   bearerHeaders,
@@ -47,9 +48,14 @@ const ChunkSchema = v.object({
   error: v.optional(v.object({ message: v.optional(v.string()) })),
 });
 
+type ChatMessageBody = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
 type ChatBody = {
   model: string;
-  messages: CanonicalRequest["messages"];
+  messages: ChatMessageBody[];
   stream?: boolean;
   stream_options?: { include_usage: boolean };
   temperature?: number;
@@ -92,6 +98,7 @@ export function chatAdapter<K extends ProviderKind>({
 
       return {
         text: choice.message.content ?? "",
+        toolCalls: [],
         finishReason: choice.finish_reason ?? null,
         usage: usageOf(parsed.output.usage),
       };
@@ -157,7 +164,10 @@ export function bearerAdapter<K extends ProviderKind>(
 function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
   const body: ChatBody = {
     model: input.target.upstreamModel,
-    messages: input.request.messages,
+    messages: input.request.messages.map((message) => ({
+      role: message.role,
+      content: textOfParts(message.content),
+    })),
     stream,
   };
 

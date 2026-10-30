@@ -88,7 +88,12 @@ export function createGateway(deps: GatewayDeps) {
       const input = parsed.output;
 
       const canonical: CanonicalRequest = {
-        messages: normalized.value,
+        messages: normalized.value.map((turn) => ({
+          role: turn.role,
+          content: [{ type: "text", text: turn.content }],
+        })),
+        tools: [],
+        toolChoice: null,
         temperature: input.temperature,
         topP: input.topP,
         maxTokens: input.maxTokens,
@@ -159,13 +164,16 @@ function canonicalRequestOf(
 ): CanonicalRequest {
   const messages: CanonicalMessage[] = [];
 
-  if (normalized.system !== "") messages.push({ role: "system", content: normalized.system });
+  if (normalized.system !== "")
+    messages.push({ role: "system", content: [{ type: "text", text: normalized.system }] });
 
   for (const message of normalized.messages)
-    messages.push({ role: message.role, content: message.text });
+    messages.push({ role: message.role, content: [{ type: "text", text: message.text }] });
 
   return {
     messages,
+    tools: [],
+    toolChoice: null,
     temperature: request.temperature,
     topP: request.top_p,
     maxTokens: request.max_tokens,

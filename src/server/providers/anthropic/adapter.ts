@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { textOfParts } from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -92,6 +93,7 @@ export function anthropicAdapter<K extends ProviderKind>({
 
       return {
         text,
+        toolCalls: [],
         finishReason: finishReason(parsed.output.stop_reason ?? null),
         usage: usageOf(parsed.output.usage),
       };
@@ -166,7 +168,7 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
 
   const system = input.request.messages
     .filter((message) => message.role === "system")
-    .map((message) => message.content)
+    .map((message) => textOfParts(message.content))
     .join("\n\n");
 
   if (conversation.length === 0) {
@@ -200,12 +202,13 @@ function conversationOf(messages: CanonicalRequest["messages"]): MessageBody[] {
   for (const message of messages) {
     if (message.role === "system") continue;
 
+    const text = textOfParts(message.content);
     const last = conversation.at(-1);
 
     if (last !== undefined && last.role === message.role) {
-      last.content += `\n\n${message.content}`;
+      last.content += `\n\n${text}`;
     } else {
-      conversation.push({ role: message.role, content: message.content });
+      conversation.push({ role: message.role, content: text });
     }
   }
 

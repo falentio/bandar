@@ -261,6 +261,11 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
                 break;
               }
 
+              case "tool_call_start":
+              case "tool_call_delta": {
+                break;
+              }
+
               case "usage": {
                 usage = event.usage;
                 break;

@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { textOfParts } from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -86,6 +87,7 @@ export function googleAdapter<K extends ProviderKind>({
 
       return {
         text: textOf(candidate),
+        toolCalls: [],
         finishReason: finishReason(candidate.finishReason ?? null),
         usage: usageOf(parsed.output.usageMetadata),
       };
@@ -160,7 +162,7 @@ function bodyFor(input: AdapterInput): ChatBody {
 
   const system = input.request.messages
     .filter((message) => message.role === "system")
-    .map((message) => message.content)
+    .map((message) => textOfParts(message.content))
     .join("\n\n");
 
   if (contents.length === 0) {
@@ -199,9 +201,9 @@ function contentsOf(messages: CanonicalRequest["messages"]): Content[] {
     const last = contents.at(-1);
 
     if (last !== undefined && last.role === role) {
-      last.parts.push({ text: message.content });
+      last.parts.push({ text: textOfParts(message.content) });
     } else {
-      contents.push({ role, parts: [{ text: message.content }] });
+      contents.push({ role, parts: [{ text: textOfParts(message.content) }] });
     }
   }
 

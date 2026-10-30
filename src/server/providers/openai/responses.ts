@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { textOfParts } from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -97,6 +98,7 @@ export function responsesAdapter<K extends ProviderKind>({
 
       return {
         text: textOf(parsed.output.output),
+        toolCalls: [],
         finishReason: finishReason(parsed.output.status ?? null, reasonOf(parsed.output)),
         usage: usageOf(parsed.output.usage),
       };
@@ -176,7 +178,7 @@ function bodyFor(input: AdapterInput, stream: boolean): ResponsesBody {
     model: input.target.upstreamModel,
     input: input.request.messages.map((message) => ({
       role: message.role,
-      content: [{ type: "input_text", text: message.content }],
+      content: [{ type: "input_text", text: textOfParts(message.content) }],
     })),
   };
 

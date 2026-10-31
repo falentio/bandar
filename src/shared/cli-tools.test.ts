@@ -202,16 +202,13 @@ describe("models", () => {
 });
 
 describe("status", () => {
-  test("a tool missing a served path is blocked and names the path", () => {
-    const codex = toolStatus(toolById("codex"));
+  test("every declared tool is ready, because this build serves every path it needs", () => {
+    for (const tool of CLI_TOOLS) {
+      const missing = tool.needs.filter((need) => !GATEWAY_SURFACE[need]);
 
-    expect(codex.status).toBe("blocked");
-    expect(codex.reason).toContain("/v1/responses");
-  });
-
-  test("a tool whose path and tools are served is ready", () => {
-    for (const id of ["opencode-v1", "opencode-v2", "pi", "claude-code"] as const)
-      expect(toolStatus(toolById(id)).status, id).toBe("ready");
+      expect(missing, tool.id).toEqual([]);
+      expect(toolStatus(tool).status, tool.id).toBe("ready");
+    }
   });
 
   test("nothing is ready while the gateway drops tools", () => {

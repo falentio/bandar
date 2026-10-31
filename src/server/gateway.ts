@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 import * as v from "valibot";
 import { GatewayRequestSchema, normalizeChatMessages, type ModelList } from "../shared/chat";
 import { MessagesRequestSchema, normalizeMessages, promptText } from "../shared/messages";
+import { ResponsesRequestSchema, normalizeResponses } from "../shared/responses";
 import type { ConversationMessage, ToolChoice, ToolDefinition } from "../shared/conversation";
 import { PROJECT_URL_HEADER, projectUrlOf } from "../shared/project";
 import { SESSION_ID_HEADER, sessionIdOf } from "../shared/session-id";
@@ -11,6 +12,7 @@ import type { Reasoning } from "../shared/reasoning";
 import { anthropicError, anthropicWire, estimateInputTokens } from "./router/anthropic-wire";
 import { runChat, type ChatDeps } from "./router/chat";
 import { listModelRefs } from "./router/resolve";
+import { responsesWire } from "./router/responses-wire";
 import { openAiError } from "./router/wire";
 import { issueOf } from "./validation";
 
@@ -104,6 +106,54 @@ export function createGateway(deps: GatewayDeps) {
         request: canonical,
         stream: input.stream,
         signal: request.signal,
+      });
+    })
+    .post("/responses", async ({ body, request }) => {
+      const parsed = v.safeParse(ResponsesRequestSchema, body);
+
+      if (!parsed.success) {
+        const text = issueOf(parsed.issues);
+
+        return openAiError(422, text.message, "validation", "invalid_request_error", text.param);
+      }
+
+      const caller = await callerOf(deps.auth, request);
+
+      if (caller === null) return unauthorized();
+
+      const normalized = normalizeResponses(parsed.output);
+
+      if (!normalized.ok)
+        return openAiError(
+          normalized.rejection.status,
+          normalized.rejection.message,
+          "validation",
+          "invalid_request_error",
+          normalized.rejection.param,
+        );
+
+      const input = parsed.output;
+
+      return runChat(deps, {
+        userId: caller.userId,
+        apiKeyId: caller.keyId,
+        projectUrl: projectUrlOf(request.headers.get(PROJECT_URL_HEADER)),
+        sessionId: sessionIdOf(request.headers.get(SESSION_ID_HEADER)),
+        ref: input.model,
+        request: canonicalRequestOf({
+          messages: normalized.value,
+          system: input.instructions ?? "",
+          tools: input.tools,
+          toolChoice: input.toolChoice,
+          temperature: input.temperature,
+          topP: input.topP,
+          maxTokens: input.maxOutputTokens,
+          stop: input.stop,
+          reasoning: input.reasoning,
+        }),
+        stream: input.stream,
+        signal: request.signal,
+        wire: responsesWire,
       });
     })
     .post("/messages", async ({ body, request }) => {

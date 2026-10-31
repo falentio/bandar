@@ -178,7 +178,7 @@ export const GatewayRequestSchema = v.pipe(
     stop:
       input.stop === undefined ? undefined : Array.isArray(input.stop) ? input.stop : [input.stop],
     tools: (input.tools ?? []).map(toolOf),
-    toolChoice: input.tool_choice === undefined ? null : choiceOf(input.tool_choice),
+    toolChoice: input.tool_choice === undefined ? null : chatChoiceOf(input.tool_choice),
     reasoning: input.reasoning_effort === undefined ? undefined : effort(input.reasoning_effort),
   })),
 );
@@ -201,12 +201,20 @@ function effort(level: ReasoningEffort): Reasoning {
   return { kind: "effort", effort: level };
 }
 
-function choiceOf(choice: v.InferOutput<typeof ChatToolChoiceSchema>): ToolChoice {
+export type ToolChoicePick = "auto" | "none" | "required";
+
+export function choiceOf(choice: ToolChoicePick | { readonly name: string }): ToolChoice {
   if (choice === "auto") return { mode: "auto" };
 
   if (choice === "none") return { mode: "none" };
 
   if (choice === "required") return { mode: "required" };
 
-  return { mode: "tool", name: choice.function.name };
+  return { mode: "tool", name: choice.name };
+}
+
+function chatChoiceOf(choice: v.InferOutput<typeof ChatToolChoiceSchema>): ToolChoice {
+  if (choice === "auto" || choice === "none" || choice === "required") return choiceOf(choice);
+
+  return choiceOf({ name: choice.function.name });
 }

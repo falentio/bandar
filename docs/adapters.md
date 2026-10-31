@@ -105,15 +105,18 @@ wire format changes one adapter file and the routes that name it.
 
 ## Ingress
 
-Two ingress wires reach the canonical shape. `POST /v1/chat/completions` speaks
-the OpenAI chat shape and `POST /v1/messages` speaks the Anthropic Messages
-shape. Both run `runChat`, so model references, tags with failover, credential
-order, cooldowns, and analytics behave the same on either route. A wire owns its
-error envelope, its completed response, and its stream frames:
-`src/server/router/wire.ts` holds `openAiWire` and
-`src/server/router/anthropic-wire.ts` holds `anthropicWire`. Both satisfy
-`ChatWire` and a caller passes one as `ChatInput.wire`; the default is
-`openAiWire`.
+Three ingress wires reach the canonical shape. `POST /v1/chat/completions`
+speaks the OpenAI chat shape, `POST /v1/messages` speaks the Anthropic Messages
+shape, and `POST /v1/responses` speaks the OpenAI Responses shape. All three run
+`runChat`, so model references, tags with failover, credential order, cooldowns,
+and analytics behave the same on any route. A wire owns its error envelope, its
+completed response, and its stream frames: `src/server/router/wire.ts` holds
+`openAiWire`, `src/server/router/anthropic-wire.ts` holds `anthropicWire`, and
+`src/server/router/responses-wire.ts` holds `responsesWire`. Every one satisfies
+`ChatWire` and a caller passes it as `ChatInput.wire`; the default is
+`openAiWire`. `GATEWAY_SURFACE` in `src/shared/cli-tools.ts` records which of the
+three paths this build serves, and a CLI tool whose `needs` the build meets is
+reported ready.
 
 ### OpenAI chat ingress
 
@@ -215,6 +218,87 @@ failure. A missing or unknown gateway key is 401 with
 `type: "authentication_error"`. A stream that fails after its first frame sends
 one `event: error` frame with the same envelope and then closes, because the
 status line is already sent.
+
+### OpenAI Responses ingress
+
+`POST /v1/responses` is what the Codex CLI posts when its provider block sets
+`wire_api = "responses"`. It accepts these fields:
+
+| Field                                               | Meaning                                                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `model`                                             | An address, `tags/<slug>`, or `<provider>/<model>`, resolved by `resolvePlan`                |
+| `input`                                             | A string, or a list of items; see the table below                                            |
+| `instructions`                                      | Read as system text; see the rewrite note                                                    |
+| `stream`                                            | `true` answers SSE, `false` or absent answers one response object                            |
+| `max_output_tokens`, `temperature`, `top_p`, `stop` | Passed through as `maxTokens`, `temperature`, `topP`, `stop`                                 |
+| `tools`                                             | Flat `{type: "function", name, description?, parameters?}`, forwarded to every upstream wire |
+| `tool_choice`                                       | `auto`, `none`, `required`, or `{type: "function", name}`                                    |
+| `reasoning.effort`                                  | The seven-rung ladder, becoming `{kind: "effort"}`                                           |
+
+`input` items become canonical turns:
+
+| Item                                                | Turn                                                            |
+| --------------------------------------------------- | --------------------------------------------------------------- |
+| `"text"`                                            | one `user` turn with one text part                              |
+| `{type: "message", role, content}`                  | that turn; text parts join with a newline                       |
+| `{role, content}` with no `type`                    | the same message item, which is what bandar's own egress writes |
+| `{type: "function_call", call_id, name, arguments}` | an `assistant` turn with one `tool_call` part                   |
+| `{type: "function_call_output", call_id, output}`   | a `user` turn with one `tool_result` part                       |
+
+A `system` or `developer` message item becomes a `system` turn. Any other item
+type is a rejection, never a silent drop, and the first item that cannot be
+carried is the one reported, at its own path:
+
+```text
+input.1.type: reasoning items are not part of this gateway
+```
+
+**`instructions` is a rewrite, not a passthrough.** The gateway prepends it to the
+system text of the canonical request, for every egress wire including the
+Responses one. A converter that reads the client's `instructions` field directly
+cannot be lossless here either, so the two-request passthrough is not a free
+upgrade: it would still have to fold `instructions` into the system turn.
+
+`reasoning.summary` and `text.format` are dropped, along with any key this schema
+does not name. `reasoning.effort` is checked against the canonical ladder, so an
+unknown level answers 422 at `param` `reasoning.effort`. A client that sends
+`stop` gets it carried to the chat and Messages wires; the Responses egress wire
+has no equivalent field and drops it, exactly as it does for that ingress.
+
+```text
+response.created
+response.output_item.added      the message item, or one per function call
+response.content_part.added     the message's output_text part
+response.output_text.delta
+response.function_call_arguments.delta
+response.output_text.done
+response.content_part.done
+response.output_item.done       one per item, the message first
+response.function_call_arguments.done
+response.completed
+[DONE]
+```
+
+A streamed answer carries one `sequence_number` counter across every frame,
+starting at 0, and an `output_index` per item in the order the items arrived, so
+a call that answers before any text takes index 0. Every frame is a bare `data:`
+line with no `event:` line, which is what `src/server/providers/openai/responses.ts`
+reads when bandar is the client.
+
+`response.created` is emitted on the first token, not when the request arrives.
+The retry window has to survive until an upstream answers, so a rate limit on the
+first credential still fails over instead of committing the client to a
+`response.failed` frame. `response.failed` carries the error and `[DONE]`.
+
+A completed answer is a Responses object: `object: "response"`, `status`
+`completed` or `incomplete`, a `message` item when the answer carried text and
+one `function_call` item per call, and `usage` with `input_tokens`,
+`output_tokens`, `total_tokens`, and `input_tokens_details.cached_tokens`. A null
+count ships as 0, and no reasoning-token count ships at all rather than a
+fabricated zero. A turn with no text and no calls still carries one empty
+`message`, because bandar's own client reads a 200 with an empty `output` as a
+failure. `status` is `incomplete` with `incomplete_details: {reason:
+"max_output_tokens"}` when the upstream stopped on length.
 
 ### Token count
 

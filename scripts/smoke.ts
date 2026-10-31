@@ -2601,6 +2601,24 @@ try {
     assert.equal(stream.outputTokens, 5);
   });
 
+  await check("POST /v1/responses streams a Responses turn", async () => {
+    const response = await postResponses({
+      model: "wire-openai",
+      instructions: "be brief",
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] }],
+      stream: true,
+    });
+
+    assert.equal(response.status, 200);
+    assert.match(contentType(response), /text\/event-stream/);
+
+    const stream = responsesStream(await response.text());
+
+    assert.ok(stream.frames.includes("response.created"), "the stream never created a response");
+    assert.ok(stream.frames.includes("response.completed"), "the stream never completed");
+    assert.equal(stream.text, "Hello from OpenAI");
+  });
+
   await check("POST /v1/messages falls through a tag to the next model", async () => {
     const dead = await postJson(
       providerPaths.list,
@@ -3539,6 +3557,46 @@ function originHeader(base: string): string {
 
 function contentType(response: Response): string {
   return response.headers.get("content-type") ?? "";
+}
+
+function postResponses(
+  body: Json,
+  headers: Readonly<Record<string, string>> = bearer(),
+): Promise<Response> {
+  return fetch(new URL("/v1/responses", origin), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+function responsesStream(raw: string) {
+  const frames: string[] = [];
+  let text = "";
+
+  for (const frame of raw.split("\n\n")) {
+    if (!frame.startsWith("data: ")) continue;
+
+    const data = frame.slice("data: ".length);
+
+    if (data === "[DONE]") {
+      frames.push(data);
+      continue;
+    }
+
+    const parsed = v.safeParse(
+      v.looseObject({ type: v.string(), delta: v.optional(v.nullable(v.string())) }),
+      JSON.parse(data),
+    );
+
+    if (!parsed.success) throw new Error("a responses frame carried no type: " + data);
+
+    frames.push(parsed.output.type);
+
+    if (parsed.output.type === "response.output_text.delta") text += parsed.output.delta ?? "";
+  }
+
+  return { frames, text };
 }
 
 async function readStream(response: Response): Promise<{

@@ -11,7 +11,12 @@ import { applyMigrations, type Migration } from "../db/migrate";
 import { cooldownEvents, providerCredentials, providerModels, providers } from "../db/schema";
 import { DuckDb, type QueryRow } from "../duck/client";
 import { applyDuckMigrations } from "../duck/migrate";
-import { addProviderModel, createProvider, type ProviderDeps } from "../providers";
+import {
+  addProviderModel,
+  createProvider,
+  updateProviderModel,
+  type ProviderDeps,
+} from "../providers";
 import { DEFAULT_PROVIDER_ENDPOINTS } from "../providers/endpoints";
 import { ensureBuiltInProviders } from "../providers/seeding";
 import { createSealer } from "../seal";
@@ -20,6 +25,8 @@ import { runChat, type ChatDeps, type ChatInput } from "./chat";
 import type { Auth } from "../auth";
 import { createGateway } from "../gateway";
 import { ChatCompletionRequestSchema } from "../../shared/chat";
+import { toolById, toolStatus } from "../../shared/cli-tools";
+import type { JsonValue } from "../../shared/json";
 import type { GenericProviderKind } from "../../shared/providers";
 import { anthropicWire } from "./anthropic-wire";
 
@@ -52,6 +59,32 @@ const MessageUsageSchema = v.object({
     output_tokens: v.number(),
     cache_read_input_tokens: v.optional(v.number()),
   }),
+});
+
+const ResponseBodySchema = v.object({
+  id: v.string(),
+  object: v.literal("response"),
+  status: v.string(),
+  output: v.array(
+    v.object({
+      id: v.string(),
+      type: v.string(),
+      status: v.optional(v.string()),
+      role: v.optional(v.string()),
+      content: v.optional(
+        v.array(
+          v.object({
+            type: v.string(),
+            text: v.string(),
+            annotations: v.optional(v.array(v.unknown())),
+          }),
+        ),
+      ),
+    }),
+  ),
+  usage: v.object({ input_tokens: v.number(), output_tokens: v.number() }),
+  error: v.nullable(v.object({ message: v.string() })),
+  incomplete_details: v.nullable(v.object({ reason: v.string() })),
 });
 
 type ChatCompletionBody = v.InferInput<typeof ChatCompletionRequestSchema>;
@@ -719,6 +752,39 @@ describe("chat ingress", () => {
     });
   });
 
+  test("keeps reasoning_effort through the schema and onto the upstream body", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({ reasoning_effort: "high" });
+  });
+
+  test("rejects a reasoning_effort the ladder does not carry", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+    const gateway = await gatewayFor(harness);
+
+    const response = await gateway.handle(
+      new Request("http://gateway.test/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
+        body: JSON.stringify({
+          model: "fast",
+          messages: [{ role: "user", content: "hi" }],
+          reasoning_effort: "turbo",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    expect(harness.upstream.calls).toHaveLength(0);
+  });
+
   test("rejects a non-text part at its path", async () => {
     const harness = await freshHarness(() => answer("hello"));
 
@@ -741,6 +807,382 @@ describe("chat ingress", () => {
     expect(body.error.param).toBe("messages.0.content.1");
     expect(body.error.message).toContain("image_url");
     expect(harness.upstream.calls).toHaveLength(0);
+  });
+});
+
+describe("responses ingress", () => {
+  async function gatewayFor(harness: Harness, compat: "responses" | null = null) {
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    if (compat !== null) await setCompat(harness, seeded, compat);
+
+    return createGateway({ ...harness.deps, auth });
+  }
+
+  function post(gateway: ReturnType<typeof createGateway>, body: JsonValue): Promise<Response> {
+    return gateway.handle(
+      new Request("http://gateway.test/v1/responses", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
+        body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  async function framed(gateway: ReturnType<typeof createGateway>, body: JsonValue) {
+    const response = await post(gateway, body);
+
+    return { status: response.status, frames: responsesFrames(await response.text()) };
+  }
+
+  test("answers a non-streamed text turn", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      input: "what is 2+2?",
+    });
+
+    expect(response.status).toBe(200);
+
+    const body = v.parse(ResponseBodySchema, await response.json());
+
+    expect(body.object).toBe("response");
+    expect(body.status).toBe("completed");
+    expect(body.output[0]).toMatchObject({
+      type: "message",
+      content: [{ type: "output_text", text: "hello" }],
+    });
+    expect(body.usage.input_tokens).toBe(1);
+    expect(body.error).toBeNull();
+    expect(body.incomplete_details).toBeNull();
+  });
+
+  test("answers an empty turn with one empty message, the way bandar itself reads a reply", async () => {
+    const harness = await freshHarness(() =>
+      Response.json({
+        choices: [{ message: { role: "assistant", content: "" }, finish_reason: "length" }],
+        usage: { prompt_tokens: 1, completion_tokens: 2 },
+      }),
+    );
+
+    const response = await post(await gatewayFor(harness), { model: "fast", input: "hi" });
+    const body = v.parse(ResponseBodySchema, await response.json());
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("incomplete");
+    expect(body.incomplete_details).toEqual({ reason: "max_output_tokens" });
+    expect(body.output).toEqual([
+      {
+        id: body.output[0]?.id,
+        type: "message",
+        status: "completed",
+        role: "assistant",
+        content: [{ type: "output_text", text: "", annotations: [] }],
+      },
+    ]);
+  });
+
+  test("streams the frames a Responses client reads, in order and numbered once", async () => {
+    const harness = await freshHarness(() => openAiStream());
+
+    const { status, frames } = await framed(await gatewayFor(harness), {
+      model: "fast",
+      input: "hi",
+      stream: true,
+    });
+
+    expect(status).toBe(200);
+    expect(frames.map((frame) => frame.type)).toEqual([
+      "response.created",
+      "response.output_item.added",
+      "response.content_part.added",
+      "response.output_text.delta",
+      "response.output_text.delta",
+      "response.output_text.done",
+      "response.content_part.done",
+      "response.output_item.done",
+      "response.completed",
+      "[DONE]",
+    ]);
+    expect(frames.slice(0, 9).map((frame) => frame.sequence_number)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 8,
+    ]);
+
+    const text = frames
+      .filter((frame) => frame.type === "response.output_text.delta")
+      .map((frame) => frame.delta)
+      .join("");
+
+    expect(text).toBe("hello world");
+  });
+
+  test("creates the response only once an upstream answers, so a rate limit still fails over", async () => {
+    const harness = await freshHarness((call) =>
+      call.key === "Bearer good-key"
+        ? openAiStream()
+        : Response.json({ error: { message: "slow down" } }, { status: 429 }),
+    );
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "limited", "limited-key");
+    await addCredential(harness.providers, seeded.providerId, "good", "good-key");
+
+    const { status, frames } = await framed(createGateway({ ...harness.deps, auth }), {
+      model: "fast",
+      input: "hi",
+      stream: true,
+    });
+
+    expect(status).toBe(200);
+    expect(frames.map((frame) => frame.type)).not.toContain("response.failed");
+    expect(frames.filter((frame) => frame.type === "response.created")).toHaveLength(1);
+    expect(harness.upstream.calls.map((call) => call.key)).toEqual([
+      "Bearer limited-key",
+      "Bearer good-key",
+    ]);
+  });
+
+  test("carries a Codex-shaped turn onto the upstream body", async () => {
+    const harness = await freshHarness(() => answer("a list"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      instructions: "be brief",
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "list ./src" }] },
+        {
+          type: "function_call",
+          call_id: "call_1",
+          name: "read_file",
+          arguments: '{"path":"./src"}',
+        },
+        { type: "function_call_output", call_id: "call_1", output: "chat.ts" },
+      ],
+      tools: [{ type: "function", name: "read_file", parameters: { type: "object" } }],
+      tool_choice: "auto",
+      max_output_tokens: 64,
+      reasoning: { effort: "high" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      messages: [
+        { role: "system", content: "be brief" },
+        { role: "user", content: "list ./src" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "read_file", arguments: '{"path":"./src"}' },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: "call_1", content: "chat.ts" },
+      ],
+      tools: [{ type: "function", function: { name: "read_file" } }],
+      tool_choice: "auto",
+      max_tokens: 64,
+      reasoning_effort: "high",
+    });
+  });
+
+  test("streams a tool call as an output item with its arguments", async () => {
+    const harness = await freshHarness(() =>
+      sse([
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_1",
+                    type: "function",
+                    function: { name: "read_file", arguments: "" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] } }],
+        },
+        {
+          choices: [
+            { delta: { tool_calls: [{ index: 0, function: { arguments: '"' + './src"}' } }] } },
+          ],
+        },
+        { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+        "[DONE]",
+      ]),
+    );
+
+    const { frames } = await framed(await gatewayFor(harness), {
+      model: "fast",
+      input: "list ./src",
+      stream: true,
+      tools: [{ type: "function", name: "read_file" }],
+    });
+
+    const opened = frames.find(
+      (frame) =>
+        frame.type === "response.output_item.added" && frame.item?.type === "function_call",
+    );
+
+    expect(opened?.item).toMatchObject({
+      type: "function_call",
+      call_id: "call_1",
+      name: "read_file",
+      arguments: "",
+    });
+    expect(opened?.output_index).toBe(0);
+    expect(frames.some((frame) => frame.item?.type === "message")).toBe(false);
+
+    const done = frames.find((frame) => frame.type === "response.function_call_arguments.done");
+
+    expect(done?.arguments).toBe('{"path":"./src"}');
+    expect(done?.item_id).toBe(opened?.item?.id);
+
+    const closed = frames.find(
+      (frame) => frame.type === "response.output_item.done" && frame.item?.type === "function_call",
+    );
+
+    expect(closed?.item).toMatchObject({ call_id: "call_1", arguments: '{"path":"./src"}' });
+    expect(
+      frames
+        .filter((frame) => frame.type === "response.function_call_arguments.delta")
+        .map((frame) => frame.delta)
+        .join(""),
+    ).toBe('{"path":"./src"}');
+  });
+
+  test("closes a call that streamed no argument deltas with the whole arguments", async () => {
+    const harness = await freshHarness(() =>
+      sse([
+        {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_1",
+                    type: "function",
+                    function: { name: "read_file", arguments: '{"path":"./src"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+        "[DONE]",
+      ]),
+    );
+
+    const { frames } = await framed(await gatewayFor(harness), {
+      model: "fast",
+      input: "list ./src",
+      stream: true,
+      tools: [{ type: "function", name: "read_file" }],
+    });
+
+    expect(frames.map((frame) => frame.type)).toContain("response.function_call_arguments.done");
+    expect(
+      frames.find((frame) => frame.type === "response.function_call_arguments.done")?.arguments,
+    ).toBe('{"path":"./src"}');
+  });
+
+  test("keeps reasoning.effort on a request answered by the Responses wire upstream", async () => {
+    const harness = await freshHarness(() =>
+      Response.json({
+        status: "completed",
+        output: [{ type: "message", content: [{ type: "output_text", text: "hi" }] }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    );
+
+    const response = await post(await gatewayFor(harness, "responses"), {
+      model: "fast",
+      input: "hi",
+      reasoning: { effort: "high", summary: "auto" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      reasoning: { effort: "high" },
+      input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }],
+    });
+  });
+
+  test("rejects an input item type and a reasoning effort the ladder lacks, and answers 401 with no key", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+    const gateway = await gatewayFor(harness);
+
+    const item = await post(gateway, {
+      model: "fast",
+      input: [
+        { role: "user", content: "hi" },
+        { type: "input_image", image_url: "x" },
+      ],
+    });
+
+    expect(item.status).toBe(422);
+
+    const itemBody = v.parse(
+      v.object({ error: v.object({ message: v.string(), param: v.nullable(v.string()) }) }),
+      await item.json(),
+    );
+
+    expect(itemBody.error.param).toBe("input.1.type");
+    expect(itemBody.error.message).toBe(
+      "input.1.type: input_image items are not part of this gateway",
+    );
+
+    const effort = await post(gateway, {
+      model: "fast",
+      input: "hi",
+      reasoning: { effort: "turbo" },
+    });
+
+    expect(effort.status).toBe(422);
+    expect(
+      v.parse(v.object({ error: v.object({ param: v.nullable(v.string()) }) }), await effort.json())
+        .error.param,
+    ).toBe("reasoning.effort");
+
+    const anonymous = await gateway.handle(
+      new Request("http://gateway.test/v1/responses", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "fast", input: "hi" }),
+      }),
+    );
+
+    expect(anonymous.status).toBe(401);
+    expect(harness.upstream.calls).toHaveLength(0);
+  });
+
+  test("reports every declared CLI tool as ready now that the responses route is served", () => {
+    expect(toolStatus(toolById("codex")).status).toBe("ready");
   });
 });
 
@@ -1083,4 +1525,44 @@ function duckMigrations() {
     .filter((name) => name.endsWith(".sql"))
     .sort()
     .map((name) => ({ tag: name.slice(0, -4), sql: readFileSync(join(DUCK_DIR, name), "utf8") }));
+}
+
+type ResponsesFrame = {
+  readonly type: string;
+  readonly sequence_number?: number;
+  readonly output_index?: number;
+  readonly item_id?: string;
+  readonly delta?: string;
+  readonly arguments?: string;
+  readonly item?: {
+    readonly id: string;
+    readonly type: string;
+    readonly call_id?: string;
+    readonly name?: string;
+    readonly arguments?: string;
+  };
+};
+
+function responsesFrames(text: string): readonly ResponsesFrame[] {
+  return text
+    .split("\n\n")
+    .filter((block) => block.trim() !== "")
+    .map((block): ResponsesFrame => {
+      const data = block.replace(/^data: /u, "");
+
+      const parsed: unknown = data === "[DONE]" ? { type: "[DONE]" } : JSON.parse(data);
+
+      return v.parse(v.looseObject({ type: v.string() }), parsed);
+    });
+}
+
+async function setCompat(harness: Harness, seeded: Seeded, compat: "responses"): Promise<void> {
+  await updateProviderModel(harness.providers, "user-1", seeded.providerId, seeded.modelId, {
+    slug: "fast",
+    alias: null,
+    compat,
+    inputPricePerMtok: null,
+    cacheInputPricePerMtok: null,
+    outputPricePerMtok: null,
+  });
 }

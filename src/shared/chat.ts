@@ -10,6 +10,7 @@ import {
   type ToolDefinition,
 } from "./conversation";
 import { ContentSchema, contentText, type Normalized } from "./messages";
+import { ReasoningEffortSchema, type Reasoning, type ReasoningEffort } from "./reasoning";
 import { MAX_MODEL_REF_LENGTH } from "./slugs";
 
 const ChatFunctionSchema = v.object({
@@ -150,6 +151,7 @@ export const ChatCompletionRequestSchema = v.object({
   stop: v.optional(v.union([v.string(), v.array(v.string())])),
   tools: v.optional(v.array(ChatToolSchema)),
   tool_choice: v.optional(ChatToolChoiceSchema),
+  reasoning_effort: v.optional(ReasoningEffortSchema),
 });
 
 export const ModelCardSchema = v.object({
@@ -176,7 +178,8 @@ export const GatewayRequestSchema = v.pipe(
     stop:
       input.stop === undefined ? undefined : Array.isArray(input.stop) ? input.stop : [input.stop],
     tools: (input.tools ?? []).map(toolOf),
-    toolChoice: input.tool_choice === undefined ? null : choiceOf(input.tool_choice),
+    toolChoice: input.tool_choice === undefined ? null : chatChoiceOf(input.tool_choice),
+    reasoning: input.reasoning_effort === undefined ? undefined : effort(input.reasoning_effort),
   })),
 );
 
@@ -194,12 +197,24 @@ function toolOf(tool: v.InferOutput<typeof ChatToolSchema>): ToolDefinition {
   };
 }
 
-function choiceOf(choice: v.InferOutput<typeof ChatToolChoiceSchema>): ToolChoice {
+function effort(level: ReasoningEffort): Reasoning {
+  return { kind: "effort", effort: level };
+}
+
+export type ToolChoicePick = "auto" | "none" | "required";
+
+export function choiceOf(choice: ToolChoicePick | { readonly name: string }): ToolChoice {
   if (choice === "auto") return { mode: "auto" };
 
   if (choice === "none") return { mode: "none" };
 
   if (choice === "required") return { mode: "required" };
 
-  return { mode: "tool", name: choice.function.name };
+  return { mode: "tool", name: choice.name };
+}
+
+function chatChoiceOf(choice: v.InferOutput<typeof ChatToolChoiceSchema>): ToolChoice {
+  if (choice === "auto" || choice === "none" || choice === "required") return choiceOf(choice);
+
+  return choiceOf({ name: choice.function.name });
 }

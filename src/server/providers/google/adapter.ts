@@ -11,6 +11,7 @@ import {
   type ToolResult,
 } from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
+import type { Reasoning } from "../../../shared/reasoning";
 import {
   joinUrl,
   postJson,
@@ -84,6 +85,7 @@ type ChatBody = {
     topP?: number;
     maxOutputTokens?: number;
     stopSequences?: string[];
+    thinkingConfig?: { thinkingBudget?: number };
   };
   tools?: { functionDeclarations: FunctionDeclaration[] }[];
   toolConfig?: {
@@ -240,6 +242,10 @@ function bodyFor(input: AdapterInput): ChatBody {
 
   if (input.request.stop !== undefined) config.stopSequences = [...input.request.stop];
 
+  const thinkingConfig = thinkingConfigOf(input.request.reasoning);
+
+  if (thinkingConfig !== null) config.thinkingConfig = thinkingConfig;
+
   if (Object.keys(config).length > 0) body.generationConfig = config;
 
   if (input.request.tools.length > 0)
@@ -248,6 +254,34 @@ function bodyFor(input: AdapterInput): ChatBody {
   if (input.request.toolChoice !== null) body.toolConfig = toolConfigOf(input.request.toolChoice);
 
   return body;
+}
+
+/**
+ * This wire takes an allowance per call and has no ladder above `off`, so a mid level is left to
+ * the model rather than guessed at.
+ */
+function thinkingConfigOf(reasoning: Reasoning | undefined): { thinkingBudget: number } | null {
+  if (reasoning === undefined) return null;
+
+  if (reasoning.kind === "budget") return { thinkingBudget: reasoning.budgetTokens };
+
+  switch (reasoning.effort) {
+    case "none": {
+      return { thinkingBudget: 0 };
+    }
+
+    case "minimal": {
+      return { thinkingBudget: 1024 };
+    }
+
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+    case "max": {
+      return null;
+    }
+  }
 }
 
 function contentsOf(messages: readonly CanonicalMessage[]): Content[] {

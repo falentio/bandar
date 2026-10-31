@@ -9,6 +9,7 @@ import {
   type ToolParameters,
 } from "../../../shared/conversation";
 import { finishOf } from "../types";
+import type { ReasoningEffort } from "../../../shared/reasoning";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   bearerHeaders,
@@ -116,6 +117,7 @@ type ChatBody = {
   stop?: readonly string[];
   tools?: readonly ChatToolBody[];
   tool_choice?: string | ChatToolChoiceBody;
+  reasoning_effort?: ReasoningEffort;
 };
 
 export type CompatibleOptions<K extends ProviderKind> = {
@@ -295,6 +297,9 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
   if (input.request.tools.length > 0) body.tools = input.request.tools.map(toolBodyOf);
 
   if (input.request.toolChoice !== null) body.tool_choice = toolChoiceOf(input.request.toolChoice);
+
+  if (input.request.reasoning?.kind === "effort")
+    body.reasoning_effort = input.request.reasoning.effort;
 
   return body;
 }

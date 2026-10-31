@@ -5,7 +5,7 @@ import type { InputModality } from "./providers";
 export const GATEWAY_SURFACE = {
   chatCompletions: true,
   messages: true,
-  responses: false,
+  responses: true,
   tools: true,
 } as const;
 

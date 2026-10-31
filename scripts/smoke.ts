@@ -167,6 +167,7 @@ const ResponsesBodySchema = v.strictObject({
   max_output_tokens: v.optional(v.number()),
   temperature: v.optional(v.number()),
   top_p: v.optional(v.number()),
+  reasoning: v.optional(v.object({ effort: v.string() })),
 });
 
 const expectedMigration = lastJournalTag();
@@ -2600,6 +2601,24 @@ try {
     assert.equal(stream.outputTokens, 5);
   });
 
+  await check("POST /v1/responses streams a Responses turn", async () => {
+    const response = await postResponses({
+      model: "wire-openai",
+      instructions: "be brief",
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hello" }] }],
+      stream: true,
+    });
+
+    assert.equal(response.status, 200);
+    assert.match(contentType(response), /text\/event-stream/);
+
+    const stream = responsesStream(await response.text());
+
+    assert.ok(stream.frames.includes("response.created"), "the stream never created a response");
+    assert.ok(stream.frames.includes("response.completed"), "the stream never completed");
+    assert.equal(stream.text, "Hello from OpenAI");
+  });
+
   await check("POST /v1/messages falls through a tag to the next model", async () => {
     const dead = await postJson(
       providerPaths.list,
@@ -2761,6 +2780,18 @@ try {
     );
 
     overrideModelId = added.models.find((model) => model.slug === "override-fast")?.id ?? "";
+
+    const reasoningAdded = await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "reasoning-check", slug: "reasoning-fast", compat: "responses" },
+      ProviderSchema,
+      201,
+    );
+
+    assert.ok(
+      reasoningAdded.models.some((model) => model.slug === "reasoning-fast"),
+      "the reasoning model was not added",
+    );
 
     const moved = await putModelEdit(id, overrideModelId, { compat: "responses" });
 
@@ -3528,6 +3559,46 @@ function contentType(response: Response): string {
   return response.headers.get("content-type") ?? "";
 }
 
+function postResponses(
+  body: Json,
+  headers: Readonly<Record<string, string>> = bearer(),
+): Promise<Response> {
+  return fetch(new URL("/v1/responses", origin), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+function responsesStream(raw: string) {
+  const frames: string[] = [];
+  let text = "";
+
+  for (const frame of raw.split("\n\n")) {
+    if (!frame.startsWith("data: ")) continue;
+
+    const data = frame.slice("data: ".length);
+
+    if (data === "[DONE]") {
+      frames.push(data);
+      continue;
+    }
+
+    const parsed = v.safeParse(
+      v.looseObject({ type: v.string(), delta: v.optional(v.nullable(v.string())) }),
+      JSON.parse(data),
+    );
+
+    if (!parsed.success) throw new Error("a responses frame carried no type: " + data);
+
+    frames.push(parsed.output.type);
+
+    if (parsed.output.type === "response.output_text.delta") text += parsed.output.delta ?? "";
+  }
+
+  return { frames, text };
+}
+
 async function readStream(response: Response): Promise<{
   text: string;
   usage: { prompt_tokens: number; completion_tokens: number } | null;
@@ -3679,6 +3750,13 @@ function startUpstream() {
           parsed.output.max_output_tokens !== 32
         ) {
           return jsonError(400, "the responses wire did not carry max_output_tokens");
+        }
+
+        if (
+          parsed.output.model === "reasoning-check" &&
+          parsed.output.reasoning?.effort !== "high"
+        ) {
+          return jsonError(400, "the responses wire did not carry reasoning.effort");
         }
 
         if (parsed.output.stream === true) {

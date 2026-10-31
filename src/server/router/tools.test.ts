@@ -548,6 +548,140 @@ describe("the genai wire", () => {
   });
 });
 
+describe("thinking controls on the wires", () => {
+  test("a level reaches the chat wire as reasoning_effort", async () => {
+    const harness = await harnessOn("openai", () =>
+      json({
+        choices: [{ message: { role: "assistant", content: "hi" }, finish_reason: "stop" }],
+      }),
+    );
+
+    const response = await postChat(harness.gateway, {
+      model: "fast",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({ reasoning_effort: "high" });
+  });
+
+  test("a level reaches the responses wire as reasoning.effort", async () => {
+    const harness = await harnessOn(
+      "openai",
+      () =>
+        json({
+          output: [{ type: "message", content: [{ type: "output_text", text: "hi" }] }],
+          status: "completed",
+        }),
+      "responses",
+    );
+
+    const response = await postChat(harness.gateway, {
+      model: "fast",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({ reasoning: { effort: "high" } });
+  });
+
+  test("a budget reaches the messages wire as thinking, with max_tokens grown to fit", async () => {
+    const harness = await harnessOn("anthropic", () =>
+      json({ content: [{ type: "text", text: "hi" }], stop_reason: "end_turn" }),
+    );
+
+    const response = await postMessages(harness.gateway, {
+      model: "fast",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "enabled", budget_tokens: 4096 },
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      thinking: { type: "enabled", budget_tokens: 4096 },
+      max_tokens: 4097,
+    });
+  });
+
+  test("a budget reaches the genai wire as thinkingConfig.thinkingBudget", async () => {
+    const harness = await harnessOn("google", () =>
+      json({ candidates: [{ content: { parts: [{ text: "hi" }] }, finishReason: "STOP" }] }),
+    );
+
+    const response = await postMessages(harness.gateway, {
+      model: "fast",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "enabled", budget_tokens: 2048 },
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      generationConfig: { thinkingConfig: { thinkingBudget: 2048 } },
+    });
+  });
+
+  test("a budget leaves the chat wire with no reasoning_effort at all", async () => {
+    const harness = await harnessOn("openai", () =>
+      json({
+        choices: [{ message: { role: "assistant", content: "hi" }, finish_reason: "stop" }],
+      }),
+    );
+
+    const response = await postMessages(harness.gateway, {
+      model: "fast",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "enabled", budget_tokens: 2048 },
+    });
+
+    const body = harness.upstream.calls[0]?.body;
+
+    expect(response.status).toBe(200);
+    expect(body).not.toHaveProperty("reasoning_effort");
+  });
+
+  test("a disabled thinking flag on the messages ingress leaves every wire without one", async () => {
+    const harness = await harnessOn("anthropic", () =>
+      json({ content: [{ type: "text", text: "hi" }], stop_reason: "end_turn" }),
+    );
+
+    const response = await postMessages(harness.gateway, {
+      model: "fast",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "disabled" },
+      output_config: { effort: "high" },
+    });
+
+    const body = harness.upstream.calls[0]?.body;
+
+    expect(response.status).toBe(200);
+    expect(body).not.toHaveProperty("thinking");
+  });
+
+  test("a level leaves the messages wire with no thinking block", async () => {
+    const harness = await harnessOn("anthropic", () =>
+      json({ content: [{ type: "text", text: "hi" }], stop_reason: "end_turn" }),
+    );
+
+    const response = await postChat(harness.gateway, {
+      model: "fast",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    });
+
+    const body = harness.upstream.calls[0]?.body;
+
+    expect(response.status).toBe(200);
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).toMatchObject({ output_config: { effort: "high" } });
+  });
+});
+
 describe("streaming tool calls", () => {
   const fragments = [
     { choices: [{ delta: { role: "assistant" } }] },

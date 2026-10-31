@@ -85,7 +85,8 @@ then speaks again survives the trip.
 `CanonicalRequest` carries `messages` (`system | user | assistant`), `tools` (the
 normalized definitions, empty when the client declared none), `toolChoice`
 (`auto`, `none`, `required`, one named tool, or `null` for the wire's own
-default), `temperature`, `topP`, `maxTokens`, and `stop`. `CanonicalResult` carries
+default), `temperature`, `topP`, `maxTokens`, `stop`, and `reasoning`
+(absent, or a level or a token allowance; see [Thinking](#thinking)). `CanonicalResult` carries
 `text`, `toolCalls` (empty for a text answer), `finishReason`, and `usage`
 (`inputTokens`, `outputTokens`, each `number | null`). `CanonicalStreamEvent` is
 one of:
@@ -154,8 +155,10 @@ messages.0.content.1: image_url blocks are not supported by this text gateway
 | `max_tokens`, `temperature`, `top_p`, `stop_sequences` | Passed through as `maxTokens`, `temperature`, `topP`, `stop`                  |
 | `tools`                                                | `{name, description?, input_schema?}`, forwarded to every upstream wire       |
 | `tool_choice`                                          | `auto`, `any`, `none`, or `{type: "tool", name}`                              |
+| `thinking`                                             | `{type: "enabled", budget_tokens}` becomes `{kind: "budget"}`                 |
+| `output_config`                                        | `{effort}` becomes `{kind: "effort"}`                                         |
 
-Every other field is ignored, including `metadata`, `thinking`, and `top_k`.
+Every other field is ignored, including `metadata` and `top_k`.
 Multiple text blocks in one message join with a newline, and multiple `system`
 blocks join the same way.
 
@@ -539,12 +542,49 @@ Helpers in `src/server/providers/http.ts`:
 | Stream usage   | final chunk, after `stream_options.include_usage` | `message_start` + `message_delta`                            | `usageMetadata` on chunks                | final chunk, after `stream_options.include_usage` | final chunk, after `stream_options.include_usage` | final chunk, after `stream_options.include_usage`            |
 | Finish reason  | native                                            | `end_turn`/`stop_sequence` → `stop`, `max_tokens` → `length` | `STOP` → `stop`, `MAX_TOKENS` → `length` | native                                            | native                                            | native                                                       |
 
+| Thinking | `reasoning_effort` | `output_config.effort`, or `thinking` for a budget | `generationConfig.thinkingConfig.thinkingBudget` | `reasoning_effort` | `reasoning_effort` | `reasoning_effort` |
+
 Anthropic and Google reject adjacent messages with the same role in some
 configurations, so both adapters merge consecutive same-role messages. Every
 other wire is the OpenAI chat shape, so it is passed through unchanged apart from
 optional fields the canonical request does not carry. That is one adapter
 implementation, not six: Kilo Code, Token Harbor, Yeta, River, Nous Portal, and
 Hyper all differ only in their headers and their catalogs.
+
+### Thinking
+
+A client states one intent at a time: a level, or a token allowance. The
+canonical request carries whichever it got, as `reasoning`, and each wire takes
+the kind it can spell:
+
+|           | `{kind: "effort", effort}`                           | `{kind: "budget", budgetTokens}`             |
+| --------- | ---------------------------------------------------- | -------------------------------------------- |
+| chat      | `reasoning_effort`                                   | dropped                                      |
+| Responses | `reasoning: {effort}`                                | dropped                                      |
+| messages  | `output_config: {effort}`                            | `thinking: {type: "enabled", budget_tokens}` |
+| genai     | `thinkingBudget` for `none`, `minimal`; else dropped | `thinkingConfig.thinkingBudget`              |
+
+Three mappings are lossy on purpose:
+
+- Anthropic floors its ladder at `low`, so `none` and `minimal` both travel as
+  `low`. `medium` and up pass through unchanged.
+- GenAI takes an allowance and no ladder above `off`, so only `none` (0) and
+  `minimal` (1024) map to a number. A mid level is left out and the model keeps
+  its default, instead of a number bandar guessed. `thinkingLevel` is a
+  different axis and errors on models that do not serve it, so it is never
+  written.
+- Anthropic rejects a budget that leaves no room to answer, so its adapter raises
+  `max_tokens` to `budget_tokens + 1` when the client asked for less.
+
+`thinking: {type: "disabled"}` maps to no control at all, not to a flag: models
+whose thinking cannot be turned off reject `disabled`, where omitting the field
+costs nothing. A request that carries both `thinking` and `output_config.effort`
+keeps the budget and drops the effort.
+
+This is request-side only. A model's thinking still does not reach the client:
+the adapters read text and tool calls from the response and discard reasoning
+blocks, in `textOf` on the Responses wire and in the `content` filter on the
+messages wire.
 
 ### Tool calling
 

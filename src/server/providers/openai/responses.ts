@@ -7,6 +7,7 @@ import {
   type ToolParameters,
 } from "../../../shared/conversation";
 import { finishOf } from "../types";
+import type { ReasoningEffort } from "../../../shared/reasoning";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   joinUrl,
@@ -97,6 +98,7 @@ type ResponsesBody = {
   top_p?: number;
   tools?: readonly ResponsesToolBody[];
   tool_choice?: string | ResponsesToolChoiceBody;
+  reasoning?: { effort: ReasoningEffort };
 };
 
 export type ResponsesOptions<K extends ProviderKind> = {
@@ -304,6 +306,9 @@ function bodyFor(input: AdapterInput, stream: boolean): ResponsesBody {
   if (input.request.tools.length > 0) body.tools = input.request.tools.map(toolBodyOf);
 
   if (input.request.toolChoice !== null) body.tool_choice = toolChoiceOf(input.request.toolChoice);
+
+  if (input.request.reasoning?.kind === "effort")
+    body.reasoning = { effort: input.request.reasoning.effort };
 
   return body;
 }

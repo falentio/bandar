@@ -167,6 +167,7 @@ const ResponsesBodySchema = v.strictObject({
   max_output_tokens: v.optional(v.number()),
   temperature: v.optional(v.number()),
   top_p: v.optional(v.number()),
+  reasoning: v.optional(v.object({ effort: v.string() })),
 });
 
 const expectedMigration = lastJournalTag();
@@ -2762,6 +2763,18 @@ try {
 
     overrideModelId = added.models.find((model) => model.slug === "override-fast")?.id ?? "";
 
+    const reasoningAdded = await postJson(
+      providerPaths.models(id),
+      { upstreamModel: "reasoning-check", slug: "reasoning-fast", compat: "responses" },
+      ProviderSchema,
+      201,
+    );
+
+    assert.ok(
+      reasoningAdded.models.some((model) => model.slug === "reasoning-fast"),
+      "the reasoning model was not added",
+    );
+
     const moved = await putModelEdit(id, overrideModelId, { compat: "responses" });
 
     const model = moved.models.find((row) => row.id === overrideModelId);
@@ -3679,6 +3692,13 @@ function startUpstream() {
           parsed.output.max_output_tokens !== 32
         ) {
           return jsonError(400, "the responses wire did not carry max_output_tokens");
+        }
+
+        if (
+          parsed.output.model === "reasoning-check" &&
+          parsed.output.reasoning?.effort !== "high"
+        ) {
+          return jsonError(400, "the responses wire did not carry reasoning.effort");
         }
 
         if (parsed.output.stream === true) {

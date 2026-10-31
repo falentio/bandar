@@ -719,6 +719,39 @@ describe("chat ingress", () => {
     });
   });
 
+  test("keeps reasoning_effort through the schema and onto the upstream body", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({ reasoning_effort: "high" });
+  });
+
+  test("rejects a reasoning_effort the ladder does not carry", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+    const gateway = await gatewayFor(harness);
+
+    const response = await gateway.handle(
+      new Request("http://gateway.test/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
+        body: JSON.stringify({
+          model: "fast",
+          messages: [{ role: "user", content: "hi" }],
+          reasoning_effort: "turbo",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(422);
+    expect(harness.upstream.calls).toHaveLength(0);
+  });
+
   test("rejects a non-text part at its path", async () => {
     const harness = await freshHarness(() => answer("hello"));
 

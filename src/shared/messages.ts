@@ -9,6 +9,7 @@ import {
   type ToolDefinition,
 } from "./conversation";
 import { MAX_MODEL_REF_LENGTH } from "./slugs";
+import type { Reasoning } from "./reasoning";
 
 const TextBlockSchema = v.object({ type: v.string(), text: v.optional(v.string()) });
 
@@ -52,6 +53,20 @@ const AnthropicToolChoiceSchema = v.variant("type", [
   v.object({ type: v.literal("tool"), name: v.pipe(v.string(), v.minLength(1)) }),
 ]);
 
+/** The ladder this wire accepts, which lacks the two rungs OpenAI has below "low". */
+export const ANTHROPIC_EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const;
+
+type AnthropicEffort = (typeof ANTHROPIC_EFFORT_VALUES)[number];
+
+const AnthropicEffortSchema: v.GenericSchema<AnthropicEffort> = v.picklist(ANTHROPIC_EFFORT_VALUES);
+
+const ThinkingSchema = v.variant("type", [
+  v.object({ type: v.literal("enabled"), budget_tokens: v.number() }),
+  v.object({ type: v.literal("disabled") }),
+]);
+
+const OutputConfigSchema = v.object({ effort: v.optional(AnthropicEffortSchema) });
+
 const MessagesBodySchema = v.object({
   model: v.pipe(v.string(), v.minLength(1), v.maxLength(MAX_MODEL_REF_LENGTH)),
   messages: v.pipe(
@@ -71,6 +86,8 @@ const MessagesBodySchema = v.object({
   stop_sequences: v.optional(v.array(v.string())),
   tools: v.optional(v.array(AnthropicToolSchema)),
   tool_choice: v.optional(AnthropicToolChoiceSchema),
+  thinking: v.optional(ThinkingSchema),
+  output_config: v.optional(OutputConfigSchema),
 });
 
 export const MessagesRequestSchema = v.pipe(
@@ -86,10 +103,27 @@ export const MessagesRequestSchema = v.pipe(
     stop_sequences: input.stop_sequences,
     tools: (input.tools ?? []).map(toolOf),
     toolChoice: input.tool_choice === undefined ? null : choiceOf(input.tool_choice),
+    reasoning: reasoningOf(input.thinking, input.output_config),
   })),
 );
 
 export type MessagesRequest = v.InferOutput<typeof MessagesRequestSchema>;
+
+/**
+ * One request carries one kind of control: a budget and an effort together would ask two things at
+ * once, so the budget wins. A `disabled` flag never travels, because models whose thinking cannot
+ * be turned off reject it, where carrying no control costs nothing.
+ */
+function reasoningOf(
+  thinking: v.InferOutput<typeof ThinkingSchema> | undefined,
+  outputConfig: v.InferOutput<typeof OutputConfigSchema> | undefined,
+): Reasoning | undefined {
+  if (thinking?.type === "enabled") return { kind: "budget", budgetTokens: thinking.budget_tokens };
+
+  if (outputConfig?.effort !== undefined) return { kind: "effort", effort: outputConfig.effort };
+
+  return undefined;
+}
 
 export type NormalizedMessages = {
   readonly system: string;

@@ -7,6 +7,7 @@ import { PROJECT_URL_HEADER, projectUrlOf } from "../shared/project";
 import { SESSION_ID_HEADER, sessionIdOf } from "../shared/session-id";
 import type { Auth, VerifiedKey } from "./auth";
 import type { CanonicalMessage, CanonicalRequest } from "./providers/types";
+import type { Reasoning } from "../shared/reasoning";
 import { anthropicError, anthropicWire, estimateInputTokens } from "./router/anthropic-wire";
 import { runChat, type ChatDeps } from "./router/chat";
 import { listModelRefs } from "./router/resolve";
@@ -91,6 +92,7 @@ export function createGateway(deps: GatewayDeps) {
         topP: input.topP,
         maxTokens: input.maxTokens,
         stop: input.stop,
+        reasoning: input.reasoning,
       });
 
       return runChat(deps, {
@@ -133,6 +135,7 @@ export function createGateway(deps: GatewayDeps) {
           topP: parsed.output.top_p,
           maxTokens: parsed.output.max_tokens,
           stop: parsed.output.stop_sequences,
+          reasoning: parsed.output.reasoning,
         }),
         stream: parsed.output.stream ?? false,
         signal: request.signal,
@@ -170,6 +173,7 @@ function canonicalRequestOf(input: {
   readonly topP?: number | undefined;
   readonly maxTokens?: number | undefined;
   readonly stop?: readonly string[] | undefined;
+  readonly reasoning?: Reasoning | undefined;
 }): CanonicalRequest {
   const messages: CanonicalMessage[] = [];
 
@@ -187,6 +191,7 @@ function canonicalRequestOf(input: {
     topP: input.topP,
     maxTokens: input.maxTokens,
     stop: input.stop,
+    reasoning: input.reasoning,
   };
 }
 

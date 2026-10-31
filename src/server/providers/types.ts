@@ -18,6 +18,7 @@ import {
   type ToolParameters,
 } from "../../shared/conversation";
 import type { Credential, OAuthCredential } from "../credential";
+import type { Reasoning } from "../../shared/reasoning";
 
 /** A wire-neutral turn: one role and its parts, the same shape both ingresses produce. */
 export type CanonicalMessage = ConversationMessage;
@@ -32,6 +33,7 @@ export type CanonicalRequest = {
   readonly topP?: number;
   readonly maxTokens?: number;
   readonly stop?: readonly string[];
+  readonly reasoning?: Reasoning;
 };
 
 export type CanonicalUsage = {

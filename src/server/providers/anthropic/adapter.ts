@@ -9,6 +9,8 @@ import {
   type ToolParameters,
 } from "../../../shared/conversation";
 import type { ProviderKind } from "../../../shared/providers";
+import { ANTHROPIC_EFFORT_VALUES } from "../../../shared/messages";
+import type { ReasoningEffort } from "../../../shared/reasoning";
 import {
   joinUrl,
   postJson,
@@ -87,6 +89,8 @@ type AnthropicToolBody = {
 
 type AnthropicToolChoiceBody = { type: "auto" } | { type: "any" } | { type: "tool"; name: string };
 
+type AnthropicThinkingBody = { type: "enabled"; budget_tokens: number };
+
 type ChatBody = {
   model: string;
   messages: MessageBody[];
@@ -98,6 +102,8 @@ type ChatBody = {
   stop_sequences?: string[];
   tools?: readonly AnthropicToolBody[];
   tool_choice?: AnthropicToolChoiceBody;
+  thinking?: AnthropicThinkingBody;
+  output_config?: { effort: (typeof ANTHROPIC_EFFORT_VALUES)[number] };
 };
 
 export type AnthropicOptions<K extends ProviderKind> = {
@@ -236,10 +242,14 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
     );
   }
 
+  const reasoning = input.request.reasoning;
+  const budget = reasoning?.kind === "budget" ? reasoning.budgetTokens : 0;
+
   const body: ChatBody = {
     model: input.target.upstreamModel,
     messages: conversation,
-    max_tokens: input.request.maxTokens ?? 1024,
+    // This wire rejects a budget that does not leave room to answer inside max_tokens.
+    max_tokens: Math.max(input.request.maxTokens ?? 1024, budget + 1),
     stream,
   };
 
@@ -260,7 +270,40 @@ function bodyFor(input: AdapterInput, stream: boolean): ChatBody {
   if (toolChoice !== null && toolChoice.mode !== "none")
     body.tool_choice = toolChoiceOf(toolChoice);
 
+  if (reasoning?.kind === "budget")
+    body.thinking = { type: "enabled", budget_tokens: reasoning.budgetTokens };
+
+  if (reasoning?.kind === "effort")
+    body.output_config = { effort: anthropicEffortOf(reasoning.effort) };
+
   return body;
+}
+
+/** Below this wire's lowest rung, the near-zero levels travel as that rung. */
+function anthropicEffortOf(effort: ReasoningEffort): (typeof ANTHROPIC_EFFORT_VALUES)[number] {
+  switch (effort) {
+    case "none":
+    case "minimal":
+    case "low": {
+      return ANTHROPIC_EFFORT_VALUES[0];
+    }
+
+    case "medium": {
+      return "medium";
+    }
+
+    case "high": {
+      return "high";
+    }
+
+    case "xhigh": {
+      return "xhigh";
+    }
+
+    case "max": {
+      return "max";
+    }
+  }
 }
 
 function conversationOf(messages: readonly CanonicalMessage[]): MessageBody[] {

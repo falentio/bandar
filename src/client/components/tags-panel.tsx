@@ -1,36 +1,29 @@
 import { type FormEvent, useState } from "react";
-import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react";
+import { PlusIcon, TrashIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Tag } from "../../shared/tags";
-import { modelLabelOf } from "../model-labels";
+import { optionLabelWithSlug } from "../model-labels";
+import type { ModelChoiceGroup } from "../model-options";
+import { rankedModels } from "../ranked-models";
 import { useProviders } from "../use-providers";
 import { useTags } from "../use-tags";
-
-type TagCandidate = {
-  readonly id: string;
-  readonly slug: string;
-  readonly label: string;
-  readonly providerName: string;
-  readonly ref: string;
-};
+import { RankedModelPicker } from "./ranked-model-picker";
 
 export function TagsPanel() {
   const tags = useTags();
   const providers = useProviders();
   const [slug, setSlug] = useState("");
 
-  const models: TagCandidate[] = providers.providers.flatMap((provider) =>
-    provider.models.map((model) => ({
-      id: model.id,
-      slug: model.slug,
-      label: modelLabelOf(model),
-      providerName: provider.name,
-      ref: model.ref,
+  const catalog: readonly ModelChoiceGroup[] = providers.providers.map((provider) => ({
+    label: provider.name,
+    options: provider.models.map((model) => ({
+      value: model.id,
+      label: optionLabelWithSlug(model),
     })),
-  );
+  }));
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -104,9 +97,9 @@ export function TagsPanel() {
         <TagCard
           key={tag.id}
           tag={tag}
-          models={models}
+          catalog={catalog}
           pending={tags.pending}
-          onOrderChange={(modelIds) => {
+          onModelsChange={(modelIds) => {
             void tags.setModels(tag.id, modelIds);
           }}
           onRemove={() => {
@@ -120,30 +113,17 @@ export function TagsPanel() {
 
 function TagCard({
   tag,
-  models,
+  catalog,
   pending,
-  onOrderChange,
+  onModelsChange,
   onRemove,
 }: {
   tag: Tag;
-  models: readonly TagCandidate[];
+  catalog: readonly ModelChoiceGroup[];
   pending: boolean;
-  onOrderChange: (modelIds: readonly string[]) => void;
+  onModelsChange: (modelIds: readonly string[]) => void;
   onRemove: () => void;
 }) {
-  const current = tag.models.map((model) => model.modelId);
-  const available = models.filter((model) => !current.includes(model.id));
-
-  const move = (index: number, delta: number) => {
-    const next = [...current];
-    const [moved] = next.splice(index, 1);
-
-    if (moved === undefined) return;
-
-    next.splice(index + delta, 0, moved);
-    onOrderChange(next);
-  };
-
   return (
     <Card>
       <CardContent className="space-y-3">
@@ -167,78 +147,12 @@ function TagCard({
           </Button>
         </div>
 
-        {tag.models.length === 0 ? (
-          <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
-            No models yet. Add one to start the chain.
-          </p>
-        ) : (
-          <ol className="divide-y rounded-lg border">
-            {tag.models.map((model, index) => (
-              <li key={model.modelId} className="flex flex-wrap items-center gap-2 px-3 py-2">
-                <span className="w-6 shrink-0 text-xs tabular-nums text-muted-foreground">
-                  #{model.priority}
-                </span>
-                <span className="text-sm font-medium">{modelLabelOf(model)}</span>
-                <span className="text-xs text-muted-foreground">{model.providerName}</span>
-                <code className="font-mono text-xs text-muted-foreground">{model.ref}</code>
-                <span className="ms-auto flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={`Move ${modelLabelOf(model)} up`}
-                    disabled={pending || index === 0}
-                    onClick={() => move(index, -1)}
-                  >
-                    <ArrowUpIcon />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={`Move ${modelLabelOf(model)} down`}
-                    disabled={pending || index === tag.models.length - 1}
-                    onClick={() => move(index, 1)}
-                  >
-                    <ArrowDownIcon />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={`Remove ${modelLabelOf(model)} from ${tag.ref}`}
-                    title={
-                      tag.models.length === 1
-                        ? "Delete the tag to remove its last model"
-                        : undefined
-                    }
-                    disabled={pending || tag.models.length === 1}
-                    onClick={() => onOrderChange(current.filter((id) => id !== model.modelId))}
-                  >
-                    <XIcon />
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-
-        {available.length === 0 ? null : (
-          <select
-            aria-label={`Add a model to ${tag.ref}`}
-            disabled={pending}
-            value=""
-            onChange={(event) => {
-              if (event.target.value !== "") onOrderChange([...current, event.target.value]);
-            }}
-            className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
-          >
-            <option value="">Add model…</option>
-            {available.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.providerName} · {model.label}
-                {model.label === model.slug ? "" : ` (${model.slug})`}
-              </option>
-            ))}
-          </select>
-        )}
+        <RankedModelPicker
+          catalog={catalog}
+          value={rankedModels(tag.models)}
+          onChange={onModelsChange}
+          disabled={pending}
+        />
       </CardContent>
     </Card>
   );

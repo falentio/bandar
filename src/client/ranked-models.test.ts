@@ -43,7 +43,7 @@ describe("rankedModels", () => {
         tagModel("pm-haiku", "haiku", null, "haiku"),
       ]),
     ).toEqual([
-      { modelId: "pm-sonnet", label: "Sonnet (claude-sonnet)", provider: "Alpha" },
+      { modelId: "pm-sonnet", label: "Sonnet", provider: "Alpha" },
       { modelId: "pm-haiku", label: "haiku", provider: "Alpha" },
     ]);
   });

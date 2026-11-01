@@ -1,10 +1,13 @@
 import type { Tag } from "../shared/tags";
-import { optionLabelWithSlug } from "./model-labels";
+import { modelLabelOf } from "./model-labels";
 import type { ModelChoiceGroup } from "./model-options";
 
 type TagModel = Tag["models"][number];
 
-/** One row of a tag's chain. The index is the fallback priority, so the order is the state. */
+/**
+ * One row of a tag's chain. The index is the fallback priority, so the order is the state.
+ * The label is the model's name alone: a chip already sits beside its provider.
+ */
 export type RankedModel = {
   readonly modelId: string;
   readonly label: string;
@@ -14,7 +17,7 @@ export type RankedModel = {
 export function rankedModels(models: readonly TagModel[]): readonly RankedModel[] {
   return models.map((model) => ({
     modelId: model.modelId,
-    label: optionLabelWithSlug(model),
+    label: modelLabelOf(model),
     provider: model.providerName,
   }));
 }

@@ -62,3 +62,40 @@ export function modelChoices(
 
   return { tags: tagOptions, providers: groups };
 }
+
+export function optionId(comboboxId: string, value: string): string {
+  return `${comboboxId}-${encodeURIComponent(value)}`;
+}
+
+export function step(
+  options: readonly ModelOption[],
+  highlighted: string | null,
+  delta: number,
+): string | null {
+  if (options.length === 0) return null;
+
+  const current = options.findIndex((option) => option.value === highlighted);
+  const next = (current + delta + options.length) % options.length;
+
+  return options[next]?.value ?? null;
+}
+
+export function visibleGroups(
+  groups: readonly ModelChoiceGroup[],
+  query: string,
+): readonly ModelChoiceGroup[] {
+  const needle = query.trim().toLowerCase();
+  const rows: ModelChoiceGroup[] = [];
+
+  for (const group of groups) {
+    const options = group.options.filter((option) => matchesQuery(option, needle));
+
+    if (options.length > 0) rows.push({ label: group.label, options });
+  }
+
+  return rows;
+}
+
+export function matchesQuery(option: ModelOption, needle: string): boolean {
+  return option.value.toLowerCase().includes(needle) || option.label.toLowerCase().includes(needle);
+}

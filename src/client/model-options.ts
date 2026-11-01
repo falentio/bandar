@@ -1,4 +1,4 @@
-import { modelLabelOf } from "./model-labels";
+import { optionLabelWithSlug } from "./model-labels";
 
 export type ModelOption = { readonly value: string; readonly label: string };
 
@@ -47,12 +47,7 @@ export function modelChoices(
 
       taken.add(model.slug);
 
-      const label = modelLabelOf(model);
-
-      options.push({
-        value: model.slug,
-        label: label === model.slug ? label : `${label} (${model.slug})`,
-      });
+      options.push({ value: model.slug, label: optionLabelWithSlug(model) });
     }
 
     if (options.length === 0) continue;
@@ -97,5 +92,7 @@ export function visibleGroups(
 }
 
 export function matchesQuery(option: ModelOption, needle: string): boolean {
+  if (needle === "") return true;
+
   return option.value.toLowerCase().includes(needle) || option.label.toLowerCase().includes(needle);
 }

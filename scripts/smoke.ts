@@ -641,7 +641,8 @@ try {
 
   await check("analytics records tokens, TTFT and tokens per second", async () => {
     const analytics = await waitForAnalytics(3);
-    assert.equal(analytics.daily.length, 30);
+    assert.equal(analytics.granularity, "day");
+    assert.equal(analytics.buckets.length, 30);
     assert.ok(analytics.summary.requests >= 3, `only ${analytics.summary.requests} requests`);
     assert.equal(analytics.summary.inputTokens, 24);
     assert.equal(analytics.summary.outputTokens, 18);
@@ -693,6 +694,15 @@ try {
     );
   });
 
+  await check("a one-day window reports 24 hourly buckets", async () => {
+    const today = await getJson(`${analyticsPaths.analytics}?days=1`, AnalyticsSchema, 200);
+
+    assert.equal(today.days, 1);
+    assert.equal(today.granularity, "hour");
+    assert.equal(today.buckets.length, 24);
+    assert.ok(today.summary.requests >= 3, `only ${today.summary.requests} requests`);
+  });
+
   await check("GET /api/analytics filters by provider, account and model", async () => {
     const anthropicOnly = await getJson(
       `${analyticsPaths.analytics}?days=30&providerKind=anthropic`,
@@ -738,7 +748,7 @@ try {
     );
 
     assert.equal(none.summary.requests, 0);
-    assert.equal(none.daily.length, 30);
+    assert.equal(none.buckets.length, 30);
   });
   await check("GET /api/analytics filters by the project url header", async () => {
     const before = await getJson(`${analyticsPaths.analytics}?days=30`, AnalyticsSchema, 200);

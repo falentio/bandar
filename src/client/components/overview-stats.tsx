@@ -1,17 +1,18 @@
 import { Card, CardContent } from "@/components/ui/card";
-import type { AnalyticsSummary, DailyUsage } from "../../shared/analytics";
-import { formatMs, formatPercent, formatTokens, formatTps, formatUsd } from "../format";
+import type { Analytics, UsageBucket } from "../../shared/analytics";
+import {
+  formatMs,
+  formatPercent,
+  formatTokens,
+  formatTps,
+  formatUsd,
+  windowPhrase,
+} from "../format";
 import { tokenSeries } from "./token-chart";
 
-export function OverviewStats({
-  summary,
-  daily,
-  days,
-}: {
-  readonly summary: AnalyticsSummary;
-  readonly daily: readonly DailyUsage[];
-  readonly days: number;
-}) {
+export function OverviewStats({ usage }: { readonly usage: Analytics }) {
+  const { summary, buckets } = usage;
+
   return (
     <Card>
       <CardContent className="p-4">
@@ -28,8 +29,8 @@ export function OverviewStats({
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
-            <TokenSparkline daily={daily} />
-            <p className="text-[11px] text-muted-foreground">last {String(days)} days</p>
+            <TokenSparkline buckets={buckets} />
+            <p className="text-[11px] text-muted-foreground">{windowPhrase(usage.days)}</p>
           </div>
         </div>
 
@@ -95,8 +96,8 @@ function TokenSplitBar({ input, output }: { readonly input: number; readonly out
   );
 }
 
-function TokenSparkline({ daily }: { readonly daily: readonly DailyUsage[] }) {
-  const points = daily.map((day) => day.inputTokens + day.outputTokens);
+function TokenSparkline({ buckets }: { readonly buckets: readonly UsageBucket[] }) {
+  const points = buckets.map((bucket) => bucket.inputTokens + bucket.outputTokens);
   const max = Math.max(...points, 1);
   const step = points.length > 1 ? 100 / (points.length - 1) : 0;
 

@@ -1,8 +1,11 @@
 import {
   ANALYTICS_FILTER_DIMENSIONS,
   MAX_ANALYTICS_FILTER_VALUES,
+  analyticsWindow,
+  type Analytics,
   type AnalyticsFilterDimension,
   type AnalyticsFilters,
+  type AnalyticsGranularity,
 } from "../shared/analytics";
 import { projectUrlOf } from "../shared/project";
 import { sessionIdOf } from "../shared/session-id";
@@ -22,42 +25,6 @@ export type RequestsQuery = {
   readonly userId: string;
   readonly limit: number;
   readonly providerId?: string;
-};
-
-export type Analytics = {
-  readonly days: number;
-  readonly summary: {
-    readonly requests: number;
-    readonly errors: number;
-    readonly errorRate: number;
-    readonly cacheHitRate: number | null;
-    readonly inputTokens: number;
-    readonly outputTokens: number;
-    readonly totalTokens: number;
-    readonly avgTokensPerDay: number;
-    readonly avgTokensPerRequest: number | null;
-    readonly avgTps: number | null;
-    readonly avgTtftMs: number | null;
-    readonly p50DurationMs: number | null;
-    readonly p95DurationMs: number | null;
-    readonly costUsd: number;
-  };
-  readonly daily: readonly {
-    readonly date: string;
-    readonly requests: number;
-    readonly inputTokens: number;
-    readonly outputTokens: number;
-    readonly avgTps: number | null;
-  }[];
-  readonly models: readonly {
-    readonly model: string;
-    readonly providerKind: string;
-    readonly requests: number;
-    readonly inputTokens: number;
-    readonly outputTokens: number;
-    readonly avgTps: number | null;
-    readonly costUsd: number;
-  }[];
 };
 
 export type RequestEvent = {
@@ -92,6 +59,26 @@ type FilterSpec = {
 };
 
 const identity = (raw: string): string => raw;
+
+type BucketSpec = {
+  readonly interval: string;
+  readonly trunc: string;
+  readonly stepMs: number;
+};
+
+// The two bucket sizes differ only in these fragments, so one query serves both.
+const BUCKET_SPECS: Record<AnalyticsGranularity, BucketSpec> = {
+  hour: {
+    interval: "1 HOUR",
+    trunc: "date_trunc('hour', events.started_at)",
+    stepMs: 3_600_000,
+  },
+  day: {
+    interval: "1 DAY",
+    trunc: "CAST(CAST(events.started_at AS DATE) AS TIMESTAMP)",
+    stepMs: 86_400_000,
+  },
+};
 
 const FILTER_SPECS: Record<AnalyticsFilterDimension, FilterSpec> = {
   providerKind: { column: "provider_kind", value: identity },
@@ -137,24 +124,33 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
   const outputTokens = number(summary, "output_tokens");
   const totalTokens = inputTokens + outputTokens;
 
-  // The clauses belong in the join condition: in WHERE they would drop the empty days.
-  const daily = db.query(
-    `WITH days AS (
-       SELECT CAST(day AS DATE) AS day
-       FROM generate_series(?::DATE, ?::DATE, INTERVAL 1 DAY) AS series(day)
+  const { granularity, bucketCount } = analyticsWindow(query.days);
+  const bucketSpec = BUCKET_SPECS[granularity];
+  const seriesEnd = new Date(start.getTime() + (bucketCount - 1) * bucketSpec.stepMs);
+
+  // The clauses belong in the join condition: in WHERE they would drop the empty buckets.
+  const buckets = db.query(
+    `WITH buckets AS (
+       SELECT CAST(bucket AS TIMESTAMP) AS bucket
+       FROM generate_series(?::TIMESTAMP, ?::TIMESTAMP, INTERVAL ${bucketSpec.interval}) AS series(bucket)
      )
      SELECT
-       strftime(days.day, '%Y-%m-%d') AS date,
+       epoch_ms(buckets.bucket) AS bucket_ms,
        count(events.id) AS requests,
        coalesce(sum(events.input_tokens), 0) AS input_tokens,
        coalesce(sum(events.output_tokens), 0) AS output_tokens,
        avg(events.tokens_per_second) AS avg_tps
-     FROM days
+     FROM buckets
      LEFT JOIN request_events events
-       ON events.user_id = ? AND CAST(events.started_at AS DATE) = days.day${filterSql}
-     GROUP BY days.day
-     ORDER BY days.day`,
-    [sqlText(dateOnly(start)), sqlText(dateOnly(end)), sqlText(query.userId), ...filter.params],
+       ON events.user_id = ? AND ${bucketSpec.trunc} = buckets.bucket${filterSql}
+     GROUP BY buckets.bucket
+     ORDER BY buckets.bucket`,
+    [
+      sqlText(start.toISOString()),
+      sqlText(seriesEnd.toISOString()),
+      sqlText(query.userId),
+      ...filter.params,
+    ],
   );
 
   const models = db.query(
@@ -176,6 +172,7 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
 
   return {
     days: query.days,
+    granularity,
     summary: {
       requests,
       errors: number(summary, "errors"),
@@ -192,8 +189,8 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
       p95DurationMs: nullableNumber(summary, "p95_duration_ms"),
       costUsd: round(number(summary, "cost_usd"), 6),
     },
-    daily: daily.map((row) => ({
-      date: string(row, "date"),
+    buckets: buckets.map((row) => ({
+      start: new Date(number(row, "bucket_ms")).toISOString(),
       requests: number(row, "requests"),
       inputTokens: number(row, "input_tokens"),
       outputTokens: number(row, "output_tokens"),
@@ -320,10 +317,6 @@ function providerParam(value: string | null): SqlValue {
 
 function startOfUtcDay(value: Date): Date {
   return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
-}
-
-function dateOnly(value: Date): string {
-  return value.toISOString().slice(0, 10);
 }
 
 function number(row: QueryRow, key: string): number {

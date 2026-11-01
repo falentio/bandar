@@ -1,3 +1,5 @@
+import type { AnalyticsGranularity } from "../shared/analytics";
+
 const compact = new Intl.NumberFormat("en", {
   notation: "compact",
   maximumFractionDigits: 1,
@@ -60,9 +62,27 @@ export function formatWhen(value: string): string {
   });
 }
 
+/** Buckets are cut and clipped in UTC, so their labels read in UTC too. */
 export function formatDay(value: string): string {
-  return new Date(`${value}T00:00:00Z`).toLocaleDateString(undefined, {
+  return new Date(value).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   });
+}
+
+function formatHour(value: string): string {
+  return new Date(value).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
+}
+
+export function formatBucket(value: string, granularity: AnalyticsGranularity): string {
+  return granularity === "hour" ? formatHour(value) : formatDay(value);
+}
+
+export function windowPhrase(days: number): string {
+  return days === 1 ? "today" : `in the last ${String(days)} days`;
 }

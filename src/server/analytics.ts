@@ -27,12 +27,33 @@ export type RequestsQuery = {
   readonly providerId?: string;
 };
 
+export type RequestQuery = {
+  readonly userId: string;
+  readonly id: string;
+};
+
+export type ExchangeQuery = {
+  readonly userId: string;
+  readonly id: string;
+  readonly attemptId: string;
+};
+
+export type Exchange = {
+  readonly attemptId: string;
+  readonly requestUrl: string;
+  readonly requestHeaders: string;
+  readonly requestBody: string;
+  readonly responseStatus: number | null;
+  readonly responseBody: string | null;
+  readonly truncated: boolean;
+};
+
 export type RequestEvent = {
   readonly id: string;
   readonly model: string;
   readonly reference: string | null;
   readonly providerKind: string;
-  readonly apiKeyId: string | null;
+  readonly providerId: string;
   readonly status: string;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
@@ -46,7 +67,19 @@ export type RequestEvent = {
   readonly startedAt: string;
 };
 
-export type RequestList = { readonly requests: readonly RequestEvent[] };
+export type DownstreamRequest = {
+  readonly id: string;
+  readonly startedAt: string;
+  readonly status: string;
+  readonly reference: string | null;
+  readonly apiKeyId: string | null;
+  readonly projectUrl: string | null;
+  readonly sessionId: string | null;
+  readonly streamed: boolean;
+  readonly attempts: readonly RequestEvent[];
+};
+
+export type RequestList = { readonly requests: readonly DownstreamRequest[] };
 
 type FilterClause = {
   readonly clauses: readonly string[];
@@ -211,14 +244,14 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
 export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
   const providerId = query.providerId ?? null;
 
-  const rows = db.query(
+  const heads = db.query(
     `SELECT
-       id, model, reference, provider_kind, api_key_id, status, input_tokens, output_tokens,
-       total_tokens, ttft_ms, duration_ms, tokens_per_second, cost_usd, error_kind, streamed,
-       epoch_ms(started_at) AS started_at_ms
+       coalesce(downstream_request_id, id) AS id,
+       epoch_ms(min(started_at)) AS started_at_ms
      FROM request_events
      WHERE user_id = ? AND (? IS NULL OR provider_id = ?)
-     ORDER BY started_at DESC
+     GROUP BY coalesce(downstream_request_id, id)
+     ORDER BY started_at_ms DESC
      LIMIT ?`,
     [
       sqlText(query.userId),
@@ -228,13 +261,126 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
     ],
   );
 
+  const ids = heads.map((row) => string(row, "id"));
+
+  if (ids.length === 0) return { requests: [] };
+
+  const grouped = groupByRequest(readRows(db, query.userId, ids));
+
   return {
-    requests: rows.map((row) => ({
+    requests: heads.flatMap((row) => {
+      const attempts = grouped.get(string(row, "id"));
+
+      if (attempts === undefined) return [];
+
+      return [downstreamOf(string(row, "id"), attempts)];
+    }),
+  };
+}
+
+export function readRequest(db: DuckDb, query: RequestQuery): DownstreamRequest | null {
+  const attempts = groupByRequest(readRows(db, query.userId, [query.id])).get(query.id);
+
+  if (attempts === undefined) return null;
+
+  return downstreamOf(query.id, attempts);
+}
+
+export function readExchange(db: DuckDb, query: ExchangeQuery): Exchange | null {
+  const rows = db.query(
+    `SELECT
+       attempt_id, request_url, request_headers, request_body, response_status, response_body,
+       truncated
+     FROM request_exchanges
+     WHERE user_id = ? AND downstream_request_id = ? AND attempt_id = ?`,
+    [sqlText(query.userId), sqlText(query.id), sqlText(query.attemptId)],
+  );
+
+  const row = rows[0];
+
+  if (row === undefined) return null;
+
+  return {
+    attemptId: string(row, "attempt_id"),
+    requestUrl: string(row, "request_url"),
+    requestHeaders: string(row, "request_headers"),
+    requestBody: string(row, "request_body"),
+    responseStatus: nullableNumber(row, "response_status"),
+    responseBody: stringOrNull(row, "response_body"),
+    truncated: row.truncated === "true",
+  };
+}
+
+function readRows(db: DuckDb, userId: string, ids: readonly string[]): readonly RequestRow[] {
+  const rows = db.query(
+    `SELECT
+       id, coalesce(downstream_request_id, id) AS downstream_request_id, model, reference,
+       provider_kind, provider_id, api_key_id, project_url, session_id, status, input_tokens,
+       output_tokens, total_tokens, ttft_ms, duration_ms, tokens_per_second, cost_usd, error_kind,
+       streamed, epoch_ms(started_at) AS started_at_ms
+     FROM request_events
+     WHERE user_id = ? AND coalesce(downstream_request_id, id) IN (${placeholdersOf(ids.length)})
+     ORDER BY started_at ASC`,
+    [sqlText(userId), ...ids.map(sqlText)],
+  );
+
+  return rows.map(attemptOf);
+}
+
+function groupByRequest(rows: readonly RequestRow[]): Map<string, RequestRow[]> {
+  const grouped = new Map<string, RequestRow[]>();
+
+  for (const row of rows) {
+    const list = grouped.get(row.downstreamRequestId) ?? [];
+
+    list.push(row);
+    grouped.set(row.downstreamRequestId, list);
+  }
+
+  return grouped;
+}
+
+// The newest attempt decides the call's outcome: the router returns on the first success, so the
+// last attempt written is the one the caller got.
+function downstreamOf(id: string, rows: readonly RequestRow[]): DownstreamRequest {
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+
+  if (first === undefined || last === undefined) throw new Error(`request ${id} has no attempts`);
+
+  return {
+    id,
+    startedAt: first.attempt.startedAt,
+    status: last.attempt.status,
+    reference: last.attempt.reference,
+    apiKeyId: last.apiKeyId,
+    projectUrl: last.projectUrl,
+    sessionId: last.sessionId,
+    streamed: rows.some((row) => row.attempt.streamed),
+    attempts: rows.map((row) => row.attempt),
+  };
+}
+
+type RequestRow = {
+  readonly downstreamRequestId: string;
+  readonly apiKeyId: string | null;
+  readonly projectUrl: string | null;
+  readonly sessionId: string | null;
+  readonly attempt: RequestEvent;
+};
+
+function attemptOf(row: QueryRow): RequestRow {
+  return {
+    downstreamRequestId: string(row, "downstream_request_id"),
+    apiKeyId: stringOrNull(row, "api_key_id"),
+    projectUrl: stringOrNull(row, "project_url"),
+    sessionId: stringOrNull(row, "session_id"),
+    attempt: {
       id: string(row, "id"),
       model: string(row, "model"),
       reference: stringOrNull(row, "reference"),
       providerKind: string(row, "provider_kind"),
-      apiKeyId: stringOrNull(row, "api_key_id"),
+      providerId: string(row, "provider_id"),
       status: string(row, "status"),
       inputTokens: nullableNumber(row, "input_tokens"),
       outputTokens: nullableNumber(row, "output_tokens"),
@@ -246,7 +392,7 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
       errorKind: stringOrNull(row, "error_kind"),
       streamed: row.streamed === "true",
       startedAt: new Date(number(row, "started_at_ms")).toISOString(),
-    })),
+    },
   };
 }
 
@@ -309,6 +455,10 @@ function filterClause(filters: AnalyticsFilters): FilterClause {
   }
 
   return { clauses, params };
+}
+
+function placeholdersOf(count: number): string {
+  return Array.from({ length: count }, () => "?").join(", ");
 }
 
 function providerParam(value: string | null): SqlValue {

@@ -1,15 +1,13 @@
+import { Link } from "@tanstack/react-router";
+import { ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatExactTokens, formatMs, formatTps, formatUsd, formatWhen } from "../format";
-import { modelLabels } from "../model-labels";
-import { ModelName } from "../model-name";
-import { useProviders } from "../use-providers";
+import type { DownstreamRequest } from "../../shared/analytics";
+import { formatExactTokens, formatUsd, formatWhen } from "../format";
 import { useRequests } from "../use-requests";
 
 export function RequestsPanel() {
   const requests = useRequests(50);
-  const providers = useProviders();
-  const labels = modelLabels(providers.providers);
 
   return (
     <div className="space-y-4">
@@ -17,7 +15,7 @@ export function RequestsPanel() {
         <div>
           <h1 className="text-lg font-semibold">Requests</h1>
           <p className="text-sm text-muted-foreground">
-            The latest gateway attempts, including failures and aborts.
+            The latest calls into the gateway. Open one to see the upstream attempts it made.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={requests.refresh}>
@@ -32,7 +30,7 @@ export function RequestsPanel() {
       <Card>
         <CardHeader>
           <CardTitle>Recent requests</CardTitle>
-          <CardDescription>Last 50 attempts for this account.</CardDescription>
+          <CardDescription>Last 50 calls for this account, newest first.</CardDescription>
         </CardHeader>
         <CardContent>
           {requests.status === "loading" ? (
@@ -45,52 +43,20 @@ export function RequestsPanel() {
                 <thead className="text-left text-xs text-muted-foreground">
                   <tr className="border-b">
                     <th className="py-2 pr-3 font-medium">When</th>
-                    <th className="py-2 pr-3 font-medium">Model</th>
+                    <th className="py-2 pr-3 font-medium">Request</th>
                     <th className="py-2 pr-3 font-medium">Status</th>
+                    <th className="py-2 pr-3 text-right font-medium">Attempts</th>
                     <th className="py-2 pr-3 text-right font-medium">In</th>
                     <th className="py-2 pr-3 text-right font-medium">Out</th>
-                    <th className="py-2 pr-3 text-right font-medium">TTFT</th>
-                    <th className="py-2 pr-3 text-right font-medium">Speed</th>
-                    <th className="py-2 text-right font-medium">Cost</th>
+                    <th className="py-2 pr-3 text-right font-medium">Cost</th>
+                    <th className="py-2 text-right font-medium">
+                      <span className="sr-only">Details</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {requests.requests.map((request) => (
-                    <tr key={request.id} className="border-b">
-                      <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
-                        {formatWhen(request.startedAt)}
-                      </td>
-                      <td className="py-2 pr-3">
-                        <ModelName labels={labels} slug={request.model} className="text-xs" />
-                        {request.reference === null ||
-                        request.reference === request.model ? null : (
-                          <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
-                            {request.reference}
-                          </span>
-                        )}
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                          {request.providerKind}
-                          {request.streamed ? "" : " · sync"}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3">
-                        <StatusLabel status={request.status} />
-                        {request.errorKind === null ? null : (
-                          <span className="mt-0.5 block text-xs text-muted-foreground">
-                            {request.errorKind}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2 pr-3 text-right">
-                        {formatExactTokens(request.inputTokens)}
-                      </td>
-                      <td className="py-2 pr-3 text-right">
-                        {formatExactTokens(request.outputTokens)}
-                      </td>
-                      <td className="py-2 pr-3 text-right">{formatMs(request.ttftMs)}</td>
-                      <td className="py-2 pr-3 text-right">{formatTps(request.tokensPerSecond)}</td>
-                      <td className="py-2 text-right">{formatUsd(request.costUsd)}</td>
-                    </tr>
+                    <RequestRow key={request.id} request={request} />
                   ))}
                 </tbody>
               </table>
@@ -100,6 +66,62 @@ export function RequestsPanel() {
       </Card>
     </div>
   );
+}
+
+function RequestRow({ request }: { request: DownstreamRequest }) {
+  const failed = request.attempts.filter((attempt) => attempt.status !== "success").length;
+
+  return (
+    <tr className="border-b align-top last:border-0">
+      <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
+        {formatWhen(request.startedAt)}
+      </td>
+      <td className="py-2 pr-3">
+        <span className="block font-mono text-xs">
+          {request.reference ?? `Request ${request.id.slice(0, 8)}`}
+        </span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          {request.streamed ? "streamed" : "sync"}
+        </span>
+      </td>
+      <td className="py-2 pr-3">
+        <StatusLabel status={request.status} />
+        {failed === 0 ? null : (
+          <span className="mt-0.5 block text-xs text-muted-foreground">{failed} failed</span>
+        )}
+      </td>
+      <td className="py-2 pr-3 text-right">{request.attempts.length}</td>
+      <td className="py-2 pr-3 text-right">{formatExactTokens(totalOf(request, "inputTokens"))}</td>
+      <td className="py-2 pr-3 text-right">
+        {formatExactTokens(totalOf(request, "outputTokens"))}
+      </td>
+      <td className="py-2 pr-3 text-right">{formatUsd(totalOf(request, "costUsd"))}</td>
+      <td className="py-2 text-right">
+        <Button asChild variant="outline" size="sm" className="gap-1">
+          <Link
+            to="/requests/$requestId"
+            params={{ requestId: request.id }}
+            aria-label={`Open request ${request.reference ?? request.id}`}
+          >
+            View
+            <ChevronRightIcon className="size-3.5" />
+          </Link>
+        </Button>
+      </td>
+    </tr>
+  );
+}
+
+type TotalField = "inputTokens" | "outputTokens" | "costUsd";
+
+function totalOf(request: DownstreamRequest, field: TotalField): number | null {
+  const values = request.attempts
+    .map((attempt) => attempt[field])
+    .filter((value): value is number => value !== null);
+
+  if (values.length === 0) return null;
+
+  return values.reduce((sum, value) => sum + value, 0);
 }
 
 function StatusLabel({ status }: { status: string }) {

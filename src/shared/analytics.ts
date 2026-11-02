@@ -95,7 +95,7 @@ export const RequestEventSchema = v.object({
   model: v.string(),
   reference: v.nullable(v.string()),
   providerKind: v.string(),
-  apiKeyId: v.nullable(v.string()),
+  providerId: v.string(),
   status: v.string(),
   inputTokens: v.nullable(v.number()),
   outputTokens: v.nullable(v.number()),
@@ -109,9 +109,35 @@ export const RequestEventSchema = v.object({
   startedAt: v.string(),
 });
 
-export const RequestListSchema = v.object({
-  requests: v.array(RequestEventSchema),
+export const DownstreamRequestSchema = v.object({
+  id: v.string(),
+  startedAt: v.string(),
+  status: v.string(),
+  reference: v.nullable(v.string()),
+  apiKeyId: v.nullable(v.string()),
+  projectUrl: v.nullable(v.string()),
+  sessionId: v.nullable(v.string()),
+  streamed: v.boolean(),
+  attempts: v.array(RequestEventSchema),
 });
+
+export const RequestListSchema = v.object({
+  requests: v.array(DownstreamRequestSchema),
+});
+
+export const ExchangeSchema = v.object({
+  attemptId: v.string(),
+  requestUrl: v.string(),
+  requestHeaders: v.string(),
+  requestBody: v.string(),
+  responseStatus: v.nullable(v.number()),
+  responseBody: v.nullable(v.string()),
+  truncated: v.boolean(),
+});
+
+export const RequestParamsSchema = v.object({ id: v.string() });
+
+export const AttemptParamsSchema = v.object({ id: v.string(), attemptId: v.string() });
 
 export const ProjectListSchema = v.object({
   projects: v.array(v.string()),
@@ -126,6 +152,9 @@ export const analyticsPaths = {
   projects: "/api/analytics/projects",
   sessions: "/api/analytics/sessions",
   requests: "/api/requests",
+  request: (id: string) => `/api/requests/${encodeURIComponent(id)}`,
+  attempt: (id: string, attemptId: string) =>
+    `/api/requests/${encodeURIComponent(id)}/attempts/${encodeURIComponent(attemptId)}`,
 };
 
 export type AnalyticsSummary = v.InferOutput<typeof AnalyticsSummarySchema>;
@@ -141,6 +170,10 @@ export type AnalyticsFilterDimension = (typeof ANALYTICS_FILTER_DIMENSIONS)[numb
 export type AnalyticsFilters = Readonly<Record<AnalyticsFilterDimension, readonly string[]>>;
 
 export type RequestEvent = v.InferOutput<typeof RequestEventSchema>;
+
+export type DownstreamRequest = v.InferOutput<typeof DownstreamRequestSchema>;
+
+export type Exchange = v.InferOutput<typeof ExchangeSchema>;
 
 export type RequestList = v.InferOutput<typeof RequestListSchema>;
 

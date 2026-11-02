@@ -651,7 +651,10 @@ try {
     assert.equal(analytics.summary.errorRate, 0);
 
     const requests = await getJson(`${analyticsPaths.requests}?limit=10`, RequestListSchema, 200);
-    const streaming = requests.requests.find((request) => request.model === "claude");
+
+    const streaming = requests.requests
+      .flatMap((request) => request.attempts)
+      .find((request) => request.model === "claude");
 
     assert.ok(streaming, "the anthropic request is missing");
     assert.equal(streaming.streamed, true);
@@ -678,7 +681,7 @@ try {
     );
 
     assert.deepEqual(
-      requests.requests.map((request) => request.model),
+      requests.requests.flatMap((request) => request.attempts).map((request) => request.model),
       ["claude"],
     );
 
@@ -3425,7 +3428,9 @@ function chatRequest(model: string, stream: boolean): Promise<Response> {
 async function referenceRows(reference: string): Promise<readonly RequestEvent[]> {
   const list = await getJson(`${analyticsPaths.requests}?limit=20`, RequestListSchema, 200);
 
-  return list.requests.filter((request) => request.reference === reference);
+  return list.requests
+    .filter((request) => request.attempts.some((attempt) => attempt.reference === reference))
+    .flatMap((request) => request.attempts);
 }
 
 async function waitForRequests(

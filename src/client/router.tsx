@@ -19,6 +19,8 @@ import { OverviewPanel } from "./components/overview-panel";
 import { ModelRowHarness } from "./components/model-row-harness";
 import { isProviderTab, ProviderPage } from "./components/provider-page";
 import { ProvidersPanel } from "./components/providers-panel";
+import { AttemptPage } from "./components/attempt-page";
+import { RequestDetailPage } from "./components/request-detail-page";
 import { RequestsPanel } from "./components/requests-panel";
 import { TagsPanel } from "./components/tags-panel";
 import { SessionProvider, useSession } from "./use-session";
@@ -114,6 +116,18 @@ const requestsRoute = createRoute({
   component: RequestsPanel,
 });
 
+const requestDetailRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/requests/$requestId",
+  component: RequestDetailRoute,
+});
+
+const attemptRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/requests/$requestId/attempts/$attemptId",
+  component: AttemptRoute,
+});
+
 const errorsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/errors",
@@ -154,6 +168,8 @@ const routeTree = rootRoute.addChildren([
     harnessRoute,
     tagsRoute,
     requestsRoute,
+    requestDetailRoute,
+    attemptRoute,
     errorsRoute,
     apiKeysRoute,
     cliToolsRoute,
@@ -186,6 +202,18 @@ function ProviderDetailRoute() {
       onRemoved={() => void navigate({ to: "/providers" })}
     />
   );
+}
+
+function RequestDetailRoute() {
+  const { requestId } = requestDetailRoute.useParams();
+
+  return <RequestDetailPage requestId={requestId} />;
+}
+
+function AttemptRoute() {
+  const { requestId, attemptId } = attemptRoute.useParams();
+
+  return <AttemptPage requestId={requestId} attemptId={attemptId} />;
 }
 
 function CliToolDetailRoute() {

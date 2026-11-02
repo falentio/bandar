@@ -10,10 +10,17 @@ import {
   type AnalyticsFilters,
 } from "../shared/analytics";
 import { tagRefOf } from "../shared/slugs";
-import { readAnalytics, readProjectUrls, readRequests, readSessionIds } from "./analytics";
+import {
+  readAnalytics,
+  readExchange,
+  readProjectUrls,
+  readRequest,
+  readRequests,
+  readSessionIds,
+} from "./analytics";
 import { DuckDb } from "./duck/client";
 import { applyDuckMigrations } from "./duck/migrate";
-import { recordRequest, type RequestEventInput } from "./router/record";
+import { recordExchange, recordRequest, type RequestEventInput } from "./router/record";
 
 const NOW = new Date("2026-10-27T12:00:00.000Z");
 const DUCK_DIR = fileURLToPath(new URL("../../duckdb", import.meta.url));
@@ -45,6 +52,7 @@ function seeded(): DuckDb {
 function event(overrides: Partial<RequestEventInput>): RequestEventInput {
   return {
     userId: "user-1",
+    downstreamRequestId: crypto.randomUUID(),
     apiKeyId: "key-1",
     providerId: "provider-1",
     providerKind: "openai",
@@ -648,12 +656,13 @@ describe("readSessionIds", () => {
 });
 
 describe("readRequests", () => {
-  test("lists newest first with derived metrics", () => {
+  test("lists newest downstream request first with its attempts nested", () => {
     const db = seeded();
-    recordRequest(db, event({}));
+    recordRequest(db, event({ downstreamRequestId: "down-1" }));
     recordRequest(
       db,
       event({
+        downstreamRequestId: "down-2",
         streamed: false,
         ttftMs: null,
         durationMs: 800,
@@ -664,10 +673,175 @@ describe("readRequests", () => {
     const list = readRequests(db, { userId: "user-1", limit: 10 });
 
     expect(list.requests).toHaveLength(2);
+    expect(list.requests[0]?.id).toBe("down-2");
     expect(list.requests[0]?.startedAt).toBe("2026-10-27T11:00:00.000Z");
-    expect(list.requests[0]?.reference).toBe("fast");
     expect(list.requests[0]?.streamed).toBe(false);
-    expect(list.requests[0]?.tokensPerSecond).toBeNull();
-    expect(list.requests[1]?.tokensPerSecond).toBe(50);
+    expect(list.requests[0]?.attempts[0]?.tokensPerSecond).toBeNull();
+    expect(list.requests[1]?.attempts[0]?.tokensPerSecond).toBe(50);
+  });
+
+  test("keeps every attempt of one downstream request, in attempt order", () => {
+    const db = seeded();
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-1",
+        status: "error",
+        httpStatus: 429,
+        errorKind: "rate_limit",
+        startedAt: new Date("2026-10-27T10:00:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-1",
+        providerId: "provider-2",
+        startedAt: new Date("2026-10-27T10:00:05.000Z"),
+      }),
+    );
+
+    const list = readRequests(db, { userId: "user-1", limit: 10 });
+
+    expect(list.requests).toHaveLength(1);
+    expect(list.requests[0]?.status).toBe("success");
+    expect(list.requests[0]?.attempts.map((attempt) => attempt.providerKind)).toEqual([
+      "openai",
+      "openai",
+    ]);
+    expect(list.requests[0]?.attempts.map((attempt) => attempt.status)).toEqual([
+      "error",
+      "success",
+    ]);
+    expect(list.requests[0]?.attempts[0]?.errorKind).toBe("rate_limit");
+  });
+
+  test("a row written before the migration reads as its own downstream request", () => {
+    const db = seeded();
+    recordRequest(db, event({ downstreamRequestId: "down-1" }));
+    db.run("UPDATE request_events SET downstream_request_id = NULL");
+
+    const list = readRequests(db, { userId: "user-1", limit: 10 });
+
+    expect(list.requests).toHaveLength(1);
+    expect(list.requests[0]?.attempts).toHaveLength(1);
+    expect(list.requests[0]?.id).toBe(list.requests[0]?.attempts[0]?.id);
+  });
+
+  test("reads one downstream request by id with its attempts in order", () => {
+    const db = seeded();
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-1",
+        status: "error",
+        errorKind: "rate_limit",
+        startedAt: new Date("2026-10-27T10:00:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-1",
+        providerId: "provider-2",
+        sessionId: "session-1",
+        startedAt: new Date("2026-10-27T10:00:05.000Z"),
+      }),
+    );
+    recordRequest(db, event({ downstreamRequestId: "down-2" }));
+
+    const found = readRequest(db, { userId: "user-1", id: "down-1" });
+
+    expect(found?.id).toBe("down-1");
+    expect(found?.status).toBe("success");
+    expect(found?.sessionId).toBe("session-1");
+    expect(found?.attempts.map((attempt) => attempt.status)).toEqual(["error", "success"]);
+    expect(found?.attempts.map((attempt) => attempt.providerId)).toEqual([
+      "provider-1",
+      "provider-2",
+    ]);
+  });
+
+  test("reads the upstream exchange recorded for one attempt", () => {
+    const db = seeded();
+    const attemptId = recordRequest(db, event({ downstreamRequestId: "down-1" }));
+    recordExchange(db, {
+      attemptId,
+      userId: "user-1",
+      downstreamRequestId: "down-1",
+      exchange: {
+        requestUrl: "https://upstream.test/v1/chat/completions",
+        requestHeaders: JSON.stringify({ authorization: "Bearer ••••" }),
+        requestBody: JSON.stringify({ model: "gpt-fast" }),
+        responseStatus: 200,
+        responseBody: JSON.stringify({ choices: [] }),
+        truncated: false,
+      },
+      recordedAt: new Date("2026-10-27T10:00:01.000Z"),
+    });
+
+    const found = readExchange(db, { userId: "user-1", id: "down-1", attemptId });
+
+    expect(found?.requestUrl).toBe("https://upstream.test/v1/chat/completions");
+    expect(found?.responseStatus).toBe(200);
+    expect(found?.requestBody).toBe(JSON.stringify({ model: "gpt-fast" }));
+    expect(found?.truncated).toBe(false);
+  });
+
+  test("an exchange needs both the request id and the attempt id", () => {
+    const db = seeded();
+    const attemptId = recordRequest(db, event({ downstreamRequestId: "down-1" }));
+    recordExchange(db, {
+      attemptId,
+      userId: "user-1",
+      downstreamRequestId: "down-1",
+      exchange: {
+        requestUrl: "https://upstream.test/v1/chat/completions",
+        requestHeaders: "{}",
+        requestBody: "{}",
+        responseStatus: 200,
+        responseBody: "{}",
+        truncated: false,
+      },
+      recordedAt: new Date("2026-10-27T10:00:01.000Z"),
+    });
+
+    expect(readExchange(db, { userId: "user-1", id: "down-2", attemptId })).toBeNull();
+    expect(readExchange(db, { userId: "user-2", id: "down-1", attemptId })).toBeNull();
+  });
+
+  test("an unknown request id reads as null", () => {
+    const db = seeded();
+
+    expect(readRequest(db, { userId: "user-1", id: "missing" })).toBeNull();
+  });
+
+  test("another account cannot read the request", () => {
+    const db = seeded();
+    recordRequest(db, event({ downstreamRequestId: "down-1" }));
+
+    expect(readRequest(db, { userId: "user-2", id: "down-1" })).toBeNull();
+  });
+
+  test("a provider filter picks the listed requests and still returns every attempt", () => {
+    const db = seeded();
+    recordRequest(db, event({ downstreamRequestId: "down-1", providerId: "provider-1" }));
+    recordRequest(db, event({ downstreamRequestId: "down-2", providerId: "provider-1" }));
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-2",
+        providerId: "provider-2",
+        startedAt: new Date("2026-10-27T10:00:05.000Z"),
+      }),
+    );
+
+    const list = readRequests(db, { userId: "user-1", limit: 10, providerId: "provider-2" });
+
+    expect(list.requests.map((request) => request.id)).toEqual(["down-2"]);
+    expect(list.requests[0]?.attempts.map((attempt) => attempt.providerId)).toEqual([
+      "provider-1",
+      "provider-2",
+    ]);
   });
 });

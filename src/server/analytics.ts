@@ -223,8 +223,6 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
 export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
   const providerId = query.providerId ?? null;
 
-  // Only downstream requests with a matching attempt are listed, so a provider filter narrows the
-  // work rather than showing parents with nothing under them.
   const heads = db.query(
     `SELECT
        coalesce(downstream_request_id, id) AS id,

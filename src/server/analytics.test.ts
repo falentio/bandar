@@ -721,13 +721,25 @@ describe("readRequests", () => {
     expect(list.requests[0]?.id).toBe(list.requests[0]?.attempts[0]?.id);
   });
 
-  test("a provider filter narrows the listed attempts", () => {
+  test("a provider filter picks the listed requests and still returns every attempt", () => {
     const db = seeded();
     recordRequest(db, event({ downstreamRequestId: "down-1", providerId: "provider-1" }));
-    recordRequest(db, event({ downstreamRequestId: "down-2", providerId: "provider-2" }));
+    recordRequest(db, event({ downstreamRequestId: "down-2", providerId: "provider-1" }));
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-2",
+        providerId: "provider-2",
+        startedAt: new Date("2026-10-27T10:00:05.000Z"),
+      }),
+    );
 
     const list = readRequests(db, { userId: "user-1", limit: 10, providerId: "provider-2" });
 
     expect(list.requests.map((request) => request.id)).toEqual(["down-2"]);
+    expect(list.requests[0]?.attempts.map((attempt) => attempt.providerId)).toEqual([
+      "provider-1",
+      "provider-2",
+    ]);
   });
 });

@@ -32,6 +32,7 @@ export type RequestEvent = {
   readonly model: string;
   readonly reference: string | null;
   readonly providerKind: string;
+  readonly providerId: string;
   readonly apiKeyId: string | null;
   readonly status: string;
   readonly inputTokens: number | null;
@@ -254,7 +255,7 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
 
   const rows = db.query(
     `SELECT
-       id, downstream_request_id, model, reference, provider_kind, status, input_tokens,
+       id, downstream_request_id, model, reference, provider_kind, provider_id, status, input_tokens,
        output_tokens, total_tokens, ttft_ms, duration_ms, tokens_per_second, cost_usd, error_kind,
        streamed, epoch_ms(started_at) AS started_at_ms
      FROM request_events
@@ -274,6 +275,7 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
       model: string(row, "model"),
       reference: stringOrNull(row, "reference"),
       providerKind: string(row, "provider_kind"),
+      providerId: string(row, "provider_id"),
       apiKeyId: null,
       status: string(row, "status"),
       inputTokens: nullableNumber(row, "input_tokens"),

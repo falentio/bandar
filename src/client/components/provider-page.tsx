@@ -797,6 +797,7 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
               <tbody>
                 {requests.requests
                   .flatMap((request) => request.attempts)
+                  .filter((attempt) => attempt.providerId === providerId)
                   .map((request) => (
                     <tr key={request.id} className="border-b last:border-0">
                       <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">

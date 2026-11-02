@@ -229,7 +229,7 @@ function cardCopy(provider: Provider): CardCopy {
     };
   }
 
-  const description = `Connect a ${provider.name} account with a device code`;
+  const description = `Connect a ${provider.name} account`;
 
   return {
     title: `${provider.name} connection`,

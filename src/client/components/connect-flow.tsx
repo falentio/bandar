@@ -112,7 +112,7 @@ export function ConnectFlow({
           {phase.kind === "starting" ? "Starting…" : `Connect ${provider.name}`}
         </Button>
         <p className="text-xs text-muted-foreground">
-          Starts a device login. Approve the code on {provider.name}; this page waits for it.
+          Starts a login and waits for the account to connect.
         </p>
       </div>
     );

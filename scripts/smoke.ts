@@ -1734,11 +1734,14 @@ try {
 
     const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
     const model = detail.provider.models.find((row) => row.upstreamModel === "kimi-k3");
+    const auto = detail.provider.models.find((row) => row.upstreamModel === "default-model");
 
     assert.equal(detail.provider.models.length, 22);
     assert.equal(model?.alias, "Kimi K3");
-    assert.equal(model?.contextWindow, 176000);
+    assert.equal(model?.contextWindow, 1000000);
     assert.equal(model?.maxOutput, 32000);
+    assert.equal(auto?.contextWindow, 176000);
+    assert.equal(auto?.maxOutput, 24000);
     assert.equal(model?.inputPricePerMtok, null);
     assert.equal(model?.outputPricePerMtok, null);
     assert.deepEqual(model?.inputModalities, ["text", "image"]);

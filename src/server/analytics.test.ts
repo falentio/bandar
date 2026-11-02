@@ -709,6 +709,18 @@ describe("readRequests", () => {
     expect(list.requests[0]?.attempts[0]?.errorKind).toBe("rate_limit");
   });
 
+  test("a row written before the migration reads as its own downstream request", () => {
+    const db = seeded();
+    recordRequest(db, event({ downstreamRequestId: "down-1" }));
+    db.run("UPDATE request_events SET downstream_request_id = NULL");
+
+    const list = readRequests(db, { userId: "user-1", limit: 10 });
+
+    expect(list.requests).toHaveLength(1);
+    expect(list.requests[0]?.attempts).toHaveLength(1);
+    expect(list.requests[0]?.id).toBe(list.requests[0]?.attempts[0]?.id);
+  });
+
   test("a provider filter narrows the listed attempts", () => {
     const db = seeded();
     recordRequest(db, event({ downstreamRequestId: "down-1", providerId: "provider-1" }));

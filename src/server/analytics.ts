@@ -33,7 +33,6 @@ export type RequestEvent = {
   readonly reference: string | null;
   readonly providerKind: string;
   readonly providerId: string;
-  readonly apiKeyId: string | null;
   readonly status: string;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
@@ -228,7 +227,7 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
   // work rather than showing parents with nothing under them.
   const heads = db.query(
     `SELECT
-       downstream_request_id AS id,
+       coalesce(downstream_request_id, id) AS id,
        epoch_ms(min(started_at)) AS started_at_ms,
        arg_max(status, started_at) AS status,
        arg_max(reference, started_at) AS reference,
@@ -238,7 +237,7 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
        bool_or(streamed) AS streamed
      FROM request_events
      WHERE user_id = ? AND (? IS NULL OR provider_id = ?)
-     GROUP BY downstream_request_id
+     GROUP BY coalesce(downstream_request_id, id)
      ORDER BY started_at_ms DESC
      LIMIT ?`,
     [
@@ -255,11 +254,12 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
 
   const rows = db.query(
     `SELECT
-       id, downstream_request_id, model, reference, provider_kind, provider_id, status, input_tokens,
+       id, coalesce(downstream_request_id, id) AS downstream_request_id, model, reference,
+       provider_kind, provider_id, status, input_tokens,
        output_tokens, total_tokens, ttft_ms, duration_ms, tokens_per_second, cost_usd, error_kind,
        streamed, epoch_ms(started_at) AS started_at_ms
      FROM request_events
-     WHERE user_id = ? AND downstream_request_id IN (${placeholdersOf(ids.length)})
+     WHERE user_id = ? AND coalesce(downstream_request_id, id) IN (${placeholdersOf(ids.length)})
      ORDER BY started_at ASC`,
     [sqlText(query.userId), ...ids.map(sqlText)],
   );
@@ -276,7 +276,6 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
       reference: stringOrNull(row, "reference"),
       providerKind: string(row, "provider_kind"),
       providerId: string(row, "provider_id"),
-      apiKeyId: null,
       status: string(row, "status"),
       inputTokens: nullableNumber(row, "input_tokens"),
       outputTokens: nullableNumber(row, "output_tokens"),

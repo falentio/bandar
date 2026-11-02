@@ -96,7 +96,6 @@ export const RequestEventSchema = v.object({
   reference: v.nullable(v.string()),
   providerKind: v.string(),
   providerId: v.string(),
-  apiKeyId: v.nullable(v.string()),
   status: v.string(),
   inputTokens: v.nullable(v.number()),
   outputTokens: v.nullable(v.number()),

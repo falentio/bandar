@@ -310,6 +310,7 @@ function resolveProviders(
       hyper: endpoint("hyper"),
       opencode: endpoint("opencode"),
       zro: endpoint("zro"),
+      codebuddy: endpoint("codebuddy"),
     },
     rows,
   };

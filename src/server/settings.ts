@@ -155,6 +155,14 @@ const ZroSettingsSchema = v.pipe(
   v.strictObject({ baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.zro.baseUrl) }),
 );
 
+const CodebuddySettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({
+    baseUrl: endpointField(PROVIDER_ENDPOINT_SPECS.codebuddy.baseUrl),
+    authUrl: endpointField(PROVIDER_ENDPOINT_SPECS.codebuddy.authUrl),
+  }),
+);
+
 const UpdateSettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
@@ -186,6 +194,7 @@ const ProvidersSettingsSchema = v.pipe(
     hyper: v.optional(HyperSettingsSchema),
     opencode: v.optional(OpenCodeSettingsSchema),
     zro: v.optional(ZroSettingsSchema),
+    codebuddy: v.optional(CodebuddySettingsSchema),
   }),
 );
 

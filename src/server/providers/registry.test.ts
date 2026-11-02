@@ -8,7 +8,15 @@ import {
 import { TAG_SLUG } from "../../shared/slugs";
 import { builtInProviders, compatsOf, definitionFor, reservedProviderSlugs } from "./registry";
 
-const CHAT_ONLY_KINDS = ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper"] as const;
+const CHAT_ONLY_KINDS = [
+  "kilocode",
+  "tokenharbor",
+  "yeta",
+  "river",
+  "nous",
+  "hyper",
+  "codebuddy",
+] as const;
 
 describe("provider registry", () => {
   test("every kind declares at least one wire, and each wire's adapter is that kind's", () => {

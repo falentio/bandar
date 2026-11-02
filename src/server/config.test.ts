@@ -71,6 +71,8 @@ describe("config", () => {
       ["BANDAR_HYPER_API", "providers.hyper.baseUrl"],
       ["BANDAR_OPENCODE_API", "providers.opencode.baseUrl"],
       ["BANDAR_ZRO_API", "providers.zro.baseUrl"],
+      ["BANDAR_CODEBUDDY_API", "providers.codebuddy.baseUrl"],
+      ["BANDAR_CODEBUDDY_AUTH", "providers.codebuddy.authUrl"],
     ] as const) {
       const attempt = () => parseConfig({ [name]: "hyper.local" });
 
@@ -776,6 +778,8 @@ describe("the provider endpoints", () => {
       "providers.hyper.baseUrl": "default",
       "providers.opencode.baseUrl": "default",
       "providers.zro.baseUrl": "default",
+      "providers.codebuddy.baseUrl": "default",
+      "providers.codebuddy.authUrl": "default",
     });
   });
 

@@ -432,11 +432,11 @@ A built-in provider takes its name, slug, and default base URL from
 `BUILT_IN_PROVIDERS` and its kind from `BUILT_IN_PROVIDER_KINDS` in
 `src/shared/providers.ts`. Its behavior comes from the definition in
 `src/server/providers/<kind>/`. Its row has `origin = "builtin"` and is seeded
-for every account by `ensureBuiltInProviders`. There are eight: Kilo Code,
-Token Harbor, Yeta, River, Nous Portal, Hyper, OpenCode Go, and Zro. Each `index.ts`
-bundles its adapter with whatever else the provider has: a catalog for all eight,
-an `OAuthConnector` for Kilo Code and Nous Portal, and a `CredentialRenewer` for
-Nous Portal. The endpoints are not part of the definition: seeding reads the
+for every account by `ensureBuiltInProviders`. There are nine: Kilo Code,
+Token Harbor, Yeta, River, Nous Portal, Hyper, OpenCode Go, Zro, and CodeBuddy.
+Each `index.ts` bundles its adapter with whatever else the provider has: a catalog
+for all nine, an `OAuthConnector` for Kilo Code, Nous Portal, and CodeBuddy, and a
+`CredentialRenewer` for Nous Portal and CodeBuddy. The endpoints are not part of the definition: seeding reads the
 resolved config's `baseUrl` for the kind and updates the row in place when it
 changed. The gateway reads the resolved endpoint directly, so an edit reaches it
 on the next request, and the seeded row catches up on the next listing. Built-in rows
@@ -451,8 +451,8 @@ restore the reserved slug. Built-ins appear in `BUILT_IN_PROVIDER_KINDS` order,
 even when one is seeded later than the rest.
 
 The distinction is about existence, not wire shape. Token Harbor, Yeta, River,
-Nous Portal, and Hyper build the shared OpenAI adapter, and their `index.ts` adds
-only the catalog, the login, or the renewal that is theirs. Kilo Code needs its
+Nous Portal, Hyper, and CodeBuddy build the shared OpenAI adapter, and their
+`index.ts` adds only the catalog, the login, or the renewal that is theirs. Kilo Code needs its
 own adapter headers, and OpenCode Go is the one built-in that serves four wires.
 Zro speaks chat on the shared OpenAI adapter and messages on the Anthropic one,
 both at its one base URL and both under a bearer key, so neither route needs a
@@ -941,6 +941,16 @@ An OAuth connector that needs an account identifier should look it up during
 `poll` and return it in the bundle, as Kilo Code does with `organizationId`. The
 adapter then decides whether that identifier becomes a header.
 
+CodeBuddy hands the login to the browser instead of showing a code. Its start
+posts to `/v2/plugin/auth/state` and the response already carries the URL the user
+should open, so the connector returns an empty `userCode`, and the dashboard
+renders the handoff copy with the Open button rather than a code block. The poll
+reads `/v2/plugin/auth/token` until the envelope stops answering `11217`, then
+looks the account up by uid and stores it as `organizationId`, which becomes the
+`X-User-Id` and `X-Userinfo` headers. There is no model endpoint to read: the
+catalog is the CLI's own product manifest, so `models.ts` answers it in code, and
+every row imports unpriced because CodeBuddy bills credits rather than dollars.
+
 ## OAuth renewal
 
 A definition may carry a `CredentialRenewer` beside its connector:
@@ -989,7 +999,7 @@ fails the same way.
 
 The smoke run is the adapter conformance suite. It boots the compiled binary,
 points one custom provider of each generic wire at a local fake upstream, checks
-that the eight built-in rows were seeded with their auth modes and catalogs, drives
+that the nine built-in rows were seeded with their auth modes and catalogs, drives
 the gateway with a gateway key, and reads the analytics row back. That covers key
 decryption, header construction, request translation, non-stream parsing, SSE
 parsing, usage extraction, finish normalization, TTFT, and tokens-per-second.

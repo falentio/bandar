@@ -6,6 +6,7 @@ import {
 } from "../../shared/providers";
 import { TAG_SLUG } from "../../shared/slugs";
 import { anthropic } from "./anthropic";
+import { codebuddy } from "./codebuddy";
 import { google } from "./google";
 import { hyper } from "./hyper";
 import { kilocode } from "./kilocode";
@@ -38,6 +39,7 @@ const builtInDefinitions = {
   hyper,
   opencode,
   zro,
+  codebuddy,
 } satisfies BuiltInProviderDefinitions;
 
 const providerDefinitions: ProviderDefinitionRecord = {

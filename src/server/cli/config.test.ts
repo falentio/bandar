@@ -88,7 +88,7 @@ describe("the config command", () => {
 
     expect(code).toBe(0);
     expect(stderr).toEqual([]);
-    expect(stdout).toHaveLength(20);
+    expect(stdout).toHaveLength(22);
 
     const printed = lineOf(stdout, "mode").replace(/^mode\s+/u, "");
 
@@ -246,6 +246,8 @@ describe("the config command", () => {
       "providers.hyper.baseUrl",
       "providers.opencode.baseUrl",
       "providers.zro.baseUrl",
+      "providers.codebuddy.baseUrl",
+      "providers.codebuddy.authUrl",
       "update.webUrl",
       "update.apiUrl",
     ]);

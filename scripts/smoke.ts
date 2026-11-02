@@ -4595,6 +4595,16 @@ function startBuiltIns() {
           return jsonError(400, "codebuddy chat wants the user info header");
         }
 
+        const conversationHeaders = [
+          "x-conversation-id",
+          "x-conversation-request-id",
+          "x-conversation-message-id",
+        ];
+
+        if (conversationHeaders.some((name) => (request.headers.get(name) ?? "") === "")) {
+          return jsonError(400, "codebuddy chat wants the conversation ids");
+        }
+
         codebuddyState.userIds.push(userId);
 
         return Response.json({

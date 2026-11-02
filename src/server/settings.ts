@@ -10,6 +10,8 @@ export const SETTINGS_SCHEMA_FILE = "config.schema.json";
 
 export const SETTINGS_SCHEMA_REF = `./${SETTINGS_SCHEMA_FILE}`;
 
+export const DEFAULT_MAX_LOG_AGE_DAYS = 7;
+
 // valibot reads a JSON array as an object with no keys, so an array would boot on defaults instead
 // of naming the typo. This runs before strictObject, which only sees the keys it copies.
 const notAnArray = v.custom((value) => !Array.isArray(value), "must hold an object");
@@ -198,6 +200,25 @@ const ProvidersSettingsSchema = v.pipe(
   }),
 );
 
+const LogsSettingsSchema = v.pipe(
+  notAnArray,
+  v.strictObject({
+    maxAgeDays: v.optional(
+      v.pipe(
+        v.number(),
+        v.integer(),
+        v.minValue(0),
+        v.description(
+          "Days of request log to keep. Older rows are deleted at startup and every hour; " +
+            "0 keeps them forever. Defaults to " +
+            String(DEFAULT_MAX_LOG_AGE_DAYS) +
+            ".",
+        ),
+      ),
+    ),
+  }),
+);
+
 export const SettingsSchema = v.pipe(
   notAnArray,
   v.strictObject({
@@ -211,6 +232,7 @@ export const SettingsSchema = v.pipe(
     ),
     server: v.optional(ServerSettingsSchema),
     providers: v.optional(ProvidersSettingsSchema),
+    logs: v.optional(LogsSettingsSchema),
     update: v.optional(UpdateSettingsSchema),
   }),
   v.metadata({

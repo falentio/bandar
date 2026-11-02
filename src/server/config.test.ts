@@ -887,3 +887,33 @@ describe("the update feed", () => {
     expect(attempt).toThrow("update.pageUrl");
   });
 });
+
+describe("the request log window", () => {
+  test("a week is the default", () => {
+    expect(fromFile("{}").logRetention).toEqual({ kind: "days", days: 7 });
+  });
+
+  test("the file sets the window in days", () => {
+    expect(fromFile('{"logs":{"maxAgeDays":30}}').logRetention).toEqual({ kind: "days", days: 30 });
+  });
+
+  test("a window of zero keeps the log forever", () => {
+    expect(fromFile('{"logs":{"maxAgeDays":0}}').logRetention).toEqual({ kind: "forever" });
+  });
+
+  test("a negative or fractional window fails the boot, naming the key", () => {
+    for (const value of [-1, 1.5]) {
+      const attempt = () => fromFile(`{"logs":{"maxAgeDays":${String(value)}}}`);
+
+      expect(attempt).toThrow(ConfigError);
+      expect(attempt).toThrow("logs.maxAgeDays");
+    }
+  });
+
+  test("an unknown key inside logs fails the boot", () => {
+    const attempt = () => fromFile('{"logs":{"maxAge":7}}');
+
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow("logs.maxAge");
+  });
+});

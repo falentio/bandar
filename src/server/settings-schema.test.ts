@@ -2,7 +2,7 @@ import * as v from "valibot";
 import { describe, expect, test } from "vite-plus/test";
 import { BUILT_IN_PROVIDER_KINDS } from "../shared/providers";
 import { DEFAULT_API_PORT, MAX_PORT, MIN_PORT } from "../shared/topology";
-import { SETTINGS_SCHEMA_TEXT, settingsSchema } from "./settings";
+import { DEFAULT_MAX_LOG_AGE_DAYS, SETTINGS_SCHEMA_TEXT, settingsSchema } from "./settings";
 
 // The generated document is parsed before it is read, so a keyword this test does not expect fails
 // here rather than sliding past an assertion that only checks the keys it happens to know.
@@ -60,6 +60,18 @@ const GeneratedSchema = v.strictObject({
         codebuddy: ProviderObject,
       }),
     }),
+    logs: v.strictObject({
+      type: v.literal("object"),
+      additionalProperties: v.literal(false),
+      required: v.array(v.string()),
+      properties: v.strictObject({
+        maxAgeDays: v.looseObject({
+          type: v.literal("integer"),
+          minimum: v.number(),
+          description: v.string(),
+        }),
+      }),
+    }),
     update: v.strictObject({
       type: v.literal("object"),
       additionalProperties: v.literal(false),
@@ -78,6 +90,8 @@ const server = document.properties.server.properties;
 
 const providers = document.properties.providers.properties;
 
+const logs = document.properties.logs.properties;
+
 const update = document.properties.update.properties;
 
 describe("the generated schema", () => {
@@ -88,7 +102,13 @@ describe("the generated schema", () => {
   });
 
   test("it lists the keys the parser reads, and no others", () => {
-    expect(Object.keys(document.properties)).toEqual(["$schema", "server", "providers", "update"]);
+    expect(Object.keys(document.properties)).toEqual([
+      "$schema",
+      "server",
+      "providers",
+      "logs",
+      "update",
+    ]);
     expect(Object.keys(server)).toEqual(["host", "port", "tailscale", "authUrl", "trustedOrigins"]);
     expect(Object.keys(providers)).toEqual([...BUILT_IN_PROVIDER_KINDS]);
     expect(Object.keys(providers.kilocode.properties)).toEqual(["baseUrl", "catalogUrl"]);
@@ -100,6 +120,7 @@ describe("the generated schema", () => {
     expect(Object.keys(providers.opencode.properties)).toEqual(["baseUrl"]);
     expect(Object.keys(providers.zro.properties)).toEqual(["baseUrl"]);
     expect(Object.keys(providers.codebuddy.properties)).toEqual(["baseUrl", "authUrl"]);
+    expect(Object.keys(logs)).toEqual(["maxAgeDays"]);
     expect(Object.keys(update)).toEqual(["webUrl", "apiUrl"]);
   });
 
@@ -107,6 +128,7 @@ describe("the generated schema", () => {
     expect(document.required).toEqual([]);
     expect(document.properties.server.required).toEqual([]);
     expect(document.properties.providers.required).toEqual([]);
+    expect(document.properties.logs.required).toEqual([]);
     expect(document.properties.update.required).toEqual([]);
 
     for (const provider of Object.values(providers)) expect(provider.required).toEqual([]);
@@ -121,6 +143,7 @@ describe("the generated schema", () => {
     const fields = [
       ...Object.values(server),
       ...Object.values(providers).flatMap((provider) => Object.values(provider.properties)),
+      ...Object.values(logs),
       ...Object.values(update),
       document.properties.$schema,
     ];
@@ -131,6 +154,10 @@ describe("the generated schema", () => {
 
   test("the port defaults in the help come from the constants", () => {
     expect(server.port.description).toContain(String(DEFAULT_API_PORT));
+  });
+
+  test("the log window default in the help comes from the constant", () => {
+    expect(logs.maxAgeDays.description).toContain(String(DEFAULT_MAX_LOG_AGE_DAYS));
   });
 
   test("the text written beside the settings is the document", () => {

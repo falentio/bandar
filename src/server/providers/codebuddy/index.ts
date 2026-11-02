@@ -2,7 +2,7 @@ import type { Credential } from "../../credential";
 import { BUILT_IN_PROVIDERS } from "../../../shared/providers";
 import { secretOf, type WireHeaders } from "../http";
 import { chatAdapter } from "../openai/compatible";
-import { always, UpstreamError, type BuiltInProviderDefinition } from "../types";
+import { always, type BuiltInProviderDefinition } from "../types";
 import { fetchCodebuddyCatalog } from "./models";
 import { codebuddyConnector } from "./oauth";
 import { codebuddyRenewal } from "./renewal";
@@ -30,11 +30,6 @@ export const codebuddy: BuiltInProviderDefinition<"codebuddy"> = {
 
 function codebuddyHeaders(credential: Credential): WireHeaders {
   const secret = secretOf(credential);
-
-  if (secret === "") {
-    throw new UpstreamError("codebuddy needs a token before it can be called", "auth");
-  }
-
   const uid = credential.authMode === "oauth" ? credential.organizationId : null;
 
   if (uid === null) return { authorization: `Bearer ${secret}` };

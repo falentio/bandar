@@ -112,7 +112,7 @@ export function ConnectFlow({
           {phase.kind === "starting" ? "Starting…" : `Connect ${provider.name}`}
         </Button>
         <p className="text-xs text-muted-foreground">
-          Starts a device login. Approve the code on {provider.name}; this page waits for it.
+          Starts a login and waits for the account to connect.
         </p>
       </div>
     );
@@ -144,14 +144,20 @@ export function ConnectFlow({
         <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
         <span>Waiting for approval</span>
       </div>
-      <div className="grid gap-1">
+      {phase.login.userCode === null ? (
         <p className="text-xs text-muted-foreground">
-          Enter this code at {hostOf(phase.login.verificationUrl)}:
+          Approve the login in your browser; this page waits for it.
         </p>
-        <code className="font-mono text-lg font-medium tracking-[0.2em]">
-          {phase.login.userCode}
-        </code>
-      </div>
+      ) : (
+        <div className="grid gap-1">
+          <p className="text-xs text-muted-foreground">
+            Enter this code at {hostOf(phase.login.verificationUrl)}:
+          </p>
+          <code className="font-mono text-lg font-medium tracking-[0.2em]">
+            {phase.login.userCode}
+          </code>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Button asChild size="sm" variant="outline">
           <a href={phase.login.verificationUrl} target="_blank" rel="noreferrer">

@@ -57,6 +57,7 @@ const GeneratedSchema = v.strictObject({
         hyper: ProviderObject,
         opencode: ProviderObject,
         zro: ProviderObject,
+        codebuddy: ProviderObject,
       }),
     }),
     update: v.strictObject({
@@ -98,6 +99,7 @@ describe("the generated schema", () => {
     expect(Object.keys(providers.hyper.properties)).toEqual(["baseUrl"]);
     expect(Object.keys(providers.opencode.properties)).toEqual(["baseUrl"]);
     expect(Object.keys(providers.zro.properties)).toEqual(["baseUrl"]);
+    expect(Object.keys(providers.codebuddy.properties)).toEqual(["baseUrl", "authUrl"]);
     expect(Object.keys(update)).toEqual(["webUrl", "apiUrl"]);
   });
 

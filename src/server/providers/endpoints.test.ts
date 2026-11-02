@@ -40,6 +40,11 @@ describe("provider endpoints", () => {
       hyper: { baseUrl: "https://hyper.charm.land/v1", catalogUrl: null, authUrl: null },
       opencode: { baseUrl: "https://opencode.ai/inference", catalogUrl: null, authUrl: null },
       zro: { baseUrl: "https://zro.moonmath.ai/v1", catalogUrl: null, authUrl: null },
+      codebuddy: {
+        baseUrl: "https://www.codebuddy.ai/v2",
+        catalogUrl: null,
+        authUrl: "https://www.codebuddy.ai",
+      },
     });
   });
 
@@ -48,7 +53,7 @@ describe("provider endpoints", () => {
       const specs = endpointSpecsFor(kind);
 
       expect(specs.catalogUrl !== undefined, kind).toBe(kind === "kilocode" || kind === "river");
-      expect(specs.authUrl !== undefined, kind).toBe(kind === "nous");
+      expect(specs.authUrl !== undefined, kind).toBe(kind === "nous" || kind === "codebuddy");
     }
   });
 
@@ -64,6 +69,8 @@ describe("provider endpoints", () => {
     expect(endpointSpecsFor("hyper").baseUrl.env).toBe("BANDAR_HYPER_API");
     expect(endpointSpecsFor("opencode").baseUrl.env).toBe("BANDAR_OPENCODE_API");
     expect(endpointSpecsFor("zro").baseUrl.env).toBe("BANDAR_ZRO_API");
+    expect(endpointSpecsFor("codebuddy").baseUrl.env).toBe("BANDAR_CODEBUDDY_API");
+    expect(endpointSpecsFor("codebuddy").authUrl?.env).toBe("BANDAR_CODEBUDDY_AUTH");
   });
 
   test("the mounts are the path each kind appends to an origin", () => {
@@ -76,6 +83,7 @@ describe("provider endpoints", () => {
       hyper: "/v1",
       opencode: "/inference",
       zro: "/v1",
+      codebuddy: "/v2",
     });
   });
 

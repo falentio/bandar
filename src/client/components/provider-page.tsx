@@ -66,6 +66,7 @@ const PLACEHOLDERS: Record<ProviderKind, string> = {
   hyper: BUILT_IN_PROVIDERS.hyper.baseUrl,
   opencode: BUILT_IN_PROVIDERS.opencode.baseUrl,
   zro: BUILT_IN_PROVIDERS.zro.baseUrl,
+  codebuddy: BUILT_IN_PROVIDERS.codebuddy.baseUrl,
 };
 
 function credentialsTabName(authModes: readonly ProviderAuthMode[]): string {

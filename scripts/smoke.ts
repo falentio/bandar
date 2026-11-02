@@ -192,6 +192,23 @@ type NousState = {
 };
 
 const nousState: NousState = { deviceStarts: 0, polls: 0, refreshToken: "rt-1", presented: [] };
+
+type CodebuddyState = {
+  polls: number;
+  refreshToken: string;
+  presented: string[];
+  userIds: string[];
+  refreshDelayMs: number;
+};
+
+const codebuddyState: CodebuddyState = {
+  polls: 0,
+  refreshToken: "cb-rt-1",
+  presented: [],
+  userIds: [],
+  refreshDelayMs: 0,
+};
+
 const opencodeState = { requests: 0 };
 const builtIns = startBuiltIns();
 const builtInsOrigin = `http://127.0.0.1:${builtIns.port}`;
@@ -208,6 +225,7 @@ const nousProvider: ProviderSlot = { provider: null, modelId: "" };
 const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
 const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
 const zroProvider: ProviderSlot = { provider: null, modelId: "" };
+const codebuddyProvider: ProviderSlot = { provider: null, modelId: "" };
 const wireProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
 let overrideModelId = "";
@@ -267,7 +285,7 @@ try {
 
     assert.deepEqual(
       builtIn.map((provider) => provider.kind),
-      ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper", "opencode", "zro"],
+      ["kilocode", "tokenharbor", "yeta", "river", "nous", "hyper", "opencode", "zro", "codebuddy"],
     );
 
     const byKind = new Map(builtIn.map((provider) => [provider.kind, provider]));
@@ -354,6 +372,17 @@ try {
     assert.deepEqual(zro.compats, ["chat", "messages"]);
     assert.equal(zro.hasCatalog, true);
 
+    const codebuddy = byKind.get("codebuddy");
+
+    if (codebuddy === undefined) throw new Error("the built-in CodeBuddy provider is missing");
+
+    assert.equal(codebuddy.name, "CodeBuddy");
+    assert.equal(codebuddy.slug, "codebuddy");
+    assert.equal(codebuddy.baseUrl, `${builtInsOrigin}/codebuddy/v2`);
+    assert.deepEqual(codebuddy.authModes, ["oauth", "api-key"]);
+    assert.deepEqual(codebuddy.compats, ["chat"]);
+    assert.equal(codebuddy.hasCatalog, true);
+
     kiloProvider.provider = kilo;
     tokenharborProvider.provider = harbor;
     yetaProvider.provider = yeta;
@@ -362,6 +391,7 @@ try {
     hyperProvider.provider = hyper;
     opencodeProvider.provider = opencode;
     zroProvider.provider = zro;
+    codebuddyProvider.provider = codebuddy;
   });
 
   await check("POST /api/providers creates a provider without models", async () => {
@@ -447,7 +477,7 @@ try {
     const builtIn = list.providers.filter((provider) => provider.origin === "builtin");
 
     assert.equal(custom.length, 3);
-    assert.equal(builtIn.length, 8);
+    assert.equal(builtIn.length, 9);
     assert.equal(list.providers[0]?.origin, "builtin");
     assert.ok(custom.every((provider) => provider.credentials.length > 0));
     assert.equal(builtIn[0]?.credentials.length, 0);
@@ -1670,6 +1700,104 @@ try {
     const response = await chatRequest("nous/nous-text-large", false);
 
     assert.equal(response.status, 200);
+  });
+
+  await check("the CodeBuddy login approves in the browser and connects", async () => {
+    const id = codebuddyProvider.provider?.id ?? "";
+
+    const start = await postJson(providerPaths.oauthStart(id), {}, ProviderOAuthStartSchema, 200);
+
+    assert.equal(start.userCode, null);
+    assert.equal(start.verificationUrl, "https://www.codebuddy.ai/login?state=cb-state-1");
+    assert.equal(start.expiresInSeconds, 300);
+    assert.equal(start.intervalSeconds, 2);
+
+    const pending = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(pending.state, "pending");
+
+    const connected = await postJson(providerPaths.oauthPoll(id), {}, ProviderOAuthPollSchema, 200);
+
+    assert.equal(connected.state, "connected");
+    assert.equal(connected.authMode, "oauth");
+  });
+
+  await check("the CodeBuddy catalog is its static manifest", async () => {
+    const id = codebuddyProvider.provider?.id ?? "";
+
+    const refresh = await postJson(
+      providerPaths.refreshModels(id),
+      {},
+      ProviderModelRefreshSchema,
+      200,
+    );
+
+    assert.equal(refresh.added, 22);
+
+    const detail = await getJson(`${providerPaths.detail(id)}?days=30`, ProviderDetailSchema, 200);
+    const model = detail.provider.models.find((row) => row.upstreamModel === "kimi-k3");
+    const auto = detail.provider.models.find((row) => row.upstreamModel === "default-model");
+
+    assert.equal(detail.provider.models.length, 22);
+    assert.equal(model?.alias, "Kimi K3");
+    assert.equal(model?.contextWindow, 1000000);
+    assert.equal(model?.maxOutput, 32000);
+    assert.equal(auto?.contextWindow, 176000);
+    assert.equal(auto?.maxOutput, 24000);
+    assert.equal(model?.inputPricePerMtok, null);
+    assert.equal(model?.outputPricePerMtok, null);
+    assert.deepEqual(model?.inputModalities, ["text", "image"]);
+  });
+
+  await check("the CodeBuddy answers chat with its bearer and user headers", async () => {
+    const response = await chatRequest("codebuddy/kimi-k3", false);
+
+    assert.equal(response.status, 200);
+
+    const body = v.parse(CompletionSchema, await response.json());
+
+    assert.equal(body.choices[0]?.message.content, "Hello from CodeBuddy");
+    assert.equal(codebuddyState.userIds.at(-1), "cb-user-1");
+  });
+
+  await check("two concurrent CodeBuddy chats share one renewal", async () => {
+    const before = codebuddyState.presented.length;
+
+    codebuddyState.refreshDelayMs = 400;
+
+    const responses = await Promise.all([
+      chatRequest("codebuddy/kimi-k3", false),
+      chatRequest("codebuddy/kimi-k3", false),
+    ]);
+
+    assert.deepEqual(
+      responses.map((response) => response.status),
+      [200, 200],
+    );
+    assert.equal(codebuddyState.presented.length, before + 1);
+
+    codebuddyState.refreshDelayMs = 0;
+  });
+
+  await check("a spent CodeBuddy refresh token is an auth failure", async () => {
+    const spent = await fetch(new URL("/codebuddy/v2/plugin/auth/token/refresh", builtInsOrigin), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-refresh-token": "cb-rt-1",
+        "x-auth-refresh-source": "plugin",
+      },
+      body: "{}",
+    });
+
+    assert.equal(spent.status, 401);
+
+    codebuddyState.refreshToken = "cb-rt-elsewhere";
+
+    const response = await chatRequest("codebuddy/kimi-k3", false);
+
+    assert.equal(response.status, 502);
+    assert.equal((await openAiError(response)).code, "auth");
   });
 
   await check("providers carry derived slugs and model refs", async () => {
@@ -3102,7 +3230,7 @@ try {
         .filter((provider) => provider.origin === "builtin")
         .map((provider) => provider.kind)
         .sort(),
-      ["hyper", "kilocode", "nous", "opencode", "river", "tokenharbor", "yeta", "zro"],
+      ["codebuddy", "hyper", "kilocode", "nous", "opencode", "river", "tokenharbor", "yeta", "zro"],
       "a built-in provider was seeded twice",
     );
   });
@@ -3173,6 +3301,10 @@ async function boot(port = 0, timeoutMs = BOOT_TIMEOUT_MS): Promise<Booted> {
         hyper: { baseUrl: `${builtInsOrigin}/hyper/v1` },
         opencode: { baseUrl: `${builtInsOrigin}/opencode/inference` },
         zro: { baseUrl: `${builtInsOrigin}/zro/v1` },
+        codebuddy: {
+          baseUrl: `${builtInsOrigin}/codebuddy/v2`,
+          authUrl: `${builtInsOrigin}/codebuddy`,
+        },
       },
     }),
   );
@@ -4373,6 +4505,106 @@ function startBuiltIns() {
           content: [{ type: "text", text: "Hello from Zro Messages" }],
           stop_reason: "end_turn",
           usage: { input_tokens: 5, output_tokens: 4 },
+        });
+      }
+
+      if (url.pathname === "/codebuddy/v2/plugin/auth/state" && request.method === "POST") {
+        if (request.headers.get("x-no-authorization") !== "true") {
+          return jsonError(400, "codebuddy state wants the no-auth headers");
+        }
+
+        if (url.searchParams.get("platform") !== "CLI") {
+          return jsonError(400, "codebuddy state wants the cli platform");
+        }
+
+        return Response.json({
+          code: 0,
+          data: {
+            state: "cb-state-1",
+            authUrl: "https://www.codebuddy.ai/login?state=cb-state-1",
+          },
+        });
+      }
+
+      if (url.pathname === "/codebuddy/v2/plugin/auth/token" && request.method === "GET") {
+        if (request.headers.get("x-no-user-id") !== "true") {
+          return jsonError(400, "codebuddy token wants the no-auth headers");
+        }
+
+        if (url.searchParams.get("state") !== "cb-state-1") {
+          return jsonError(400, "codebuddy token wants the state it issued");
+        }
+
+        codebuddyState.polls += 1;
+
+        if (codebuddyState.polls === 1) return Response.json({ code: 11217, msg: "pending" });
+
+        return Response.json({
+          code: 0,
+          data: { accessToken: "cb-access-1", refreshToken: "cb-rt-1", expiresIn: 0 },
+        });
+      }
+
+      if (url.pathname === "/codebuddy/v2/plugin/account" && request.method === "GET") {
+        if (authorization !== "Bearer cb-access-1") {
+          return jsonError(401, "bad codebuddy access token");
+        }
+
+        return Response.json({ code: 0, data: { uid: "cb-user-1", pluginEnabled: true } });
+      }
+
+      if (url.pathname === "/codebuddy/v2/plugin/auth/token/refresh" && request.method === "POST") {
+        if (request.headers.get("x-auth-refresh-source") !== "plugin") {
+          return jsonError(400, "codebuddy refresh wants the plugin source");
+        }
+
+        const presented = request.headers.get("x-refresh-token") ?? "";
+
+        codebuddyState.presented.push(presented);
+
+        if (presented !== codebuddyState.refreshToken) {
+          return jsonError(401, "spent codebuddy refresh token");
+        }
+
+        await Bun.sleep(codebuddyState.refreshDelayMs);
+
+        codebuddyState.refreshToken = `cb-rt-${String(codebuddyState.presented.length + 1)}`;
+
+        return Response.json({
+          code: 0,
+          data: {
+            accessToken: `cb-access-${String(codebuddyState.presented.length + 1)}`,
+            refreshToken: codebuddyState.refreshToken,
+            expiresIn: 0,
+          },
+        });
+      }
+
+      if (url.pathname === "/codebuddy/v2/chat/completions") {
+        if (!authorization.startsWith("Bearer cb-access-")) {
+          return jsonError(401, "bad codebuddy access token");
+        }
+
+        const userId = request.headers.get("x-user-id") ?? "";
+
+        if (userId === "") return jsonError(400, "codebuddy chat wants the user id");
+
+        const userInfo = Buffer.from(JSON.stringify({ uin: userId }), "utf8").toString("base64");
+
+        if (request.headers.get("x-userinfo") !== userInfo) {
+          return jsonError(400, "codebuddy chat wants the user info header");
+        }
+
+        codebuddyState.userIds.push(userId);
+
+        return Response.json({
+          choices: [
+            {
+              message: { role: "assistant", content: "Hello from CodeBuddy" },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 6, completion_tokens: 4 },
         });
       }
 

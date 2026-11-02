@@ -72,6 +72,10 @@ export const PROVIDER_ENDPOINT_SPECS = {
   zro: {
     baseUrl: baseUrl("zro", "BANDAR_ZRO_API"),
   },
+  codebuddy: {
+    baseUrl: baseUrl("codebuddy", "BANDAR_CODEBUDDY_API"),
+    authUrl: authUrl("BANDAR_CODEBUDDY_AUTH", "https://www.codebuddy.ai"),
+  },
 } satisfies Record<BuiltInProviderKind, EndpointSpecs>;
 
 export const PROVIDER_MOUNTS: Record<BuiltInProviderKind, string> = {
@@ -83,6 +87,7 @@ export const PROVIDER_MOUNTS: Record<BuiltInProviderKind, string> = {
   hyper: "/v1",
   opencode: "/inference",
   zro: "/v1",
+  codebuddy: "/v2",
 };
 
 export type ProviderEndpoint = {
@@ -152,4 +157,5 @@ export const DEFAULT_PROVIDER_ENDPOINTS: ProviderEndpoints = {
   hyper: defaultEndpoint("hyper"),
   opencode: defaultEndpoint("opencode"),
   zro: defaultEndpoint("zro"),
+  codebuddy: defaultEndpoint("codebuddy"),
 };

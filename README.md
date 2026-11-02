@@ -204,6 +204,9 @@ for a system one.
   },
   "update": {
     "webUrl": "https://github.com/falentio/bandar"
+  },
+  "logs": {
+    "maxAgeDays": 7
   }
 }
 ```
@@ -217,6 +220,12 @@ for a system one.
 | `server.trustedOrigins` | a non-empty array of origins | derived, see below                   |
 | `update.webUrl`         | an http or https URL         | `https://github.com/falentio/bandar` |
 | `update.apiUrl`         | an http or https URL         | none, so the public release page     |
+| `logs.maxAgeDays`       | a whole number of days       | `7`                                  |
+
+`logs.maxAgeDays` caps how much request log `bandar` keeps. At startup and then once an
+hour it deletes the requests and exchanges older than the window, so the log stops
+growing past it. `0` keeps every row. The request list and the analytics show what the
+window left, so a shorter window is a shorter history.
 
 `providers.<kind>` holds the endpoints of one built-in provider. Every field is a full
 http or https URL, and only the fields its kind uses exist:

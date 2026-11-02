@@ -22,7 +22,9 @@ import {
   type ProviderEndpoint,
   type ProviderEndpoints,
 } from "./providers/endpoints";
+import type { LogRetention } from "./retention";
 import {
+  DEFAULT_MAX_LOG_AGE_DAYS,
   HttpUrlSchema,
   OriginSchema,
   loadSettings,
@@ -43,6 +45,7 @@ export type Config = {
   readonly trustedOrigins: readonly string[];
   readonly providers: ProviderEndpoints;
   readonly update: { readonly webUrl: string; readonly apiUrl: string | null };
+  readonly logRetention: LogRetention;
 };
 
 export type RunMode = "development" | "production";
@@ -414,6 +417,7 @@ function buildConfig(
   const update = settings.update;
   const updateWebUrl = resolve(update?.webUrl, environment.BANDAR_RELEASE_WEB_URL, PUBLIC_WEB_URL);
   const updateApiUrl = resolve(update?.apiUrl, environment.BANDAR_RELEASE_API_URL, null);
+  const maxLogAgeDays = resolve(settings.logs?.maxAgeDays, undefined, DEFAULT_MAX_LOG_AGE_DAYS);
 
   return {
     config: {
@@ -428,6 +432,7 @@ function buildConfig(
       trustedOrigins: trustedOrigins.value,
       providers: providers.endpoints,
       update: { webUrl: updateWebUrl.value, apiUrl: updateApiUrl.value },
+      logRetention: logRetentionOf(maxLogAgeDays.value),
     },
     sources: {
       host: endpoint.host.source,
@@ -440,6 +445,11 @@ function buildConfig(
     },
     providerRows: providers.rows,
   };
+}
+
+/** The settings file writes "keep everything" as zero days. */
+function logRetentionOf(days: number): LogRetention {
+  return days === 0 ? { kind: "forever" } : { kind: "days", days };
 }
 
 type Resolved<T> = {

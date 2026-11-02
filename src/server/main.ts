@@ -15,6 +15,7 @@ import { clientFiles } from "./generated/client-assets";
 import { migrations } from "./generated/migrations";
 import { version } from "./generated/version";
 import { assignProviderSlugs } from "./providers/seeding";
+import { startHourlyRequestLogPruning } from "./retention";
 import { createSealer } from "./seal";
 import { settingsIo } from "./settings-io";
 
@@ -80,6 +81,10 @@ async function startServer(env: Env): Promise<void> {
       `${migration.current ?? "none"}; duckdb: ${duckMigration.applied.length} applied, ` +
       `${duckMigration.current ?? "none"}; client: ${client.kind})`,
   );
+
+  startHourlyRequestLogPruning(duck, config.logRetention, (pruned) => {
+    console.log(`bandar: pruned ${String(pruned.events + pruned.exchanges)} request log rows`);
+  });
 }
 
 process.exitCode = await main(Bun.env, Bun.argv.slice(2));

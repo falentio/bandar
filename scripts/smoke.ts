@@ -1705,7 +1705,7 @@ try {
 
     const start = await postJson(providerPaths.oauthStart(id), {}, ProviderOAuthStartSchema, 200);
 
-    assert.equal(start.userCode, "");
+    assert.equal(start.userCode, null);
     assert.equal(start.verificationUrl, "https://www.codebuddy.ai/login?state=cb-state-1");
     assert.equal(start.expiresInSeconds, 300);
     assert.equal(start.intervalSeconds, 2);
@@ -4560,7 +4560,6 @@ function startBuiltIns() {
           return jsonError(401, "spent codebuddy refresh token");
         }
 
-        // A slow rotation keeps a concurrent burst inside one renewal slot.
         await Bun.sleep(400);
 
         codebuddyState.refreshToken = `cb-rt-${String(codebuddyState.presented.length + 1)}`;

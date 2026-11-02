@@ -283,7 +283,7 @@ export const ProviderCredentialProbeSchema = v.object({
 });
 
 export const ProviderOAuthStartSchema = v.object({
-  userCode: v.string(),
+  userCode: v.nullable(v.string()),
   verificationUrl: v.string(),
   expiresInSeconds: v.number(),
   intervalSeconds: v.pipe(v.number(), v.minValue(1)),

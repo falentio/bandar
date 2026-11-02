@@ -165,7 +165,7 @@ export type ProviderCatalog = (request: CatalogRequest) => Promise<readonly Mode
 
 export type DeviceLogin = {
   readonly code: string;
-  readonly userCode: string;
+  readonly userCode: string | null;
   readonly verificationUrl: string;
   readonly expiresInSeconds: number;
   readonly intervalSeconds: number;

@@ -144,7 +144,7 @@ export function ConnectFlow({
         <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
         <span>Waiting for approval</span>
       </div>
-      {phase.login.userCode === "" ? (
+      {phase.login.userCode === null ? (
         <p className="text-xs text-muted-foreground">
           Approve the login in your browser; this page waits for it.
         </p>

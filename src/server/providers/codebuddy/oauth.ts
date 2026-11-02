@@ -64,7 +64,7 @@ export const codebuddyConnector: OAuthConnector = {
 
     return {
       code: parsed.output.data.state,
-      userCode: "",
+      userCode: null,
       verificationUrl: parsed.output.data.authUrl,
       expiresInSeconds: LOGIN_EXPIRES_SECONDS,
       intervalSeconds: LOGIN_INTERVAL_SECONDS,

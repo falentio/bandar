@@ -3,6 +3,10 @@ import { ProjectUrlSchema } from "./project";
 import { SessionIdSchema } from "./session-id";
 import { MAX_MODEL_REF_LENGTH, SlugSchema } from "./slugs";
 
+export const ANALYTICS_GRANULARITIES = ["hour", "day"] as const;
+
+export type AnalyticsGranularity = (typeof ANALYTICS_GRANULARITIES)[number];
+
 export const ANALYTICS_FILTER_DIMENSIONS = [
   "providerKind",
   "providerId",
@@ -60,8 +64,8 @@ export const AnalyticsSummarySchema = v.object({
   costUsd: v.number(),
 });
 
-export const DailyUsageSchema = v.object({
-  date: v.string(),
+export const UsageBucketSchema = v.object({
+  start: v.string(),
   requests: v.number(),
   inputTokens: v.number(),
   outputTokens: v.number(),
@@ -80,8 +84,9 @@ export const ModelUsageSchema = v.object({
 
 export const AnalyticsSchema = v.object({
   days: v.number(),
+  granularity: v.picklist(ANALYTICS_GRANULARITIES),
   summary: AnalyticsSummarySchema,
-  daily: v.array(DailyUsageSchema),
+  buckets: v.array(UsageBucketSchema),
   models: v.array(ModelUsageSchema),
 });
 
@@ -125,7 +130,7 @@ export const analyticsPaths = {
 
 export type AnalyticsSummary = v.InferOutput<typeof AnalyticsSummarySchema>;
 
-export type DailyUsage = v.InferOutput<typeof DailyUsageSchema>;
+export type UsageBucket = v.InferOutput<typeof UsageBucketSchema>;
 
 export type ModelUsage = v.InferOutput<typeof ModelUsageSchema>;
 
@@ -143,11 +148,24 @@ export type ProjectList = v.InferOutput<typeof ProjectListSchema>;
 
 export type SessionList = v.InferOutput<typeof SessionListSchema>;
 
-export const ANALYTICS_RANGES = [7, 30, 90] as const;
+export const ANALYTICS_RANGES = [1, 7, 30, 90] as const;
 
 export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
 
 export const DEFAULT_ANALYTICS_DAYS: AnalyticsRange = 30;
+
+/**
+ * A window's shape, derived from its span once so the server and the chart cannot disagree. One day
+ * reads hour by hour, or the chart would be a single bar.
+ */
+export function analyticsWindow(days: number): {
+  readonly granularity: AnalyticsGranularity;
+  readonly bucketCount: number;
+} {
+  return days === 1
+    ? { granularity: "hour", bucketCount: 24 }
+    : { granularity: "day", bucketCount: days };
+}
 
 export const EMPTY_ANALYTICS_FILTERS: AnalyticsFilters = {
   providerKind: [],

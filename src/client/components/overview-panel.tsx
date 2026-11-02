@@ -65,7 +65,7 @@ export function OverviewPanel() {
           aria-busy={analytics.status === "loading"}
           className={analytics.status === "loading" ? "space-y-4 opacity-60" : "space-y-4"}
         >
-          <OverviewStats summary={data.summary} daily={data.daily} days={data.days} />
+          <OverviewStats usage={data} />
 
           <Card>
             <CardHeader>
@@ -75,7 +75,7 @@ export function OverviewPanel() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <TokenChart daily={data.daily} />
+              <TokenChart usage={data} />
             </CardContent>
           </Card>
 

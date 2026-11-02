@@ -7,27 +7,29 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type { DailyUsage } from "../../shared/analytics";
-import { formatDay, formatExactTokens, formatTokens } from "../format";
+import type { Analytics } from "../../shared/analytics";
+import { formatBucket, formatExactTokens, formatTokens } from "../format";
 
 export const tokenSeries = {
   inputTokens: { label: "Input", color: "var(--chart-2)" },
   outputTokens: { label: "Output", color: "var(--chart-5)" },
 } satisfies ChartConfig;
 
-export function TokenChart({ daily }: { daily: readonly DailyUsage[] }) {
-  const requestsByDate = new Map(daily.map((day): [string, number] => [day.date, day.requests]));
+export function TokenChart({ usage }: { usage: Analytics }) {
+  const requestsByBucket = new Map(
+    usage.buckets.map((bucket): [string, number] => [bucket.start, bucket.requests]),
+  );
 
   return (
     <ChartContainer config={tokenSeries} className="aspect-auto h-56 w-full">
-      <BarChart accessibilityLayer data={[...daily]}>
+      <BarChart accessibilityLayer data={[...usage.buckets]}>
         <XAxis
-          dataKey="date"
+          dataKey="start"
           tickLine={false}
           axisLine={false}
           tickMargin={8}
           minTickGap={32}
-          tickFormatter={formatDay}
+          tickFormatter={(value: string) => formatBucket(value, usage.granularity)}
         />
         <YAxis
           width={44}
@@ -40,12 +42,12 @@ export function TokenChart({ daily }: { daily: readonly DailyUsage[] }) {
           content={
             <ChartTooltipContent
               labelFormatter={(label) => {
-                const date = String(label);
-                const requests = requestsByDate.get(date);
+                const bucket = formatBucket(String(label), usage.granularity);
+                const requests = requestsByBucket.get(String(label));
 
                 return requests === undefined
-                  ? formatDay(date)
-                  : `${formatDay(date)} · ${formatExactTokens(requests)} requests`;
+                  ? bucket
+                  : `${bucket} · ${formatExactTokens(requests)} requests`;
               }}
             />
           }

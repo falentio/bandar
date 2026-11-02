@@ -75,6 +75,57 @@ afterEach(() => {
 });
 
 describe("readAnalytics", () => {
+  test("a one-day window fills 24 hours and buckets events by the hour", () => {
+    const db = seeded();
+
+    recordRequest(db, event({ inputTokens: 100, outputTokens: 50 }));
+    recordRequest(
+      db,
+      event({
+        inputTokens: 200,
+        outputTokens: 100,
+        startedAt: new Date("2026-10-27T10:59:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        inputTokens: 400,
+        outputTokens: 200,
+        startedAt: new Date("2026-10-27T00:30:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        inputTokens: 999,
+        outputTokens: 999,
+        startedAt: new Date("2026-10-26T23:30:00.000Z"),
+      }),
+    );
+
+    const analytics = readAnalytics(db, {
+      userId: "user-1",
+      days: 1,
+      filters: EMPTY_ANALYTICS_FILTERS,
+      now: NOW,
+    });
+
+    expect(analytics.granularity).toBe("hour");
+    expect(analytics.buckets).toHaveLength(24);
+    expect(analytics.buckets[0]?.start).toBe("2026-10-27T00:00:00.000Z");
+    expect(analytics.buckets.at(-1)?.start).toBe("2026-10-27T23:00:00.000Z");
+    expect(analytics.buckets.find((bucket) => bucket.start === "2026-10-27T10:00:00.000Z")).toEqual(
+      expect.objectContaining({ requests: 2, inputTokens: 300, outputTokens: 150 }),
+    );
+    expect(analytics.buckets.find((bucket) => bucket.start === "2026-10-27T00:00:00.000Z")).toEqual(
+      expect.objectContaining({ requests: 1, inputTokens: 400 }),
+    );
+    expect(analytics.summary.requests).toBe(3);
+    expect(analytics.summary.inputTokens).toBe(700);
+    expect(analytics.summary.avgTokensPerDay).toBe(1050);
+  });
+
   test("summarizes the window, fills 30 days and excludes older events", () => {
     const db = seeded();
 
@@ -121,9 +172,10 @@ describe("readAnalytics", () => {
     });
 
     expect(analytics.days).toBe(30);
-    expect(analytics.daily).toHaveLength(30);
-    expect(analytics.daily[0]?.date).toBe("2026-09-28");
-    expect(analytics.daily.at(-1)?.date).toBe("2026-10-27");
+    expect(analytics.buckets).toHaveLength(30);
+    expect(analytics.granularity).toBe("day");
+    expect(analytics.buckets[0]?.start).toBe("2026-09-28T00:00:00.000Z");
+    expect(analytics.buckets.at(-1)?.start).toBe("2026-10-27T00:00:00.000Z");
     expect(analytics.summary.requests).toBe(3);
     expect(analytics.summary.errors).toBe(1);
     expect(analytics.summary.errorRate).toBe(0.3333);
@@ -135,7 +187,7 @@ describe("readAnalytics", () => {
     expect(analytics.summary.avgTps).toBe(50);
     expect(analytics.summary.avgTtftMs).toBe(300);
     expect(analytics.summary.p50DurationMs).not.toBeNull();
-    expect(analytics.daily.at(-1)?.requests).toBe(2);
+    expect(analytics.buckets.at(-1)?.requests).toBe(2);
     expect(analytics.models).toHaveLength(2);
     expect(analytics.models[0]?.model).toBe("smart");
   });
@@ -170,7 +222,7 @@ describe("readAnalytics", () => {
     expect(analytics.summary.avgTokensPerRequest).toBeNull();
     expect(analytics.summary.cacheHitRate).toBeNull();
     expect(analytics.summary.avgTps).toBeNull();
-    expect(analytics.daily).toHaveLength(7);
+    expect(analytics.buckets).toHaveLength(7);
   });
 
   test("divides cached tokens by the prompt of the requests that reported a split", () => {
@@ -297,7 +349,7 @@ describe("readAnalytics filters", () => {
 
     expect(analytics.summary.requests).toBe(1);
     expect(analytics.summary.inputTokens).toBe(200);
-    expect(analytics.daily.at(-2)?.requests).toBe(1);
+    expect(analytics.buckets.at(-2)?.requests).toBe(1);
   });
 
   test("filters by tag reference", () => {
@@ -350,8 +402,8 @@ describe("readAnalytics filters", () => {
     const analytics = readFiltered(filterSeeded(), { projectUrl: ["https://other.test"] });
 
     expect(analytics.summary.requests).toBe(0);
-    expect(analytics.daily).toHaveLength(30);
-    expect(analytics.daily.every((day) => day.requests === 0)).toBe(true);
+    expect(analytics.buckets).toHaveLength(30);
+    expect(analytics.buckets.every((day) => day.requests === 0)).toBe(true);
   });
 
   test("filters by session id", () => {
@@ -379,7 +431,7 @@ describe("readAnalytics filters", () => {
     const analytics = readFiltered(filterSeeded(), { sessionId: ["has space"] });
 
     expect(analytics.summary.requests).toBe(0);
-    expect(analytics.daily).toHaveLength(30);
+    expect(analytics.buckets).toHaveLength(30);
   });
 
   test("every filter dimension names a column that exists", () => {
@@ -393,7 +445,7 @@ describe("readAnalytics filters", () => {
         now: NOW,
       });
 
-      expect(analytics.daily).toHaveLength(30);
+      expect(analytics.buckets).toHaveLength(30);
     }
   });
 
@@ -401,7 +453,7 @@ describe("readAnalytics filters", () => {
     const analytics = readFiltered(filterSeeded(), { projectUrl: ["not a url"] });
 
     expect(analytics.summary.requests).toBe(0);
-    expect(analytics.daily).toHaveLength(30);
+    expect(analytics.buckets).toHaveLength(30);
   });
 
   test("intersects two dimensions", () => {
@@ -429,8 +481,8 @@ describe("readAnalytics filters", () => {
     expect(analytics.summary.requests).toBe(0);
     expect(analytics.summary.totalTokens).toBe(0);
     expect(analytics.models).toHaveLength(0);
-    expect(analytics.daily).toHaveLength(30);
-    expect(analytics.daily.every((day) => day.requests === 0)).toBe(true);
+    expect(analytics.buckets).toHaveLength(30);
+    expect(analytics.buckets.every((day) => day.requests === 0)).toBe(true);
   });
 
   test("never returns another user's events", () => {

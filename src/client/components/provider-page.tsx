@@ -33,7 +33,7 @@ import {
 } from "../../shared/providers";
 import { modelLabelOf, modelLabels, modelSecondaryOf } from "../model-labels";
 import { ModelName } from "../model-name";
-import { formatExactTokens, formatRate, formatTps, formatWhen } from "../format";
+import { formatExactTokens, formatRate, formatTps, formatWhen, windowPhrase } from "../format";
 import { providerApi } from "../api";
 import { describeError, isError } from "../errors";
 import { useProviderDetail } from "../use-provider-detail";
@@ -246,12 +246,12 @@ function UsageSection({ usage }: { usage: Analytics | null }) {
       <Card>
         <CardHeader>
           <CardTitle>No requests to this provider</CardTitle>
-          <CardDescription>No traffic in the last {String(usage.days)} days.</CardDescription>
+          <CardDescription>No traffic {windowPhrase(usage.days)}.</CardDescription>
         </CardHeader>
       </Card>
     );
 
-  return <OverviewStats summary={usage.summary} daily={usage.daily} days={usage.days} />;
+  return <OverviewStats usage={usage} />;
 }
 
 function SettingsCard({

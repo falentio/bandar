@@ -198,6 +198,7 @@ type CodebuddyState = {
   refreshToken: string;
   presented: string[];
   userIds: string[];
+  refreshDelayMs: number;
 };
 
 const codebuddyState: CodebuddyState = {
@@ -205,6 +206,7 @@ const codebuddyState: CodebuddyState = {
   refreshToken: "cb-rt-1",
   presented: [],
   userIds: [],
+  refreshDelayMs: 0,
 };
 
 const opencodeState = { requests: 0 };
@@ -1761,6 +1763,8 @@ try {
   await check("two concurrent CodeBuddy chats share one renewal", async () => {
     const before = codebuddyState.presented.length;
 
+    codebuddyState.refreshDelayMs = 400;
+
     const responses = await Promise.all([
       chatRequest("codebuddy/kimi-k3", false),
       chatRequest("codebuddy/kimi-k3", false),
@@ -1771,6 +1775,8 @@ try {
       [200, 200],
     );
     assert.equal(codebuddyState.presented.length, before + 1);
+
+    codebuddyState.refreshDelayMs = 0;
   });
 
   await check("a spent CodeBuddy refresh token is an auth failure", async () => {
@@ -4560,7 +4566,7 @@ function startBuiltIns() {
           return jsonError(401, "spent codebuddy refresh token");
         }
 
-        await Bun.sleep(400);
+        await Bun.sleep(codebuddyState.refreshDelayMs);
 
         codebuddyState.refreshToken = `cb-rt-${String(codebuddyState.presented.length + 1)}`;
 

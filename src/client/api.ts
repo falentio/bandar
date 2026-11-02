@@ -11,12 +11,14 @@ import {
 import {
   ANALYTICS_FILTER_DIMENSIONS,
   AnalyticsSchema,
+  DownstreamRequestSchema,
   ProjectListSchema,
   RequestListSchema,
   SessionListSchema,
   analyticsPaths,
   type Analytics,
   type AnalyticsFilters,
+  type DownstreamRequest,
   type ProjectList,
   type RequestList,
   type SessionList,
@@ -174,6 +176,8 @@ export const analyticsApi = {
         : `${analyticsPaths.requests}?limit=${limit}&providerId=${encodeURIComponent(providerId)}`,
       RequestListSchema,
     ),
+  request: (id: string): Promise<DownstreamRequest> =>
+    request(analyticsPaths.request(id), DownstreamRequestSchema),
 };
 
 export const cooldownApi = {

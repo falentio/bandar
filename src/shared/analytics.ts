@@ -125,6 +125,8 @@ export const RequestListSchema = v.object({
   requests: v.array(DownstreamRequestSchema),
 });
 
+export const RequestParamsSchema = v.object({ id: v.string() });
+
 export const ProjectListSchema = v.object({
   projects: v.array(v.string()),
 });
@@ -138,6 +140,7 @@ export const analyticsPaths = {
   projects: "/api/analytics/projects",
   sessions: "/api/analytics/sessions",
   requests: "/api/requests",
+  request: (id: string) => `/api/requests/${encodeURIComponent(id)}`,
 };
 
 export type AnalyticsSummary = v.InferOutput<typeof AnalyticsSummarySchema>;

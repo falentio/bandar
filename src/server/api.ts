@@ -3,9 +3,11 @@ import { Elysia } from "elysia";
 import * as v from "valibot";
 import {
   AnalyticsSchema,
+  DownstreamRequestSchema,
   EMPTY_ANALYTICS_FILTERS,
   ProjectListSchema,
   RequestListSchema,
+  RequestParamsSchema,
   SessionListSchema,
 } from "../shared/analytics";
 import { HealthSchema, type ApiErrorBody, type Health } from "../shared/api";
@@ -29,7 +31,13 @@ import {
   ProviderParamsSchema,
 } from "../shared/providers";
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
-import { readAnalytics, readProjectUrls, readRequests, readSessionIds } from "./analytics";
+import {
+  readAnalytics,
+  readProjectUrls,
+  readRequest,
+  readRequests,
+  readSessionIds,
+} from "./analytics";
 import { AnalyticsFiltersInputSchema, filterParams, isBlank } from "./analytics-filters";
 import type { Auth, SessionUser } from "./auth";
 import { createBackup } from "./backup";
@@ -715,6 +723,22 @@ export function createApi(deps: ApiDeps) {
         RequestListSchema,
         readRequests(deps.duck, { userId: caller.userId, limit, providerId }),
       );
+    })
+    .get("/requests/:id", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id } = parseInput(RequestParamsSchema, params);
+      const found = readRequest(deps.duck, { userId: caller.userId, id });
+
+      if (found === null) {
+        set.status = 404;
+
+        return failure("not_found", `request ${id} not found`);
+      }
+
+      return v.parse(DownstreamRequestSchema, found);
     })
     .get("/cooldowns", async ({ query, request }) => {
       const caller = await authenticate(deps.auth, request);

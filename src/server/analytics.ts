@@ -27,6 +27,11 @@ export type RequestsQuery = {
   readonly providerId?: string;
 };
 
+export type RequestQuery = {
+  readonly userId: string;
+  readonly id: string;
+};
+
 export type RequestEvent = {
   readonly id: string;
   readonly model: string;
@@ -226,13 +231,7 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
   const heads = db.query(
     `SELECT
        coalesce(downstream_request_id, id) AS id,
-       epoch_ms(min(started_at)) AS started_at_ms,
-       arg_max(status, started_at) AS status,
-       arg_max(reference, started_at) AS reference,
-       arg_max(api_key_id, started_at) AS api_key_id,
-       arg_max(project_url, started_at) AS project_url,
-       arg_max(session_id, started_at) AS session_id,
-       bool_or(streamed) AS streamed
+       epoch_ms(min(started_at)) AS started_at_ms
      FROM request_events
      WHERE user_id = ? AND (? IS NULL OR provider_id = ?)
      GROUP BY coalesce(downstream_request_id, id)
@@ -250,25 +249,92 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
 
   if (ids.length === 0) return { requests: [] };
 
+  const grouped = groupByRequest(readRows(db, query.userId, ids));
+
+  return {
+    requests: heads.flatMap((row) => {
+      const attempts = grouped.get(string(row, "id"));
+
+      if (attempts === undefined) return [];
+
+      return [downstreamOf(string(row, "id"), attempts)];
+    }),
+  };
+}
+
+export function readRequest(db: DuckDb, query: RequestQuery): DownstreamRequest | null {
+  const attempts = groupByRequest(readRows(db, query.userId, [query.id])).get(query.id);
+
+  if (attempts === undefined) return null;
+
+  return downstreamOf(query.id, attempts);
+}
+
+function readRows(db: DuckDb, userId: string, ids: readonly string[]): readonly RequestRow[] {
   const rows = db.query(
     `SELECT
        id, coalesce(downstream_request_id, id) AS downstream_request_id, model, reference,
-       provider_kind, provider_id, status, input_tokens,
+       provider_kind, provider_id, api_key_id, project_url, session_id, status, input_tokens,
        output_tokens, total_tokens, ttft_ms, duration_ms, tokens_per_second, cost_usd, error_kind,
        streamed, epoch_ms(started_at) AS started_at_ms
      FROM request_events
      WHERE user_id = ? AND coalesce(downstream_request_id, id) IN (${placeholdersOf(ids.length)})
      ORDER BY started_at ASC`,
-    [sqlText(query.userId), ...ids.map(sqlText)],
+    [sqlText(userId), ...ids.map(sqlText)],
   );
 
-  const attempts = new Map<string, RequestEvent[]>();
+  return rows.map(attemptOf);
+}
+
+function groupByRequest(rows: readonly RequestRow[]): Map<string, RequestRow[]> {
+  const grouped = new Map<string, RequestRow[]>();
 
   for (const row of rows) {
-    const id = string(row, "downstream_request_id");
-    const list = attempts.get(id) ?? [];
+    const list = grouped.get(row.downstreamRequestId) ?? [];
 
-    list.push({
+    list.push(row);
+    grouped.set(row.downstreamRequestId, list);
+  }
+
+  return grouped;
+}
+
+// The newest attempt decides the call's outcome: the router returns on the first success, so the
+// last attempt written is the one the caller got.
+function downstreamOf(id: string, rows: readonly RequestRow[]): DownstreamRequest {
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+
+  if (first === undefined || last === undefined) throw new Error(`request ${id} has no attempts`);
+
+  return {
+    id,
+    startedAt: first.attempt.startedAt,
+    status: last.attempt.status,
+    reference: last.attempt.reference,
+    apiKeyId: last.apiKeyId,
+    projectUrl: last.projectUrl,
+    sessionId: last.sessionId,
+    streamed: rows.some((row) => row.attempt.streamed),
+    attempts: rows.map((row) => row.attempt),
+  };
+}
+
+type RequestRow = {
+  readonly downstreamRequestId: string;
+  readonly apiKeyId: string | null;
+  readonly projectUrl: string | null;
+  readonly sessionId: string | null;
+  readonly attempt: RequestEvent;
+};
+
+function attemptOf(row: QueryRow): RequestRow {
+  return {
+    downstreamRequestId: string(row, "downstream_request_id"),
+    apiKeyId: stringOrNull(row, "api_key_id"),
+    projectUrl: stringOrNull(row, "project_url"),
+    sessionId: stringOrNull(row, "session_id"),
+    attempt: {
       id: string(row, "id"),
       model: string(row, "model"),
       reference: stringOrNull(row, "reference"),
@@ -285,26 +351,7 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
       errorKind: stringOrNull(row, "error_kind"),
       streamed: row.streamed === "true",
       startedAt: new Date(number(row, "started_at_ms")).toISOString(),
-    });
-    attempts.set(id, list);
-  }
-
-  return {
-    requests: heads.map((row) => {
-      const id = string(row, "id");
-
-      return {
-        id,
-        startedAt: new Date(number(row, "started_at_ms")).toISOString(),
-        status: string(row, "status"),
-        reference: stringOrNull(row, "reference"),
-        apiKeyId: stringOrNull(row, "api_key_id"),
-        projectUrl: stringOrNull(row, "project_url"),
-        sessionId: stringOrNull(row, "session_id"),
-        streamed: row.streamed === "true",
-        attempts: attempts.get(id) ?? [],
-      };
-    }),
+    },
   };
 }
 

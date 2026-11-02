@@ -10,7 +10,13 @@ import {
   type AnalyticsFilters,
 } from "../shared/analytics";
 import { tagRefOf } from "../shared/slugs";
-import { readAnalytics, readProjectUrls, readRequests, readSessionIds } from "./analytics";
+import {
+  readAnalytics,
+  readProjectUrls,
+  readRequest,
+  readRequests,
+  readSessionIds,
+} from "./analytics";
 import { DuckDb } from "./duck/client";
 import { applyDuckMigrations } from "./duck/migrate";
 import { recordRequest, type RequestEventInput } from "./router/record";
@@ -719,6 +725,53 @@ describe("readRequests", () => {
     expect(list.requests).toHaveLength(1);
     expect(list.requests[0]?.attempts).toHaveLength(1);
     expect(list.requests[0]?.id).toBe(list.requests[0]?.attempts[0]?.id);
+  });
+
+  test("reads one downstream request by id with its attempts in order", () => {
+    const db = seeded();
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-1",
+        status: "error",
+        errorKind: "rate_limit",
+        startedAt: new Date("2026-10-27T10:00:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-1",
+        providerId: "provider-2",
+        sessionId: "session-1",
+        startedAt: new Date("2026-10-27T10:00:05.000Z"),
+      }),
+    );
+    recordRequest(db, event({ downstreamRequestId: "down-2" }));
+
+    const found = readRequest(db, { userId: "user-1", id: "down-1" });
+
+    expect(found?.id).toBe("down-1");
+    expect(found?.status).toBe("success");
+    expect(found?.sessionId).toBe("session-1");
+    expect(found?.attempts.map((attempt) => attempt.status)).toEqual(["error", "success"]);
+    expect(found?.attempts.map((attempt) => attempt.providerId)).toEqual([
+      "provider-1",
+      "provider-2",
+    ]);
+  });
+
+  test("an unknown request id reads as null", () => {
+    const db = seeded();
+
+    expect(readRequest(db, { userId: "user-1", id: "missing" })).toBeNull();
+  });
+
+  test("another account cannot read the request", () => {
+    const db = seeded();
+    recordRequest(db, event({ downstreamRequestId: "down-1" }));
+
+    expect(readRequest(db, { userId: "user-2", id: "down-1" })).toBeNull();
   });
 
   test("a provider filter picks the listed requests and still returns every attempt", () => {

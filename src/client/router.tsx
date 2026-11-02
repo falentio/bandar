@@ -19,6 +19,7 @@ import { OverviewPanel } from "./components/overview-panel";
 import { ModelRowHarness } from "./components/model-row-harness";
 import { isProviderTab, ProviderPage } from "./components/provider-page";
 import { ProvidersPanel } from "./components/providers-panel";
+import { RequestDetailPage } from "./components/request-detail-page";
 import { RequestsPanel } from "./components/requests-panel";
 import { TagsPanel } from "./components/tags-panel";
 import { SessionProvider, useSession } from "./use-session";
@@ -114,6 +115,12 @@ const requestsRoute = createRoute({
   component: RequestsPanel,
 });
 
+const requestDetailRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/requests/$requestId",
+  component: RequestDetailRoute,
+});
+
 const errorsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/errors",
@@ -154,6 +161,7 @@ const routeTree = rootRoute.addChildren([
     harnessRoute,
     tagsRoute,
     requestsRoute,
+    requestDetailRoute,
     errorsRoute,
     apiKeysRoute,
     cliToolsRoute,
@@ -186,6 +194,12 @@ function ProviderDetailRoute() {
       onRemoved={() => void navigate({ to: "/providers" })}
     />
   );
+}
+
+function RequestDetailRoute() {
+  const { requestId } = requestDetailRoute.useParams();
+
+  return <RequestDetailPage requestId={requestId} />;
 }
 
 function CliToolDetailRoute() {

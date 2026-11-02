@@ -32,6 +32,22 @@ export type RequestQuery = {
   readonly id: string;
 };
 
+export type ExchangeQuery = {
+  readonly userId: string;
+  readonly id: string;
+  readonly attemptId: string;
+};
+
+export type Exchange = {
+  readonly attemptId: string;
+  readonly requestUrl: string;
+  readonly requestHeaders: string;
+  readonly requestBody: string;
+  readonly responseStatus: number | null;
+  readonly responseBody: string | null;
+  readonly truncated: boolean;
+};
+
 export type RequestEvent = {
   readonly id: string;
   readonly model: string;
@@ -268,6 +284,31 @@ export function readRequest(db: DuckDb, query: RequestQuery): DownstreamRequest 
   if (attempts === undefined) return null;
 
   return downstreamOf(query.id, attempts);
+}
+
+export function readExchange(db: DuckDb, query: ExchangeQuery): Exchange | null {
+  const rows = db.query(
+    `SELECT
+       attempt_id, request_url, request_headers, request_body, response_status, response_body,
+       truncated
+     FROM request_exchanges
+     WHERE user_id = ? AND downstream_request_id = ? AND attempt_id = ?`,
+    [sqlText(query.userId), sqlText(query.id), sqlText(query.attemptId)],
+  );
+
+  const row = rows[0];
+
+  if (row === undefined) return null;
+
+  return {
+    attemptId: string(row, "attempt_id"),
+    requestUrl: string(row, "request_url"),
+    requestHeaders: string(row, "request_headers"),
+    requestBody: string(row, "request_body"),
+    responseStatus: nullableNumber(row, "response_status"),
+    responseBody: stringOrNull(row, "response_body"),
+    truncated: row.truncated === "true",
+  };
 }
 
 function readRows(db: DuckDb, userId: string, ids: readonly string[]): readonly RequestRow[] {

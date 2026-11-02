@@ -19,6 +19,7 @@ import { OverviewPanel } from "./components/overview-panel";
 import { ModelRowHarness } from "./components/model-row-harness";
 import { isProviderTab, ProviderPage } from "./components/provider-page";
 import { ProvidersPanel } from "./components/providers-panel";
+import { AttemptPage } from "./components/attempt-page";
 import { RequestDetailPage } from "./components/request-detail-page";
 import { RequestsPanel } from "./components/requests-panel";
 import { TagsPanel } from "./components/tags-panel";
@@ -121,6 +122,12 @@ const requestDetailRoute = createRoute({
   component: RequestDetailRoute,
 });
 
+const attemptRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/requests/$requestId/attempts/$attemptId",
+  component: AttemptRoute,
+});
+
 const errorsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/errors",
@@ -162,6 +169,7 @@ const routeTree = rootRoute.addChildren([
     tagsRoute,
     requestsRoute,
     requestDetailRoute,
+    attemptRoute,
     errorsRoute,
     apiKeysRoute,
     cliToolsRoute,
@@ -200,6 +208,12 @@ function RequestDetailRoute() {
   const { requestId } = requestDetailRoute.useParams();
 
   return <RequestDetailPage requestId={requestId} />;
+}
+
+function AttemptRoute() {
+  const { requestId, attemptId } = attemptRoute.useParams();
+
+  return <AttemptPage requestId={requestId} attemptId={attemptId} />;
 }
 
 function CliToolDetailRoute() {

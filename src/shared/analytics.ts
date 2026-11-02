@@ -125,7 +125,19 @@ export const RequestListSchema = v.object({
   requests: v.array(DownstreamRequestSchema),
 });
 
+export const ExchangeSchema = v.object({
+  attemptId: v.string(),
+  requestUrl: v.string(),
+  requestHeaders: v.string(),
+  requestBody: v.string(),
+  responseStatus: v.nullable(v.number()),
+  responseBody: v.nullable(v.string()),
+  truncated: v.boolean(),
+});
+
 export const RequestParamsSchema = v.object({ id: v.string() });
+
+export const AttemptParamsSchema = v.object({ id: v.string(), attemptId: v.string() });
 
 export const ProjectListSchema = v.object({
   projects: v.array(v.string()),
@@ -141,6 +153,8 @@ export const analyticsPaths = {
   sessions: "/api/analytics/sessions",
   requests: "/api/requests",
   request: (id: string) => `/api/requests/${encodeURIComponent(id)}`,
+  attempt: (id: string, attemptId: string) =>
+    `/api/requests/${encodeURIComponent(id)}/attempts/${encodeURIComponent(attemptId)}`,
 };
 
 export type AnalyticsSummary = v.InferOutput<typeof AnalyticsSummarySchema>;
@@ -158,6 +172,8 @@ export type AnalyticsFilters = Readonly<Record<AnalyticsFilterDimension, readonl
 export type RequestEvent = v.InferOutput<typeof RequestEventSchema>;
 
 export type DownstreamRequest = v.InferOutput<typeof DownstreamRequestSchema>;
+
+export type Exchange = v.InferOutput<typeof ExchangeSchema>;
 
 export type RequestList = v.InferOutput<typeof RequestListSchema>;
 

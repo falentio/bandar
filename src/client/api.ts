@@ -12,6 +12,7 @@ import {
   ANALYTICS_FILTER_DIMENSIONS,
   AnalyticsSchema,
   DownstreamRequestSchema,
+  ExchangeSchema,
   ProjectListSchema,
   RequestListSchema,
   SessionListSchema,
@@ -19,6 +20,7 @@ import {
   type Analytics,
   type AnalyticsFilters,
   type DownstreamRequest,
+  type Exchange,
   type ProjectList,
   type RequestList,
   type SessionList,
@@ -178,6 +180,8 @@ export const analyticsApi = {
     ),
   request: (id: string): Promise<DownstreamRequest> =>
     request(analyticsPaths.request(id), DownstreamRequestSchema),
+  attempt: (id: string, attemptId: string): Promise<Exchange> =>
+    request(analyticsPaths.attempt(id, attemptId), ExchangeSchema),
 };
 
 export const cooldownApi = {

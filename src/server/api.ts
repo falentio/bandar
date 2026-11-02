@@ -3,7 +3,9 @@ import { Elysia } from "elysia";
 import * as v from "valibot";
 import {
   AnalyticsSchema,
+  AttemptParamsSchema,
   DownstreamRequestSchema,
+  ExchangeSchema,
   EMPTY_ANALYTICS_FILTERS,
   ProjectListSchema,
   RequestListSchema,
@@ -33,6 +35,7 @@ import {
 import { TagCreateInputSchema, TagModelsInputSchema, TagParamsSchema } from "../shared/tags";
 import {
   readAnalytics,
+  readExchange,
   readProjectUrls,
   readRequest,
   readRequests,
@@ -739,6 +742,22 @@ export function createApi(deps: ApiDeps) {
       }
 
       return v.parse(DownstreamRequestSchema, found);
+    })
+    .get("/requests/:id/attempts/:attemptId", async ({ params, request, set }) => {
+      const caller = await authenticate(deps.auth, request);
+
+      if (caller instanceof Response) return caller;
+
+      const { id, attemptId } = parseInput(AttemptParamsSchema, params);
+      const found = readExchange(deps.duck, { userId: caller.userId, id, attemptId });
+
+      if (found === null) {
+        set.status = 404;
+
+        return failure("not_found", "attempt " + attemptId + " not found");
+      }
+
+      return v.parse(ExchangeSchema, found);
     })
     .get("/cooldowns", async ({ query, request }) => {
       const caller = await authenticate(deps.auth, request);

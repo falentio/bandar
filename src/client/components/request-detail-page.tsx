@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DownstreamRequest, RequestEvent } from "../../shared/analytics";
@@ -94,13 +94,17 @@ function Detail({
                   <th className="py-2 pr-3 text-right font-medium">Out</th>
                   <th className="py-2 pr-3 text-right font-medium">TTFT</th>
                   <th className="py-2 pr-3 text-right font-medium">Speed</th>
-                  <th className="py-2 text-right font-medium">Cost</th>
+                  <th className="py-2 pr-3 text-right font-medium">Cost</th>
+                  <th className="py-2 text-right font-medium">
+                    <span className="sr-only">Exchange</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {request.attempts.map((attempt, index) => (
                   <AttemptRow
                     key={attempt.id}
+                    requestId={request.id}
                     attempt={attempt}
                     position={index + 1}
                     labels={labels}
@@ -142,10 +146,12 @@ function Fact({ label, value, mono }: { label: string; value: string | null; mon
 }
 
 function AttemptRow({
+  requestId,
   attempt,
   position,
   labels,
 }: {
+  requestId: string;
   attempt: RequestEvent;
   position: number;
   labels: ReturnType<typeof modelLabels>;
@@ -175,7 +181,19 @@ function AttemptRow({
       <td className="py-2 pr-3 text-right">{formatExactTokens(attempt.outputTokens)}</td>
       <td className="py-2 pr-3 text-right">{formatMs(attempt.ttftMs)}</td>
       <td className="py-2 pr-3 text-right">{formatTps(attempt.tokensPerSecond)}</td>
-      <td className="py-2 text-right">{formatUsd(attempt.costUsd)}</td>
+      <td className="py-2 pr-3 text-right">{formatUsd(attempt.costUsd)}</td>
+      <td className="py-2 text-right">
+        <Button asChild variant="outline" size="sm" className="gap-1">
+          <Link
+            to="/requests/$requestId/attempts/$attemptId"
+            params={{ requestId, attemptId: attempt.id }}
+            aria-label={`Inspect attempt ${position}`}
+          >
+            Inspect
+            <ChevronRightIcon className="size-3.5" />
+          </Link>
+        </Button>
+      </td>
     </tr>
   );
 }

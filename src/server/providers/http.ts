@@ -1,5 +1,6 @@
 import * as v from "valibot";
 import type { Credential } from "../credential";
+import { currentCapture, noteRequest, noteResponse } from "../router/exchange";
 import { UpstreamError, type UpstreamErrorKind } from "./types";
 
 const ErrorBodySchema = v.object({
@@ -26,27 +27,47 @@ export function joinUrl(baseUrl: string, path: string): string {
 }
 
 export async function postJson(request: JsonPost): Promise<Response> {
-  return send(
+  return post(
     request.url,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", ...request.headers },
-      body: request.body,
-    },
+    { "content-type": "application/json", ...request.headers },
+    request.body,
     request.signal,
   );
 }
 
 export async function postForm(request: FormPost): Promise<Response> {
-  return send(
+  return post(
     request.url,
-    {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", ...request.headers },
-      body: new URLSearchParams(request.form).toString(),
-    },
+    { "content-type": "application/x-www-form-urlencoded", ...request.headers },
+    new URLSearchParams(request.form).toString(),
     request.signal,
   );
+}
+
+/**
+ * Notes the outbound call before it leaves, so a connection that never answers still shows what
+ * was attempted. Calls the log cannot see — catalogs, OAuth — run outside a capture and pass
+ * straight through.
+ */
+async function post(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const capture = currentCapture();
+
+  if (capture !== undefined) noteRequest(capture, url, headers, body);
+
+  const response = await send(url, { method: "POST", headers, body }, signal);
+
+  if (capture === undefined || response.body === null) return response;
+
+  const [forCaller, forCapture] = response.body.tee();
+
+  noteResponse(capture, response, forCapture);
+
+  return new Response(forCaller, response);
 }
 
 export async function requireOk(response: Response): Promise<void> {

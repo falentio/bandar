@@ -10,7 +10,13 @@ import {
 import type { ProviderDeps } from "../providers";
 import { routeAttempt, type RoutedAttempt } from "../providers/route";
 import { freshCredential } from "../providers/refresh";
-import { recordRequest, type RequestEventInput, type RequestOutcome } from "./record";
+import { exchangeOf, inCapture, newCapture, type Capture } from "./exchange";
+import {
+  recordExchange,
+  recordRequest,
+  type RequestEventInput,
+  type RequestOutcome,
+} from "./record";
 import { resolvePlan, type ResolvedAttempt, type ResolvedPlan } from "./resolve";
 import {
   UpstreamError,
@@ -133,21 +139,24 @@ async function complete(
     const startedAt = new Date();
     const started = performance.now();
     const base = eventBase(input, plan.ref, downstreamRequestId, attempt, startedAt);
+    const capture = newCapture();
 
     try {
       const route = await routeOf(deps.providers, attempt);
 
-      const result = await route.adapter.chat({
-        target: route.target,
-        request: input.request,
-        signal: input.signal,
-      });
+      const result = await inCapture(capture, () =>
+        route.adapter.chat({
+          target: route.target,
+          request: input.request,
+          signal: input.signal,
+        }),
+      );
 
       attempts.succeeded(attempt);
 
       const response = wire.complete({ id, created, model: plan.ref, result });
 
-      recordSafe(deps, base, {
+      const attemptId = recordSafe(deps, base, {
         status: "success",
         httpStatus: 200,
         errorKind: null,
@@ -158,6 +167,8 @@ async function complete(
         durationMs: performance.now() - started,
       });
 
+      await recordExchangeSafe(deps, base, attemptId, capture);
+
       return response;
     } catch (error) {
       const failed =
@@ -167,7 +178,7 @@ async function complete(
 
       const aborted = input.signal.aborted;
 
-      recordSafe(deps, base, {
+      const attemptId = recordSafe(deps, base, {
         status: aborted ? "aborted" : "error",
         httpStatus: failed.status,
         errorKind: aborted ? "aborted" : failed.kind,
@@ -177,6 +188,8 @@ async function complete(
         ttftMs: null,
         durationMs: performance.now() - started,
       });
+
+      await recordExchangeSafe(deps, base, attemptId, capture);
 
       if (aborted) {
         return wire.error(400, "request aborted", "aborted", "upstream_error");
@@ -255,6 +268,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         const startedAt = new Date();
         const started = performance.now();
         const base = eventBase(input, plan.ref, context.downstreamRequestId, attempt, startedAt);
+        const capture = newCapture();
         const writer = writerOf();
 
         let usage: CanonicalUsage = {
@@ -268,56 +282,60 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
         try {
           const route = await routeOf(deps.providers, attempt);
 
-          for await (const event of route.adapter.stream({
-            target: route.target,
-            request: input.request,
-            signal: abort.signal,
-          })) {
-            switch (event.type) {
-              case "text": {
-                if (event.text === "") break;
+          // The generator body runs the upstream POST, so the capture has to wrap the iteration,
+          // not just the call that builds the generator.
+          await inCapture(capture, async () => {
+            for await (const event of route.adapter.stream({
+              target: route.target,
+              request: input.request,
+              signal: abort.signal,
+            })) {
+              switch (event.type) {
+                case "text": {
+                  if (event.text === "") break;
 
-                if (ttftMs === null) ttftMs = performance.now() - context.start;
+                  if (ttftMs === null) ttftMs = performance.now() - context.start;
 
-                writer.text(event.text);
-                break;
-              }
+                  writer.text(event.text);
+                  break;
+                }
 
-              case "tool_call_start": {
-                if (ttftMs === null) ttftMs = performance.now() - context.start;
+                case "tool_call_start": {
+                  if (ttftMs === null) ttftMs = performance.now() - context.start;
 
-                writer.toolCall(event.call);
-                break;
-              }
+                  writer.toolCall(event.call);
+                  break;
+                }
 
-              case "tool_call_delta": {
-                writer.toolArguments(event.id, event.arguments);
-                break;
-              }
+                case "tool_call_delta": {
+                  writer.toolArguments(event.id, event.arguments);
+                  break;
+                }
 
-              case "usage": {
-                usage = event.usage;
-                break;
-              }
+                case "usage": {
+                  usage = event.usage;
+                  break;
+                }
 
-              case "finish": {
-                finishReason = event.reason;
-                break;
-              }
+                case "finish": {
+                  finishReason = event.reason;
+                  break;
+                }
 
-              default: {
-                const _exhaustive: never = event;
+                default: {
+                  const _exhaustive: never = event;
 
-                return _exhaustive;
+                  return _exhaustive;
+                }
               }
             }
-          }
+          });
 
           writer.finish(finishReason, usage);
 
           attempts.succeeded(attempt);
 
-          recordSafe(deps, base, {
+          const attemptId = recordSafe(deps, base, {
             status: "success",
             httpStatus: 200,
             errorKind: null,
@@ -328,6 +346,8 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             durationMs: performance.now() - started,
           });
 
+          await recordExchangeSafe(deps, base, attemptId, capture);
+
           return;
         } catch (error) {
           const failed =
@@ -337,7 +357,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
 
           const aborted = abort.signal.aborted;
 
-          recordSafe(deps, base, {
+          const attemptId = recordSafe(deps, base, {
             status: aborted ? "aborted" : "error",
             httpStatus: failed.status,
             errorKind: aborted ? "aborted" : failed.kind,
@@ -347,6 +367,8 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             ttftMs: null,
             durationMs: performance.now() - started,
           });
+
+          await recordExchangeSafe(deps, base, attemptId, capture);
 
           if (aborted) {
             writer.fail("request aborted", "aborted");
@@ -536,7 +558,7 @@ function eventBase(
   };
 }
 
-function recordSafe(deps: ChatDeps, base: EventBase, outcome: Outcome): void {
+function recordSafe(deps: ChatDeps, base: EventBase, outcome: Outcome): string | null {
   const event: RequestEventInput = {
     ...base,
     status: outcome.status,
@@ -550,9 +572,36 @@ function recordSafe(deps: ChatDeps, base: EventBase, outcome: Outcome): void {
   };
 
   try {
-    recordRequest(deps.duck, event);
+    return recordRequest(deps.duck, event);
   } catch (error) {
     console.error("gateway: could not record request", error);
+
+    return null;
+  }
+}
+
+async function recordExchangeSafe(
+  deps: ChatDeps,
+  base: EventBase,
+  attemptId: string | null,
+  capture: Capture,
+): Promise<void> {
+  if (attemptId === null) return;
+
+  const exchange = await exchangeOf(capture).catch(() => null);
+
+  if (exchange === null) return;
+
+  try {
+    recordExchange(deps.duck, {
+      attemptId,
+      userId: base.userId,
+      downstreamRequestId: base.downstreamRequestId,
+      exchange,
+      recordedAt: new Date(),
+    });
+  } catch (error) {
+    console.error("gateway: could not record the upstream exchange", error);
   }
 }
 

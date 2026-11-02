@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { DownstreamRequest } from "../shared/analytics";
+import type { DownstreamRequest, Exchange } from "../shared/analytics";
 import { analyticsApi } from "./api";
 import { describeError, isError } from "./errors";
 
@@ -98,4 +98,48 @@ export function useRequest(id: string): RequestDetail {
   const refresh = useCallback(() => setReload((value) => value + 1), []);
 
   return { status, request, error, refresh };
+}
+
+export type ExchangeDetail = {
+  readonly status: Status;
+  readonly exchange: Exchange | null;
+  readonly error: string | null;
+};
+
+export function useExchange(id: string, attemptId: string): ExchangeDetail {
+  const [exchange, setExchange] = useState<Exchange | null>(null);
+  const [status, setStatus] = useState<Status>("loading");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+
+    const load = async () => {
+      setStatus("loading");
+      setError(null);
+
+      try {
+        const found = await analyticsApi.attempt(id, attemptId);
+
+        if (!live) return;
+
+        setExchange(found);
+        setStatus("ready");
+      } catch (error) {
+        if (!live) return;
+
+        setExchange(null);
+        setError(isError(error) ? describeError(error) : String(error));
+        setStatus("error");
+      }
+    };
+
+    void load();
+
+    return () => {
+      live = false;
+    };
+  }, [id, attemptId]);
+
+  return { status, exchange, error };
 }

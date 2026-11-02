@@ -12,6 +12,7 @@ import {
 import { tagRefOf } from "../shared/slugs";
 import {
   readAnalytics,
+  readExchange,
   readProjectUrls,
   readRequest,
   readRequests,
@@ -19,7 +20,7 @@ import {
 } from "./analytics";
 import { DuckDb } from "./duck/client";
 import { applyDuckMigrations } from "./duck/migrate";
-import { recordRequest, type RequestEventInput } from "./router/record";
+import { recordExchange, recordRequest, type RequestEventInput } from "./router/record";
 
 const NOW = new Date("2026-10-27T12:00:00.000Z");
 const DUCK_DIR = fileURLToPath(new URL("../../duckdb", import.meta.url));
@@ -759,6 +760,54 @@ describe("readRequests", () => {
       "provider-1",
       "provider-2",
     ]);
+  });
+
+  test("reads the upstream exchange recorded for one attempt", () => {
+    const db = seeded();
+    const attemptId = recordRequest(db, event({ downstreamRequestId: "down-1" }));
+    recordExchange(db, {
+      attemptId,
+      userId: "user-1",
+      downstreamRequestId: "down-1",
+      exchange: {
+        requestUrl: "https://upstream.test/v1/chat/completions",
+        requestHeaders: JSON.stringify({ authorization: "Bearer ••••" }),
+        requestBody: JSON.stringify({ model: "gpt-fast" }),
+        responseStatus: 200,
+        responseBody: JSON.stringify({ choices: [] }),
+        truncated: false,
+      },
+      recordedAt: new Date("2026-10-27T10:00:01.000Z"),
+    });
+
+    const found = readExchange(db, { userId: "user-1", id: "down-1", attemptId });
+
+    expect(found?.requestUrl).toBe("https://upstream.test/v1/chat/completions");
+    expect(found?.responseStatus).toBe(200);
+    expect(found?.requestBody).toBe(JSON.stringify({ model: "gpt-fast" }));
+    expect(found?.truncated).toBe(false);
+  });
+
+  test("an exchange needs both the request id and the attempt id", () => {
+    const db = seeded();
+    const attemptId = recordRequest(db, event({ downstreamRequestId: "down-1" }));
+    recordExchange(db, {
+      attemptId,
+      userId: "user-1",
+      downstreamRequestId: "down-1",
+      exchange: {
+        requestUrl: "https://upstream.test/v1/chat/completions",
+        requestHeaders: "{}",
+        requestBody: "{}",
+        responseStatus: 200,
+        responseBody: "{}",
+        truncated: false,
+      },
+      recordedAt: new Date("2026-10-27T10:00:01.000Z"),
+    });
+
+    expect(readExchange(db, { userId: "user-1", id: "down-2", attemptId })).toBeNull();
+    expect(readExchange(db, { userId: "user-2", id: "down-1", attemptId })).toBeNull();
   });
 
   test("an unknown request id reads as null", () => {

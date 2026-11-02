@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { RequestEvent } from "../shared/analytics";
+import type { DownstreamRequest } from "../shared/analytics";
 import { analyticsApi } from "./api";
 import { describeError, isError } from "./errors";
 
@@ -7,13 +7,13 @@ type Status = "loading" | "ready" | "error";
 
 export type Requests = {
   readonly status: Status;
-  readonly requests: readonly RequestEvent[];
+  readonly requests: readonly DownstreamRequest[];
   readonly error: string | null;
   readonly refresh: () => void;
 };
 
 export function useRequests(limit = 50, providerId?: string): Requests {
-  const [requests, setRequests] = useState<readonly RequestEvent[]>([]);
+  const [requests, setRequests] = useState<readonly DownstreamRequest[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);

@@ -6,6 +6,7 @@ export type RequestOutcome = "success" | "error" | "aborted";
 
 export type RequestEventInput = {
   readonly userId: string;
+  readonly downstreamRequestId: string;
   readonly apiKeyId: string | null;
   readonly providerId: string;
   readonly providerKind: string;
@@ -49,12 +50,13 @@ export function recordRequest(db: DuckDb, event: RequestEventInput): void {
 
   db.run(
     `INSERT INTO request_events (
-       id, user_id, api_key_id, provider_id, provider_kind, model, reference, project_url, session_id,
+       id, downstream_request_id, user_id, api_key_id, provider_id, provider_kind, model, reference, project_url, session_id,
        upstream_model, status, http_status, error_kind, streamed, input_tokens, output_tokens,
        cached_input_tokens, total_tokens, cost_usd, ttft_ms, duration_ms, tokens_per_second, started_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::TIMESTAMP)`,
     [
       sqlText(crypto.randomUUID()),
+      sqlText(event.downstreamRequestId),
       sqlText(event.userId),
       event.apiKeyId === null ? SQL_NULL : sqlText(event.apiKeyId),
       sqlText(event.providerId),

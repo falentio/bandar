@@ -795,32 +795,34 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
                 </tr>
               </thead>
               <tbody>
-                {requests.requests.map((request) => (
-                  <tr key={request.id} className="border-b last:border-0">
-                    <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
-                      {formatWhen(request.startedAt)}
-                    </td>
-                    <td className="py-2 pr-3">
-                      <ModelName labels={labels} slug={request.model} className="text-xs" />
-                    </td>
-                    <td className="py-2 pr-3">
-                      <span
-                        className={
-                          request.status === "success" ? "text-xs" : "text-xs text-destructive"
-                        }
-                      >
-                        {request.status}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-3 text-right text-xs">
-                      {formatExactTokens(request.inputTokens)} /{" "}
-                      {formatExactTokens(request.outputTokens)}
-                    </td>
-                    <td className="py-2 text-right text-xs">
-                      {formatTps(request.tokensPerSecond)}
-                    </td>
-                  </tr>
-                ))}
+                {requests.requests
+                  .flatMap((request) => request.attempts)
+                  .map((request) => (
+                    <tr key={request.id} className="border-b last:border-0">
+                      <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
+                        {formatWhen(request.startedAt)}
+                      </td>
+                      <td className="py-2 pr-3">
+                        <ModelName labels={labels} slug={request.model} className="text-xs" />
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span
+                          className={
+                            request.status === "success" ? "text-xs" : "text-xs text-destructive"
+                          }
+                        >
+                          {request.status}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3 text-right text-xs">
+                        {formatExactTokens(request.inputTokens)} /{" "}
+                        {formatExactTokens(request.outputTokens)}
+                      </td>
+                      <td className="py-2 text-right text-xs">
+                        {formatTps(request.tokensPerSecond)}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>

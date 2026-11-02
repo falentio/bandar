@@ -46,7 +46,19 @@ export type RequestEvent = {
   readonly startedAt: string;
 };
 
-export type RequestList = { readonly requests: readonly RequestEvent[] };
+export type DownstreamRequest = {
+  readonly id: string;
+  readonly startedAt: string;
+  readonly status: string;
+  readonly reference: string | null;
+  readonly apiKeyId: string | null;
+  readonly projectUrl: string | null;
+  readonly sessionId: string | null;
+  readonly streamed: boolean;
+  readonly attempts: readonly RequestEvent[];
+};
+
+export type RequestList = { readonly requests: readonly DownstreamRequest[] };
 
 type FilterClause = {
   readonly clauses: readonly string[];
@@ -211,14 +223,22 @@ export function readAnalytics(db: DuckDb, query: AnalyticsQuery): Analytics {
 export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
   const providerId = query.providerId ?? null;
 
-  const rows = db.query(
+  // Only downstream requests with a matching attempt are listed, so a provider filter narrows the
+  // work rather than showing parents with nothing under them.
+  const heads = db.query(
     `SELECT
-       id, model, reference, provider_kind, api_key_id, status, input_tokens, output_tokens,
-       total_tokens, ttft_ms, duration_ms, tokens_per_second, cost_usd, error_kind, streamed,
-       epoch_ms(started_at) AS started_at_ms
+       downstream_request_id AS id,
+       epoch_ms(min(started_at)) AS started_at_ms,
+       arg_max(status, started_at) AS status,
+       arg_max(reference, started_at) AS reference,
+       arg_max(api_key_id, started_at) AS api_key_id,
+       arg_max(project_url, started_at) AS project_url,
+       arg_max(session_id, started_at) AS session_id,
+       bool_or(streamed) AS streamed
      FROM request_events
      WHERE user_id = ? AND (? IS NULL OR provider_id = ?)
-     ORDER BY started_at DESC
+     GROUP BY downstream_request_id
+     ORDER BY started_at_ms DESC
      LIMIT ?`,
     [
       sqlText(query.userId),
@@ -228,13 +248,33 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
     ],
   );
 
-  return {
-    requests: rows.map((row) => ({
+  const ids = heads.map((row) => string(row, "id"));
+
+  if (ids.length === 0) return { requests: [] };
+
+  const rows = db.query(
+    `SELECT
+       id, downstream_request_id, model, reference, provider_kind, status, input_tokens,
+       output_tokens, total_tokens, ttft_ms, duration_ms, tokens_per_second, cost_usd, error_kind,
+       streamed, epoch_ms(started_at) AS started_at_ms
+     FROM request_events
+     WHERE user_id = ? AND downstream_request_id IN (${placeholdersOf(ids.length)})
+     ORDER BY started_at ASC`,
+    [sqlText(query.userId), ...ids.map(sqlText)],
+  );
+
+  const attempts = new Map<string, RequestEvent[]>();
+
+  for (const row of rows) {
+    const id = string(row, "downstream_request_id");
+    const list = attempts.get(id) ?? [];
+
+    list.push({
       id: string(row, "id"),
       model: string(row, "model"),
       reference: stringOrNull(row, "reference"),
       providerKind: string(row, "provider_kind"),
-      apiKeyId: stringOrNull(row, "api_key_id"),
+      apiKeyId: null,
       status: string(row, "status"),
       inputTokens: nullableNumber(row, "input_tokens"),
       outputTokens: nullableNumber(row, "output_tokens"),
@@ -246,7 +286,26 @@ export function readRequests(db: DuckDb, query: RequestsQuery): RequestList {
       errorKind: stringOrNull(row, "error_kind"),
       streamed: row.streamed === "true",
       startedAt: new Date(number(row, "started_at_ms")).toISOString(),
-    })),
+    });
+    attempts.set(id, list);
+  }
+
+  return {
+    requests: heads.map((row) => {
+      const id = string(row, "id");
+
+      return {
+        id,
+        startedAt: new Date(number(row, "started_at_ms")).toISOString(),
+        status: string(row, "status"),
+        reference: stringOrNull(row, "reference"),
+        apiKeyId: stringOrNull(row, "api_key_id"),
+        projectUrl: stringOrNull(row, "project_url"),
+        sessionId: stringOrNull(row, "session_id"),
+        streamed: row.streamed === "true",
+        attempts: attempts.get(id) ?? [],
+      };
+    }),
   };
 }
 
@@ -309,6 +368,10 @@ function filterClause(filters: AnalyticsFilters): FilterClause {
   }
 
   return { clauses, params };
+}
+
+function placeholdersOf(count: number): string {
+  return Array.from({ length: count }, () => "?").join(", ");
 }
 
 function providerParam(value: string | null): SqlValue {

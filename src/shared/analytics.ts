@@ -109,8 +109,20 @@ export const RequestEventSchema = v.object({
   startedAt: v.string(),
 });
 
+export const DownstreamRequestSchema = v.object({
+  id: v.string(),
+  startedAt: v.string(),
+  status: v.string(),
+  reference: v.nullable(v.string()),
+  apiKeyId: v.nullable(v.string()),
+  projectUrl: v.nullable(v.string()),
+  sessionId: v.nullable(v.string()),
+  streamed: v.boolean(),
+  attempts: v.array(RequestEventSchema),
+});
+
 export const RequestListSchema = v.object({
-  requests: v.array(RequestEventSchema),
+  requests: v.array(DownstreamRequestSchema),
 });
 
 export const ProjectListSchema = v.object({
@@ -141,6 +153,8 @@ export type AnalyticsFilterDimension = (typeof ANALYTICS_FILTER_DIMENSIONS)[numb
 export type AnalyticsFilters = Readonly<Record<AnalyticsFilterDimension, readonly string[]>>;
 
 export type RequestEvent = v.InferOutput<typeof RequestEventSchema>;
+
+export type DownstreamRequest = v.InferOutput<typeof DownstreamRequestSchema>;
 
 export type RequestList = v.InferOutput<typeof RequestListSchema>;
 

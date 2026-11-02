@@ -40,6 +40,7 @@ export type ChatInput = {
 
 type EventBase = {
   userId: string;
+  downstreamRequestId: string;
   apiKeyId: string;
   providerId: string;
   providerKind: string;
@@ -94,13 +95,24 @@ export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Respons
 
   const startedAt = new Date();
   const id = crypto.randomUUID();
+  const downstreamRequestId = crypto.randomUUID();
   const created = Math.floor(startedAt.getTime() / 1000);
   const start = performance.now();
   const attempts = attemptPlan(deps.providers, plan, input.userId, startedAt);
 
-  if (!input.stream) return complete(deps, input, plan, attempts, wire, id, created);
+  if (!input.stream)
+    return complete(deps, input, plan, attempts, wire, downstreamRequestId, id, created);
 
-  return streamResponse(deps, { input, plan, attempts, wire, id, created, start });
+  return streamResponse(deps, {
+    input,
+    plan,
+    attempts,
+    wire,
+    downstreamRequestId,
+    id,
+    created,
+    start,
+  });
 }
 
 async function complete(
@@ -109,6 +121,7 @@ async function complete(
   plan: ResolvedPlan,
   attempts: AttemptPlan,
   wire: ChatWire,
+  downstreamRequestId: string,
   id: string,
   created: number,
 ): Promise<Response> {
@@ -119,7 +132,7 @@ async function complete(
 
     const startedAt = new Date();
     const started = performance.now();
-    const base = eventBase(input, plan.ref, attempt, startedAt);
+    const base = eventBase(input, plan.ref, downstreamRequestId, attempt, startedAt);
 
     try {
       const route = await routeOf(deps.providers, attempt);
@@ -196,6 +209,7 @@ type StreamInput = {
   readonly plan: ResolvedPlan;
   readonly attempts: AttemptPlan;
   readonly wire: ChatWire;
+  readonly downstreamRequestId: string;
   readonly id: string;
   readonly created: number;
   readonly start: number;
@@ -240,7 +254,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
 
         const startedAt = new Date();
         const started = performance.now();
-        const base = eventBase(input, plan.ref, attempt, startedAt);
+        const base = eventBase(input, plan.ref, context.downstreamRequestId, attempt, startedAt);
         const writer = writerOf();
 
         let usage: CanonicalUsage = {
@@ -500,11 +514,13 @@ async function targetOf(
 function eventBase(
   input: ChatInput,
   reference: string,
+  downstreamRequestId: string,
   attempt: ResolvedAttempt,
   startedAt: Date,
 ): EventBase {
   return {
     userId: input.userId,
+    downstreamRequestId,
     apiKeyId: input.apiKeyId,
     providerId: attempt.providerId,
     providerKind: attempt.kind,

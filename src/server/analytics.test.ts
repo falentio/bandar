@@ -45,6 +45,7 @@ function seeded(): DuckDb {
 function event(overrides: Partial<RequestEventInput>): RequestEventInput {
   return {
     userId: "user-1",
+    downstreamRequestId: crypto.randomUUID(),
     apiKeyId: "key-1",
     providerId: "provider-1",
     providerKind: "openai",
@@ -648,12 +649,13 @@ describe("readSessionIds", () => {
 });
 
 describe("readRequests", () => {
-  test("lists newest first with derived metrics", () => {
+  test("lists newest downstream request first with its attempts nested", () => {
     const db = seeded();
-    recordRequest(db, event({}));
+    recordRequest(db, event({ downstreamRequestId: "down-1" }));
     recordRequest(
       db,
       event({
+        downstreamRequestId: "down-2",
         streamed: false,
         ttftMs: null,
         durationMs: 800,
@@ -664,10 +666,56 @@ describe("readRequests", () => {
     const list = readRequests(db, { userId: "user-1", limit: 10 });
 
     expect(list.requests).toHaveLength(2);
+    expect(list.requests[0]?.id).toBe("down-2");
     expect(list.requests[0]?.startedAt).toBe("2026-10-27T11:00:00.000Z");
-    expect(list.requests[0]?.reference).toBe("fast");
     expect(list.requests[0]?.streamed).toBe(false);
-    expect(list.requests[0]?.tokensPerSecond).toBeNull();
-    expect(list.requests[1]?.tokensPerSecond).toBe(50);
+    expect(list.requests[0]?.attempts[0]?.tokensPerSecond).toBeNull();
+    expect(list.requests[1]?.attempts[0]?.tokensPerSecond).toBe(50);
+  });
+
+  test("keeps every attempt of one downstream request, in attempt order", () => {
+    const db = seeded();
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-1",
+        status: "error",
+        httpStatus: 429,
+        errorKind: "rate_limit",
+        startedAt: new Date("2026-10-27T10:00:00.000Z"),
+      }),
+    );
+    recordRequest(
+      db,
+      event({
+        downstreamRequestId: "down-1",
+        providerId: "provider-2",
+        startedAt: new Date("2026-10-27T10:00:05.000Z"),
+      }),
+    );
+
+    const list = readRequests(db, { userId: "user-1", limit: 10 });
+
+    expect(list.requests).toHaveLength(1);
+    expect(list.requests[0]?.status).toBe("success");
+    expect(list.requests[0]?.attempts.map((attempt) => attempt.providerKind)).toEqual([
+      "openai",
+      "openai",
+    ]);
+    expect(list.requests[0]?.attempts.map((attempt) => attempt.status)).toEqual([
+      "error",
+      "success",
+    ]);
+    expect(list.requests[0]?.attempts[0]?.errorKind).toBe("rate_limit");
+  });
+
+  test("a provider filter narrows the listed attempts", () => {
+    const db = seeded();
+    recordRequest(db, event({ downstreamRequestId: "down-1", providerId: "provider-1" }));
+    recordRequest(db, event({ downstreamRequestId: "down-2", providerId: "provider-2" }));
+
+    const list = readRequests(db, { userId: "user-1", limit: 10, providerId: "provider-2" });
+
+    expect(list.requests.map((request) => request.id)).toEqual(["down-2"]);
   });
 });

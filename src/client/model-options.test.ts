@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { modelChoices } from "./model-options";
+import { matchesQuery, modelChoices, optionId, step, visibleGroups } from "./model-options";
 
 describe("modelChoices", () => {
   test("lists tags first as their own list", () => {
@@ -119,5 +119,83 @@ describe("modelChoices", () => {
 
   test("both empty gives empty lists", () => {
     expect(modelChoices([], [])).toEqual({ tags: [], providers: [] });
+  });
+});
+
+describe("optionId", () => {
+  test("keeps two values apart when they differ only in punctuation", () => {
+    expect(optionId("box", "tags/fast")).not.toBe(optionId("box", "tags-fast"));
+    expect(optionId("box", "a/b")).not.toBe(optionId("box", "a.b"));
+  });
+
+  test("prefixes the combobox id", () => {
+    expect(optionId("box", "sonnet")).toBe(`box-${encodeURIComponent("sonnet")}`);
+  });
+});
+
+describe("step", () => {
+  const options = [
+    { value: "a", label: "A" },
+    { value: "b", label: "B" },
+  ];
+
+  test("wraps down from the first and up from the last", () => {
+    expect(step(options, "a", -1)).toBe("b");
+    expect(step(options, "b", 1)).toBe("a");
+  });
+
+  test("starts at the first option when nothing is highlighted", () => {
+    expect(step(options, null, 1)).toBe("a");
+  });
+
+  test("has no answer for an empty list", () => {
+    expect(step([], "a", 1)).toBeNull();
+  });
+});
+
+describe("visibleGroups", () => {
+  const groups = [
+    {
+      label: "Alpha",
+      options: [
+        { value: "sonnet", label: "Sonnet" },
+        { value: "haiku", label: "Haiku" },
+      ],
+    },
+    { label: "Beta", options: [{ value: "flash", label: "Flash" }] },
+  ];
+
+  test("matches the label and the value, ignoring case", () => {
+    expect(visibleGroups(groups, "SON")).toEqual([
+      { label: "Alpha", options: [{ value: "sonnet", label: "Sonnet" }] },
+    ]);
+    expect(visibleGroups(groups, "flash")).toEqual([
+      { label: "Beta", options: [{ value: "flash", label: "Flash" }] },
+    ]);
+  });
+
+  test("drops a group with no match and keeps the order of the rest", () => {
+    expect(visibleGroups(groups, "a")).toEqual([
+      { label: "Alpha", options: [{ value: "haiku", label: "Haiku" }] },
+      { label: "Beta", options: [{ value: "flash", label: "Flash" }] },
+    ]);
+  });
+
+  test("a blank query keeps every group", () => {
+    expect(visibleGroups(groups, "  ")).toEqual(groups);
+  });
+});
+
+describe("matchesQuery", () => {
+  const option = { value: "openai/sonnet", label: "Sonnet" };
+
+  test("matches on either field", () => {
+    expect(matchesQuery(option, "sonnet")).toBe(true);
+    expect(matchesQuery(option, "openai")).toBe(true);
+    expect(matchesQuery(option, "opus")).toBe(false);
+  });
+
+  test("matches everything on an empty needle", () => {
+    expect(matchesQuery(option, "")).toBe(true);
   });
 });

@@ -7,6 +7,16 @@ export function modelLabelOf(model: {
   return model.alias ?? model.upstreamModel;
 }
 
+export function optionLabelWithSlug(model: {
+  readonly slug: string;
+  readonly alias: string | null;
+  readonly upstreamModel: string;
+}): string {
+  const label = modelLabelOf(model);
+
+  return label === model.slug ? label : `${label} (${model.slug})`;
+}
+
 export function modelSecondaryOf(model: {
   readonly slug: string;
   readonly ref: string;

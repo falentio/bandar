@@ -3,7 +3,13 @@ import { CheckIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import type { ModelChoiceGroup, ModelChoices, ModelOption } from "../model-options";
+import {
+  type ModelChoiceGroup,
+  type ModelChoices,
+  optionId,
+  step,
+  visibleGroups,
+} from "../model-options";
 
 type ModelComboboxProps = {
   readonly choices: ModelChoices;
@@ -177,47 +183,8 @@ export function ModelCombobox({ choices, selected, disabled, onChange }: ModelCo
   );
 }
 
-function optionId(comboboxId: string, value: string): string {
-  return `${comboboxId}-${value.replace(/[^a-zA-Z0-9]+/gu, "-")}`;
-}
-
-function step(
-  options: readonly ModelOption[],
-  highlighted: string | null,
-  delta: number,
-): string | null {
-  if (options.length === 0) return null;
-
-  const current = options.findIndex((option) => option.value === highlighted);
-  const next = (current + delta + options.length) % options.length;
-
-  return options[next]?.value ?? null;
-}
-
 function groupedChoices(choices: ModelChoices): readonly ModelChoiceGroup[] {
   if (choices.tags.length === 0) return choices.providers;
 
   return [{ label: "Tags", options: choices.tags }, ...choices.providers];
-}
-
-function visibleGroups(
-  groups: readonly ModelChoiceGroup[],
-  query: string,
-): readonly ModelChoiceGroup[] {
-  const needle = query.trim().toLowerCase();
-  const rows: ModelChoiceGroup[] = [];
-
-  for (const group of groups) {
-    const options = group.options.filter((option) => matchesQuery(option, needle));
-
-    if (options.length > 0) rows.push({ label: group.label, options });
-  }
-
-  return rows;
-}
-
-function matchesQuery(option: ModelOption, needle: string): boolean {
-  if (needle === "") return true;
-
-  return option.value.toLowerCase().includes(needle) || option.label.toLowerCase().includes(needle);
 }

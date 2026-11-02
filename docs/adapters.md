@@ -947,9 +947,14 @@ should open, so the connector returns an empty `userCode`, and the dashboard
 renders the handoff copy with the Open button rather than a code block. The poll
 reads `/v2/plugin/auth/token` until the envelope stops answering `11217`, then
 looks the account up by uid and stores it as `organizationId`, which becomes the
-`X-User-Id` and `X-Userinfo` headers. There is no model endpoint to read: the
-catalog is the CLI's own product manifest, so `models.ts` answers it in code, and
-every row imports unpriced because CodeBuddy bills credits rather than dollars.
+`X-User-Id` and `X-Userinfo` headers. A chat request also carries fresh
+`X-Conversation-Id`, `X-Conversation-Request-Id`, and
+`X-Conversation-Message-Id` headers, because the endpoint answers a request
+without all three as code 11128. The endpoint also requires the first message to
+carry the `system` role, and the shared adapter forwards the client's messages
+unchanged, so a client that sends no system prompt gets that error instead. There is no model endpoint to read: the catalog is the CLI's
+own product manifest, so `models.ts` answers it in code, and every row
+imports unpriced because CodeBuddy bills credits rather than dollars.
 
 ## OAuth renewal
 

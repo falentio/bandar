@@ -12,6 +12,7 @@ import { cooldownEvents, providerCredentials } from "./db/schema";
 import {
   COOLDOWN_HISTORY_LIMIT,
   recordFailure,
+  recordSuccess,
   type FailureContext,
   type FailureRecord,
 } from "./health";
@@ -109,6 +110,93 @@ describe("cooldown history", () => {
     expect(rows[0]?.attemptId).toBe("attempt-1");
     expect(rows[1]?.downstreamRequestId).toBeNull();
     expect(rows[1]?.attemptId).toBeNull();
+  });
+
+  test("lists a cooling subject with the event that flagged it", async () => {
+    const handle = freshDb();
+    const seeded = await seedCredential(handle, "user-1");
+    const now = new Date("2026-01-01T00:00:00.000Z");
+
+    recordFailure(
+      handle.db,
+      failureOf(seeded, now, { requestId: "request-1", attemptId: "attempt-1" }),
+    );
+
+    const list = await readCooldowns(handle.db, "user-1", 100, now);
+
+    expect(list.active).toHaveLength(1);
+    expect(list.active[0]).toMatchObject({
+      subject: "credential",
+      subjectId: seeded.credentialId,
+      subjectName: "primary",
+      providerId: seeded.providerId,
+      providerName: "Primary",
+      failures: 1,
+    });
+    expect(list.active[0]?.flaggedUntil).toBe(new Date(now.getTime() + 30_000).toISOString());
+    expect(list.active[0]?.lastEvent?.id).toBe(list.events[0]?.id);
+    expect(list.active[0]?.lastEvent?.attempt).toEqual({
+      requestId: "request-1",
+      attemptId: "attempt-1",
+    });
+  });
+
+  test("lists a cooling subject whose history was pruned", async () => {
+    const handle = freshDb();
+    const seeded = await seedCredential(handle, "user-1");
+    const now = new Date("2026-01-01T00:00:00.000Z");
+
+    recordFailure(handle.db, failureOf(seeded, now));
+    handle.db.delete(cooldownEvents).run();
+
+    const list = await readCooldowns(handle.db, "user-1", 100, now);
+
+    expect(list.active).toHaveLength(1);
+    expect(list.active[0]?.lastEvent).toBeNull();
+    expect(list.events).toHaveLength(0);
+  });
+
+  test("keeps the newest event for a subject still cooling", async () => {
+    const handle = freshDb();
+    const seeded = await seedCredential(handle, "user-1");
+    const first = new Date("2026-01-01T00:00:00.000Z");
+    const second = new Date(first.getTime() + 1000);
+
+    recordFailure(handle.db, failureOf(seeded, first));
+    recordFailure(handle.db, failureOf(seeded, second));
+
+    const list = await readCooldowns(handle.db, "user-1", 100, second);
+
+    expect(list.active[0]?.failures).toBe(2);
+    expect(list.active[0]?.lastEvent?.id).toBe(list.events[0]?.id);
+    expect(list.active[0]?.lastEvent?.createdAt).toBe(second.toISOString());
+  });
+
+  test("drops a subject once a success clears it", async () => {
+    const handle = freshDb();
+    const seeded = await seedCredential(handle, "user-1");
+    const now = new Date("2026-01-01T00:00:00.000Z");
+
+    recordFailure(handle.db, failureOf(seeded, now));
+    recordSuccess(handle.db, [{ kind: "credential", id: seeded.credentialId }]);
+
+    const list = await readCooldowns(handle.db, "user-1", 100, now);
+
+    expect(list.active).toHaveLength(0);
+    expect(list.events).toHaveLength(1);
+  });
+
+  test("leaves an expired flag out of the active list", async () => {
+    const handle = freshDb();
+    const seeded = await seedCredential(handle, "user-1");
+    const now = new Date("2026-01-01T00:00:00.000Z");
+
+    recordFailure(handle.db, failureOf(seeded, now));
+
+    const list = await readCooldowns(handle.db, "user-1", 100, new Date(now.getTime() + 31_000));
+
+    expect(list.active).toHaveLength(0);
+    expect(list.events).toHaveLength(1);
   });
 
   test("drops a user's history when the user is deleted", async () => {

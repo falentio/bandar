@@ -14,7 +14,7 @@ import { AppShell } from "./components/app-shell";
 import { AuthPage } from "./components/auth-page";
 import { CliToolPage } from "./components/cli-tool-page";
 import { CliToolsPanel } from "./components/cli-tools-panel";
-import { ErrorsPanel } from "./components/errors-panel";
+import { CooldownsPanel } from "./components/cooldowns-panel";
 import { OverviewPanel } from "./components/overview-panel";
 import { ModelRowHarness } from "./components/model-row-harness";
 import { isProviderTab, ProviderPage } from "./components/provider-page";
@@ -33,7 +33,7 @@ const loginSearch = v.object({
       "/providers",
       "/tags",
       "/requests",
-      "/errors",
+      "/cooldowns",
       "/api-keys",
       "/cli-tools",
     ]),
@@ -128,10 +128,19 @@ const attemptRoute = createRoute({
   component: AttemptRoute,
 });
 
+const cooldownsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/cooldowns",
+  component: CooldownsPanel,
+});
+
+// The old address listed the cooldown history; the page now owns both lists.
 const errorsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/errors",
-  component: ErrorsPanel,
+  beforeLoad: () => {
+    throw redirect({ to: "/cooldowns" });
+  },
 });
 
 const tagsRoute = createRoute({
@@ -170,6 +179,7 @@ const routeTree = rootRoute.addChildren([
     requestsRoute,
     requestDetailRoute,
     attemptRoute,
+    cooldownsRoute,
     errorsRoute,
     apiKeysRoute,
     cliToolsRoute,

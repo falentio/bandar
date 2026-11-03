@@ -4,6 +4,12 @@ export const COOLDOWN_SUBJECTS = ["provider", "model", "credential"] as const;
 
 export const CooldownSubjectSchema = v.picklist(COOLDOWN_SUBJECTS);
 
+/** The upstream call behind a flag: the downstream request it belonged to, and the attempt row. */
+export const CooldownLinkSchema = v.object({
+  requestId: v.string(),
+  attemptId: v.string(),
+});
+
 export const CooldownEventSchema = v.object({
   id: v.string(),
   subject: CooldownSubjectSchema,
@@ -34,6 +40,8 @@ export const cooldownPaths = {
 };
 
 export type CooldownSubject = v.InferOutput<typeof CooldownSubjectSchema>;
+
+export type CooldownLink = v.InferOutput<typeof CooldownLinkSchema>;
 
 export type CooldownEvent = v.InferOutput<typeof CooldownEventSchema>;
 

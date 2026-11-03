@@ -35,8 +35,8 @@ export function ErrorsPanel() {
         <CardHeader>
           <CardTitle>Cooldown history</CardTitle>
           <CardDescription>
-            Last 100 failures that flagged a subject. A vendor reset is the refill time it named: a
-            budget cooldown waits for it, and the other kinds ignore it.
+            Last 100 failures that flagged a subject. A vendor reset is the refill time it named,
+            and the cooldown waits for it where it outlasts the ordinary growth.
           </CardDescription>
         </CardHeader>
         <CardContent>

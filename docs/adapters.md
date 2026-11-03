@@ -596,8 +596,7 @@ allowance.
 `budget_exceeded` is the allowance being gone rather than the rate being too
 high: a wait of a second will not clear it, and the vendor says when it comes
 back. It is retryable like a rate limit, so the chain moves to the next
-credential, but it flags for that refill time instead of the 30-second growth,
-and answers 429 when no credential is left.
+credential, and it answers 429 when no credential is left.
 
 Each failure that points at a subject also flags it: a credential for `auth`,
 `rate_limit`, and `budget_exceeded`, the provider for `unavailable` and
@@ -628,9 +627,11 @@ or top-level `code`, and answers `budget_exceeded` for `budget_exceeded` and
 response both, since a wire can report the state in a 200 body, and on an OK
 response only the head of the stream is read, so the caller still gets its body.
 
-The refill time comes from the vendor's own words where it names one (`"It resets
-in 6h 11m"` is a countdown, capped at one day), and otherwise from a
-`Retry-After` header. With neither, the cooldown is the ordinary growth.
+A `resetsAt` raises the cooldown to the refill, where it outlasts the ordinary
+growth, and is capped at the same one day as the cooldown cap. It comes from the
+vendor's own words where it names one (`"It resets in 6h 11m"` is a countdown),
+and otherwise from a `Retry-After` header, which a plain status failure carries
+as well.
 
 Helpers in `src/server/providers/http.ts`:
 

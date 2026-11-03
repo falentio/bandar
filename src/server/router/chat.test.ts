@@ -443,6 +443,35 @@ describe("runChat cooldowns", () => {
     expect(harness.db.select().from(cooldownEvents).all()[0]?.errorKind).toBe("budget_exceeded");
   });
 
+  test("answers a spent allowance in the Anthropic envelope as a rate limit", async () => {
+    const harness = await freshHarness(() =>
+      Response.json({ error: { message: "no quota" } }, { status: 402 }),
+    );
+
+    const seeded = await providerWithModel(harness, {
+      name: "Unpaid Claude",
+      kind: "anthropic",
+      slug: "claude",
+      upstreamModel: "claude-x",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "only", "only-key");
+
+    const response = await runChat(harness.deps, {
+      ...chatInput("claude"),
+      wire: anthropicWire,
+    });
+
+    expect(response.status).toBe(429);
+
+    const body = v.parse(
+      v.object({ error: v.object({ type: v.string(), message: v.string() }) }),
+      await response.json(),
+    );
+
+    expect(body.error.type).toBe("rate_limit_error");
+  });
+
   test("flags a model after a protocol failure and lets the next tag model answer", async () => {
     const harness = await freshHarness((call) => {
       // SAFETY: the fake upstream records the JSON body the openai adapter posts.

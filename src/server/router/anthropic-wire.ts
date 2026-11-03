@@ -259,6 +259,7 @@ function errorTypeOf(status: number, code: string): string {
     case "unauthorized":
       return "authentication_error";
     case "rate_limit":
+    case "budget_exceeded":
       return "rate_limit_error";
     case "model_not_found":
     case "not_found":

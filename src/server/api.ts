@@ -129,7 +129,11 @@ export function createApi(deps: ApiDeps) {
 
       if (error instanceof UpstreamError) {
         set.status =
-          error.kind === "invalid_request" ? 400 : error.kind === "rate_limit" ? 429 : 502;
+          error.kind === "invalid_request"
+            ? 400
+            : error.kind === "rate_limit" || error.kind === "budget_exceeded"
+              ? 429
+              : 502;
 
         return failure(`upstream_${error.kind}`, error.message);
       }

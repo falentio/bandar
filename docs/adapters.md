@@ -628,9 +628,9 @@ or top-level `code`, and answers `budget_exceeded` for `budget_exceeded` and
 response both, since a wire can report the state in a 200 body, and on an OK
 response only the head of the stream is read, so the caller still gets its body.
 
-The refill time comes from the vendor's own words where it names one — `"It
-resets in 6h 11m" is read as a countdown, capped at one day — and otherwise from
-a `Retry-After` header. With neither, the cooldown is the ordinary growth.
+The refill time comes from the vendor's own words where it names one (`"It resets
+in 6h 11m"` is a countdown, capped at one day), and otherwise from a
+`Retry-After` header. With neither, the cooldown is the ordinary growth.
 
 Helpers in `src/server/providers/http.ts`:
 
@@ -642,9 +642,10 @@ Helpers in `src/server/providers/http.ts`:
 - `requireOk(response, classify?)` reads an error envelope (`error.message`,
   `message`, or plain text) and classifies the status, after letting `classify`
   name a kind the status does not.
-- `budgetExceeded(rejection)` builds the budget error, its refill time included,
-  and `codeOfBody`, `isBudgetCode`, `resetFrom`, and `retryAfterOf` are the
-  pieces it reads.
+- `budgetOfBody(rejection)` is the classifier a `budget: true` wire passes: the
+  kind's own body naming an exhausted allowance. `budgetExceeded` builds that
+  error, and `codeOfBody`, `isBudgetCode`, `resetFrom`, and `retryAfterOf` are
+  the pieces it reads.
 - `sseData(body, signal)` yields the joined `data:` lines of each SSE event, including one
   the upstream closes on without a trailing blank line.
 - `apiKeyHeaders(name)` returns a `HeaderFactory` that omits the header when the

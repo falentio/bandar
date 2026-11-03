@@ -13,6 +13,7 @@ import {
   COOLDOWN_HISTORY_LIMIT,
   recordFailure,
   recordSuccess,
+  type Subject,
   type FailureContext,
   type FailureRecord,
 } from "./health";
@@ -84,13 +85,15 @@ describe("cooldown history", () => {
     recordFailure(handle.db, failureOf(mine, now));
     recordFailure(handle.db, failureOf(other, new Date(now.getTime() + 1000)));
 
-    const mineList = await readCooldowns(handle.db, "user-1", 100);
-    const otherList = await readCooldowns(handle.db, "user-2", 100);
+    const mineList = await readCooldowns(handle.db, "user-1", 100, now);
+    const otherList = await readCooldowns(handle.db, "user-2", 100, now);
 
     expect(mineList.events).toHaveLength(1);
     expect(mineList.events[0]?.providerId).toBe(mine.providerId);
+    expect(mineList.active.map((row) => row.subjectId)).toEqual([mine.credentialId]);
     expect(otherList.events).toHaveLength(1);
     expect(otherList.events[0]?.providerId).toBe(other.providerId);
+    expect(otherList.active.map((row) => row.subjectId)).toEqual([other.credentialId]);
   });
 
   test("stores the upstream attempt behind each flag", async () => {
@@ -154,6 +157,50 @@ describe("cooldown history", () => {
     expect(list.active).toHaveLength(1);
     expect(list.active[0]?.lastEvent).toBeNull();
     expect(list.events).toHaveLength(0);
+  });
+
+  test("lists a provider, a model and a credential cooling at once", async () => {
+    const handle = freshDb();
+    const seeded = await seedCredential(handle, "user-1");
+    const now = new Date("2026-01-01T00:00:00.000Z");
+
+    recordFailure(
+      handle.db,
+      failureOn({ kind: "provider", id: seeded.providerId }, seeded, now, "unavailable"),
+    );
+    recordFailure(
+      handle.db,
+      failureOn(
+        { kind: "model", id: seeded.modelId },
+        seeded,
+        new Date(now.getTime() + 1000),
+        "protocol",
+      ),
+    );
+    recordFailure(
+      handle.db,
+      failureOn(
+        { kind: "credential", id: seeded.credentialId },
+        seeded,
+        new Date(now.getTime() + 2000),
+        "auth",
+      ),
+    );
+
+    const list = await readCooldowns(handle.db, "user-1", 100, new Date(now.getTime() + 3000));
+    const bySubject = new Map(list.active.map((row) => [row.subject, row]));
+
+    expect(bySubject.get("provider")?.subjectId).toBe(seeded.providerId);
+    expect(bySubject.get("model")?.subjectId).toBe(seeded.modelId);
+    expect(bySubject.get("credential")?.subjectId).toBe(seeded.credentialId);
+
+    for (const row of list.active) {
+      expect(row.lastEvent?.subject).toBe(row.subject);
+      expect(row.lastEvent?.subjectName).toBe(row.subjectName);
+      expect(row.lastEvent?.id).toBe(
+        list.events.find((entry) => entry.subject === row.subject)?.id,
+      );
+    }
   });
 
   test("keeps the newest event for a subject still cooling", async () => {
@@ -225,6 +272,28 @@ describe("cooldown history", () => {
     expect(list.events.at(-1)?.createdAt).toBe(new Date(start + 5000).toISOString());
   });
 });
+
+function failureOn(
+  subject: Subject,
+  seeded: Seeded,
+  now: Date,
+  errorKind: FailureContext["errorKind"],
+): FailureRecord {
+  const context: FailureContext = {
+    userId: seeded.userId,
+    reference: "fast",
+    errorKind,
+    providerId: seeded.providerId,
+    providerName: seeded.providerName,
+    modelId: seeded.modelId,
+    modelSlug: seeded.modelSlug,
+    credentialId: seeded.credentialId,
+    credentialName: seeded.credentialName,
+    attempt: null,
+  };
+
+  return { subject, context, now };
+}
 
 function failureOf(
   seeded: Seeded,

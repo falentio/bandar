@@ -48,7 +48,7 @@ ignored, so a typo never fails a request. A client tags a session with
 gateway drops spaces around the id. It ignores a value that is not 1-128 printable ascii
 characters or that holds a space inside. The row
 is denormalized, so deleting a provider keeps its history. Each failure that flags a
-subject also writes one row to the cooldown history, which the Errors page lists.
+subject also writes one row to the cooldown history, which the Cooldowns page lists.
 
 **One binary at runtime.** `bun build --compile` embeds the React client, the SQLite
 migrations, the DuckDB migrations, and the DuckDB shared library. The binary serves

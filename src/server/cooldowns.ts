@@ -128,7 +128,6 @@ type FlaggedRow = {
   readonly flaggedUntil: Date | null;
 };
 
-/** The newest event per listed subject, so each row can open the call that flagged it. */
 async function readLastEvents(
   db: Db,
   userId: string,

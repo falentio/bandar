@@ -2,7 +2,12 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ActiveCooldown, CooldownEvent, CooldownLink } from "../../shared/cooldowns";
+import type {
+  ActiveCooldown,
+  CooldownEvent,
+  CooldownLink,
+  CooldownSubject,
+} from "../../shared/cooldowns";
 import { formatWhen } from "../format";
 import { labelForId, modelLabels, type ModelLabels } from "../model-labels";
 import { ModelName } from "../model-name";
@@ -65,7 +70,7 @@ export function CooldownsPanel() {
                 </thead>
                 <tbody>
                   {cooldowns.active.map((row) => (
-                    <ActiveRow key={`${row.subject}:${row.subjectId}`} row={row} />
+                    <ActiveRow key={`${row.subject}:${row.subjectId}`} row={row} labels={labels} />
                   ))}
                 </tbody>
               </table>
@@ -122,19 +127,24 @@ export function CooldownsPanel() {
   );
 }
 
-function ActiveRow({ row }: { row: ActiveCooldown }) {
+function ActiveRow({ row, labels }: { row: ActiveCooldown; labels: ModelLabels }) {
+  const cooling = isCoolingDown(row.flaggedUntil);
+  const label = labelOf(row.subjectName, row.subject, row.subjectId, labels);
+
   return (
     <tr className="border-b align-top last:border-0">
       <td className="py-2 pr-3">
         <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
           {row.subject}
         </span>
-        <span className="mt-0.5 block">{nameOf(row.subjectName)}</span>
+        <span className="mt-0.5 block">{label}</span>
       </td>
       <td className="py-2 pr-3">{row.providerName}</td>
       <td className="py-2 pr-3 text-right tabular-nums">{row.failures}</td>
       <td className="py-2 pr-3 whitespace-nowrap">
-        <span className="font-medium text-destructive">cooling down</span>
+        <span className={cooling ? "font-medium text-destructive" : "text-muted-foreground"}>
+          {cooling ? "cooling down" : "expired"}
+        </span>
         <span className="mt-0.5 block text-xs text-muted-foreground">
           {formatWhen(row.flaggedUntil)}
         </span>
@@ -143,11 +153,16 @@ function ActiveRow({ row }: { row: ActiveCooldown }) {
         {row.lastEvent === null ? (
           <span className="font-sans text-muted-foreground">not captured</span>
         ) : (
-          row.lastEvent.errorKind
+          <>
+            {row.lastEvent.errorKind}
+            <span className="mt-0.5 block font-sans text-muted-foreground">
+              {formatWhen(row.lastEvent.createdAt)}
+            </span>
+          </>
         )}
       </td>
       <td className="py-2 text-right">
-        <InspectCell link={row.lastEvent?.attempt ?? null} />
+        <InspectCell link={row.lastEvent?.attempt ?? null} what={label} />
       </td>
     </tr>
   );
@@ -199,13 +214,13 @@ function EventRow({ event, labels }: { event: CooldownEvent; labels: ModelLabels
       </td>
       <td className="py-2 pr-3 font-mono text-xs">{event.reference}</td>
       <td className="py-2 text-right">
-        <InspectCell link={event.attempt} />
+        <InspectCell link={event.attempt} what={subjectLabelOf(event, labels)} />
       </td>
     </tr>
   );
 }
 
-function InspectCell({ link }: { link: CooldownLink | null }) {
+function InspectCell({ link, what }: { link: CooldownLink | null; what: string }) {
   if (link === null) return <span className="text-xs text-muted-foreground">not captured</span>;
 
   return (
@@ -213,13 +228,22 @@ function InspectCell({ link }: { link: CooldownLink | null }) {
       <Link
         to="/requests/$requestId/attempts/$attemptId"
         params={{ requestId: link.requestId, attemptId: link.attemptId }}
-        aria-label="Inspect the upstream call"
+        aria-label={`Inspect the upstream call that flagged ${what}`}
       >
         Inspect
         <ChevronRightIcon className="size-3.5" />
       </Link>
     </Button>
   );
+}
+
+function labelOf(
+  name: string,
+  subject: CooldownSubject,
+  subjectId: string,
+  labels: ModelLabels,
+): string {
+  return subject === "model" ? labelForId(labels, subjectId, name) : nameOf(name);
 }
 
 function subjectLabelOf(event: CooldownEvent, labels: ModelLabels): string {

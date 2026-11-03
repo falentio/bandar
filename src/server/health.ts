@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import type { CooldownLink } from "../shared/cooldowns";
 import type { Db } from "./db/client";
 import { cooldownEvents, providerCredentials, providerModels, providers } from "./db/schema";
 import type { UpstreamErrorKind } from "./providers/types";
@@ -30,6 +31,7 @@ export type FailureContext = {
   readonly modelSlug: string;
   readonly credentialId: string | null;
   readonly credentialName: string | null;
+  readonly attempt: CooldownLink | null;
 };
 
 export type FailureRecord = {
@@ -107,6 +109,8 @@ export function recordFailure(db: Db, record: FailureRecord): void {
         modelSlug: context.modelSlug,
         credentialId: context.credentialId,
         credentialName: context.credentialName,
+        attemptId: context.attempt?.attemptId ?? null,
+        downstreamRequestId: context.attempt?.requestId ?? null,
         errorKind: context.errorKind,
         errorMessage: errorMessageOf(context.message),
         reference: context.reference,

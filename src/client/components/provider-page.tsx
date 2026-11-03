@@ -1,8 +1,9 @@
-import { type FormEvent, useState } from "react";
+import { Fragment, type FormEvent, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   BoxesIcon,
+  ChevronDownIcon,
   CircleDollarSignIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
@@ -41,6 +42,7 @@ import { type Providers, useProviders } from "../use-providers";
 import { useRequests } from "../use-requests";
 import { useTags } from "../use-tags";
 import { CredentialsCard } from "./credentials-card";
+import { ExchangeView } from "./exchange-view";
 import { HealthBadge } from "./health-badge";
 import { EditModelDialog } from "./model-edit-dialog";
 import { OverviewStats } from "./overview-stats";
@@ -771,17 +773,27 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
   const requests = useRequests(10, providerId);
   const providers = useProviders();
   const labels = modelLabels(providers.providers);
+  const [openAttemptId, setOpenAttemptId] = useState<string | null>(null);
+
+  const attempts = requests.requests.flatMap((request) =>
+    request.attempts
+      .filter((attempt) => attempt.providerId === providerId)
+      .map((attempt) => ({ requestId: request.id, attempt })),
+  );
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Recent requests</CardTitle>
-        <CardDescription>The last 10 attempts routed to {providerName}.</CardDescription>
+        <CardDescription>
+          The last 10 attempts routed to {providerName}. Open one to read what was sent and what
+          came back.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {requests.status === "loading" ? (
           <Skeleton className="h-16 w-full" />
-        ) : requests.requests.length === 0 ? (
+        ) : attempts.length === 0 ? (
           <p className="text-sm text-muted-foreground">No requests to this provider yet.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -792,39 +804,71 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
                   <th className="py-2 pr-3 font-medium">Model</th>
                   <th className="py-2 pr-3 font-medium">Status</th>
                   <th className="py-2 pr-3 text-right font-medium">Tokens</th>
-                  <th className="py-2 text-right font-medium">Speed</th>
+                  <th className="py-2 pr-3 text-right font-medium">Speed</th>
+                  <th className="py-2 text-right font-medium">
+                    <span className="sr-only">Exchange</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {requests.requests
-                  .flatMap((request) => request.attempts)
-                  .filter((attempt) => attempt.providerId === providerId)
-                  .map((request) => (
-                    <tr key={request.id} className="border-b last:border-0">
-                      <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
-                        {formatWhen(request.startedAt)}
-                      </td>
-                      <td className="py-2 pr-3">
-                        <ModelName labels={labels} slug={request.model} className="text-xs" />
-                      </td>
-                      <td className="py-2 pr-3">
-                        <span
-                          className={
-                            request.status === "success" ? "text-xs" : "text-xs text-destructive"
-                          }
-                        >
-                          {request.status}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3 text-right text-xs">
-                        {formatExactTokens(request.inputTokens)} /{" "}
-                        {formatExactTokens(request.outputTokens)}
-                      </td>
-                      <td className="py-2 text-right text-xs">
-                        {formatTps(request.tokensPerSecond)}
-                      </td>
-                    </tr>
-                  ))}
+                {attempts.map(({ requestId, attempt }) => {
+                  const open = openAttemptId === attempt.id;
+
+                  return (
+                    <Fragment key={attempt.id}>
+                      <tr className="border-b align-top last:border-0">
+                        <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
+                          {formatWhen(attempt.startedAt)}
+                        </td>
+                        <td className="py-2 pr-3">
+                          <ModelName labels={labels} slug={attempt.model} className="text-xs" />
+                        </td>
+                        <td className="py-2 pr-3">
+                          <span
+                            className={
+                              attempt.status === "success" ? "text-xs" : "text-xs text-destructive"
+                            }
+                          >
+                            {attempt.status}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 text-right text-xs">
+                          {formatExactTokens(attempt.inputTokens)} /{" "}
+                          {formatExactTokens(attempt.outputTokens)}
+                        </td>
+                        <td className="py-2 text-right text-xs">
+                          {formatTps(attempt.tokensPerSecond)}
+                        </td>
+                        <td className="py-2 text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1"
+                            aria-expanded={open}
+                            aria-label={`${open ? "Hide" : "Inspect"} ${attempt.model} exchange`}
+                            onClick={() => setOpenAttemptId(open ? null : attempt.id)}
+                          >
+                            {open ? "Hide" : "Inspect"}
+                            <ChevronDownIcon
+                              className={
+                                open
+                                  ? "size-3.5 rotate-180 transition-transform"
+                                  : "size-3.5 transition-transform"
+                              }
+                            />
+                          </Button>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr className="border-b last:border-0">
+                          <td colSpan={6} className="pb-4">
+                            <ExchangeView requestId={requestId} attemptId={attempt.id} />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -34,7 +34,10 @@ export function ErrorsPanel() {
       <Card>
         <CardHeader>
           <CardTitle>Cooldown history</CardTitle>
-          <CardDescription>Last 100 failures that flagged a subject.</CardDescription>
+          <CardDescription>
+            Last 100 failures that flagged a subject. A vendor reset is the refill time it named,
+            and the cooldown waits for it where it outlasts the ordinary growth.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {cooldowns.status === "loading" ? (
@@ -54,6 +57,7 @@ export function ErrorsPanel() {
                     <th className="py-2 pr-3 font-medium">Model</th>
                     <th className="py-2 pr-3 font-medium">Error</th>
                     <th className="py-2 pr-3 font-medium">Cooldown</th>
+                    <th className="py-2 pr-3 font-medium">Vendor reset</th>
                     <th className="py-2 pr-3 font-medium">Until</th>
                     <th className="py-2 font-medium">Reference</th>
                   </tr>
@@ -86,6 +90,9 @@ export function ErrorsPanel() {
                       </td>
                       <td className="py-2 pr-3 whitespace-nowrap tabular-nums">
                         {formatCooldown(event.cooldownMs)}
+                      </td>
+                      <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
+                        {event.resetsAt === null ? "—" : formatWhen(event.resetsAt)}
                       </td>
                       <td className="py-2 pr-3 whitespace-nowrap">
                         <span

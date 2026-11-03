@@ -19,6 +19,8 @@ export const CooldownEventSchema = v.object({
   reference: v.string(),
   failures: v.number(),
   cooldownMs: v.number(),
+  /** When the vendor said the exhausted allowance comes back; null when it did not say. */
+  resetsAt: v.nullable(v.string()),
   flaggedUntil: v.string(),
   createdAt: v.string(),
 });

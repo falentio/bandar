@@ -123,6 +123,7 @@ export interface ProviderAdapter<K extends ProviderKind = ProviderKind> {
 export type UpstreamErrorKind =
   | "auth"
   | "rate_limit"
+  | "budget_exceeded"
   | "invalid_request"
   | "not_found"
   | "unavailable"
@@ -133,14 +134,35 @@ export type UpstreamErrorKind =
 export class UpstreamError extends Error {
   readonly kind: UpstreamErrorKind;
   readonly status: number | null;
+  /** When the exhausted allowance comes back, when the vendor said so. */
+  readonly resetsAt: Date | null;
 
-  constructor(message: string, kind: UpstreamErrorKind, status: number | null = null) {
+  constructor(
+    message: string,
+    kind: UpstreamErrorKind,
+    status: number | null = null,
+    resetsAt: Date | null = null,
+  ) {
     super(message);
     this.name = "UpstreamError";
     this.kind = kind;
     this.status = status;
+    this.resetsAt = resetsAt;
   }
 }
+
+/**
+ * One rejected call, before a kind is picked: the body the upstream sent, and its headers for the
+ * hint some of them carry. A wire that reports an account or model state in the response itself
+ * names its own error kinds here, and a 200 passes through when it classified nothing.
+ */
+export type UpstreamRejection = {
+  readonly status: number;
+  readonly body: string;
+  readonly headers: Headers;
+};
+
+export type UpstreamClassifier = (rejection: UpstreamRejection) => UpstreamError | null;
 
 export type ModelCatalogEntry = {
   readonly upstreamModel: string;

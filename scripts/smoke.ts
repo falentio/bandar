@@ -225,6 +225,7 @@ const nousProvider: ProviderSlot = { provider: null, modelId: "" };
 const hyperProvider: ProviderSlot = { provider: null, modelId: "" };
 const opencodeProvider: ProviderSlot = { provider: null, modelId: "" };
 const zroProvider: ProviderSlot = { provider: null, modelId: "" };
+const zroState = { spent: false };
 const codebuddyProvider: ProviderSlot = { provider: null, modelId: "" };
 const wireProvider: ProviderSlot = { provider: null, modelId: "" };
 let apiKey = "";
@@ -1517,6 +1518,53 @@ try {
     assert.equal(stream.done, true);
   });
 
+  await check("a spent Zro allowance falls through to the next credential", async () => {
+    const id = zroProvider.provider?.id ?? "";
+
+    const spend = await postJson(
+      providerPaths.credentials(id),
+      { apiKey: "zro_spent" },
+      ProviderSchema,
+      201,
+    );
+
+    assert.equal(spend.credentials.length, 2);
+
+    const working = spend.credentials[0];
+    const spent = spend.credentials[1];
+
+    if (working === undefined || spent === undefined) throw new Error("the Zro keys are missing");
+
+    await putJson(
+      providerPaths.credentialOrder(id),
+      { credentialIds: [spent.id, working.id] },
+      ProviderSchema,
+      200,
+    );
+
+    zroState.spent = true;
+
+    const response = await chatRequest("zro/deepseek-v4.1-flash", false);
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      v.parse(CompletionSchema, await response.json()).choices[0]?.message.content,
+      "Hello from Zro",
+    );
+
+    const detail = await getJson(providerPaths.detail(id), ProviderDetailSchema, 200);
+    const flagged = detail.provider.credentials.find((credential) => credential.id === spent.id);
+
+    assert.ok(flagged?.flaggedUntil !== null, "the spent credential was not flagged");
+    assert.equal(detail.provider.failures, 0);
+
+    const cooldowns = await getJson(cooldownPaths.list, CooldownListSchema, 200);
+    const event = cooldowns.events.find((entry) => entry.reference === "zro/deepseek-v4.1-flash");
+
+    assert.equal(event?.errorKind, "budget_exceeded");
+    assert.equal(event?.subject, "credential");
+    assert.ok(event?.resetsAt !== null, "the vendor reset was not recorded");
+  });
   await check("the Nous Portal device login returns a code and connects", async () => {
     const id = nousProvider.provider?.id ?? "";
 
@@ -4459,6 +4507,19 @@ function startBuiltIns() {
       }
 
       if (url.pathname === "/zro/v1/chat/completions") {
+        if (authorization === "Bearer zro_spent" && zroState.spent) {
+          return Response.json(
+            {
+              error: {
+                message: "You've used today's Free usage. It resets in 6h 11m.",
+                code: "budget_exceeded",
+                type: "budget_exceeded",
+              },
+            },
+            { status: 429 },
+          );
+        }
+
         if (authorization !== "Bearer zro_test") return jsonError(401, "bad zro key");
 
         if (request.headers.has("x-api-key")) return jsonError(401, "zro takes one bearer");
@@ -4493,6 +4554,13 @@ function startBuiltIns() {
       }
 
       if (url.pathname === "/zro/v1/messages") {
+        if (authorization === "Bearer zro_spent" && zroState.spent) {
+          return Response.json(
+            { error: { message: "no quota", code: "budget_exceeded" } },
+            { status: 429 },
+          );
+        }
+
         if (authorization !== "Bearer zro_test") return jsonError(401, "bad zro key");
 
         if (request.headers.get("anthropic-version") !== "2023-06-01") {

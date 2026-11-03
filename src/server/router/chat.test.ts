@@ -217,6 +217,70 @@ describe("runChat cooldowns", () => {
     expect(history[0]?.errorKind).toBe("rate_limit");
   });
 
+  test("falls through a spent allowance and flags the credential for the vendor's refill time", async () => {
+    const harness = await zroHarness((call) =>
+      call.key === "Bearer good-key"
+        ? openAiSuccess()
+        : Response.json(
+            {
+              error: {
+                message: "You've used today's Free usage. It resets in 6h 11m.",
+                type: "budget_exceeded",
+                code: "budget_exceeded",
+                param: null,
+              },
+            },
+            { status: 429 },
+          ),
+    );
+
+    const providerId = await zroModel(harness, "fast");
+
+    await addCredential(harness.providers, providerId, "spent", "spent-key");
+    await addCredential(harness.providers, providerId, "good", "good-key");
+
+    const response = await runChat(harness.deps, chatInput("fast"));
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls.map((call) => call.key)).toEqual([
+      "Bearer spent-key",
+      "Bearer good-key",
+    ]);
+
+    const spent = credentialNamed(harness.db, "spent");
+    const cooldown = (spent?.flaggedUntil?.getTime() ?? 0) - Date.now();
+
+    expect(spent?.failures).toBe(1);
+    expect(cooldown).toBeGreaterThan(6 * 3_600_000);
+    expect(cooldown).toBeLessThan(7 * 3_600_000);
+    expect(providerRowOf(harness.db, providerId)?.failures).toBe(0);
+
+    const history = harness.db.select().from(cooldownEvents).all();
+
+    expect(history).toHaveLength(1);
+    expect(history[0]?.subject).toBe("credential");
+    expect(history[0]?.errorKind).toBe("budget_exceeded");
+    expect(history[0]?.resetsAt).not.toBeNull();
+  });
+
+  test("answers 429 when the only credential has spent its allowance", async () => {
+    const harness = await zroHarness(() =>
+      Response.json(
+        { error: { message: "quota is gone", code: "budget_exceeded" } },
+        { status: 429 },
+      ),
+    );
+
+    const providerId = await zroModel(harness, "fast");
+
+    await addCredential(harness.providers, providerId, "spent", "spent-key");
+
+    const response = await runChat(harness.deps, chatInput("fast"));
+
+    expect(response.status).toBe(429);
+    expect(v.parse(ErrorSchema, await response.json()).error.code).toBe("budget_exceeded");
+  });
+
   test("skips a cooling credential on the next request", async () => {
     const harness = await freshHarness(openAiUpstream("good-key"));
 
@@ -325,12 +389,12 @@ describe("runChat cooldowns", () => {
 
   test("answers 502 and convicts nobody for an unclassified status", async () => {
     const harness = await freshHarness(() =>
-      Response.json({ error: { message: "payment required" } }, { status: 402 }),
+      Response.json({ error: { message: "teapot" } }, { status: 418 }),
     );
 
     const seeded = await providerWithModel(harness, {
-      name: "Unpaid",
-      path: "/unpaid",
+      name: "Odd",
+      path: "/odd",
       slug: "fast",
       upstreamModel: "m",
     });
@@ -355,6 +419,57 @@ describe("runChat cooldowns", () => {
     expect(events[0]?.status).toBe("error");
     expect(events[0]?.error_kind).toBe("unknown");
     expect(events[0]?.model).toBe("fast");
+  });
+
+  test("reads a bare 402 as a spent allowance", async () => {
+    const harness = await freshHarness(() =>
+      Response.json({ error: { message: "payment required" } }, { status: 402 }),
+    );
+
+    const seeded = await providerWithModel(harness, {
+      name: "Unpaid",
+      path: "/unpaid",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "only", "only-key");
+
+    const response = await runChat(harness.deps, chatInput("fast"));
+
+    expect(response.status).toBe(429);
+    expect(v.parse(ErrorSchema, await response.json()).error.code).toBe("budget_exceeded");
+    expect(credentialNamed(harness.db, "only")?.failures).toBe(1);
+    expect(harness.db.select().from(cooldownEvents).all()[0]?.errorKind).toBe("budget_exceeded");
+  });
+
+  test("answers a spent allowance in the Anthropic envelope as a rate limit", async () => {
+    const harness = await freshHarness(() =>
+      Response.json({ error: { message: "no quota" } }, { status: 402 }),
+    );
+
+    const seeded = await providerWithModel(harness, {
+      name: "Unpaid Claude",
+      kind: "anthropic",
+      slug: "claude",
+      upstreamModel: "claude-x",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "only", "only-key");
+
+    const response = await runChat(harness.deps, {
+      ...chatInput("claude"),
+      wire: anthropicWire,
+    });
+
+    expect(response.status).toBe(429);
+
+    const body = v.parse(
+      v.object({ error: v.object({ type: v.string(), message: v.string() }) }),
+      await response.json(),
+    );
+
+    expect(body.error.type).toBe("rate_limit_error");
   });
 
   test("flags a model after a protocol failure and lets the next tag model answer", async () => {
@@ -524,6 +639,36 @@ describe("runChat cooldowns", () => {
       "Bearer good-key",
     ]);
     expect(credentialNamed(harness.db, "bad")?.failures).toBe(1);
+  });
+
+  test("streams from the next credential after a spent allowance before any text", async () => {
+    const harness = await zroHarness((call) =>
+      call.key === "Bearer good-key"
+        ? openAiStream()
+        : Response.json(
+            { error: { message: "no quota", code: "budget_exceeded" } },
+            { status: 429 },
+          ),
+    );
+
+    const providerId = await zroModel(harness, "fast");
+
+    await addCredential(harness.providers, providerId, "spent", "spent-key");
+    await addCredential(harness.providers, providerId, "good", "good-key");
+
+    const response = await runChat(harness.deps, chatInput("fast", true));
+
+    expect(response.status).toBe(200);
+
+    const text = await response.text();
+
+    expect(text).toContain('"content":"hello"');
+    expect(text).not.toContain("error");
+    expect(harness.upstream.calls.map((call) => call.key)).toEqual([
+      "Bearer spent-key",
+      "Bearer good-key",
+    ]);
+    expect(credentialNamed(harness.db, "spent")?.failures).toBe(1);
   });
 });
 
@@ -1214,6 +1359,24 @@ function chatInput(
   };
 }
 
+async function zroHarness(handle: (call: Call) => Response | Promise<Response>): Promise<Harness> {
+  const harness = await freshHarness(handle);
+
+  return {
+    ...harness,
+    deps: {
+      ...harness.deps,
+      providers: {
+        ...harness.providers,
+        endpoints: {
+          ...harness.providers.endpoints,
+          zro: { ...harness.providers.endpoints.zro, baseUrl: harness.upstream.origin },
+        },
+      },
+    },
+  };
+}
+
 async function freshHarness(
   handle: (call: Call) => Response | Promise<Response>,
 ): Promise<Harness> {
@@ -1453,6 +1616,18 @@ function deadOrigin(): string {
   void server.stop(true);
 
   return origin;
+}
+
+async function zroModel(harness: Harness, slug: string): Promise<string> {
+  await ensureBuiltInProviders(harness.providers, "user-1");
+
+  const row = harness.db.select().from(providers).where(eq(providers.kind, "zro")).get();
+
+  if (row === undefined) throw new Error("zro was not seeded");
+
+  await addProviderModel(harness.providers, "user-1", row.id, { upstreamModel: "m", slug });
+
+  return row.id;
 }
 
 async function providerWithModel(

@@ -138,6 +138,7 @@ export const cooldownEvents = sqliteTable(
     reference: text("reference").notNull(),
     failures: integer("failures").notNull(),
     cooldownMs: integer("cooldown_ms").notNull(),
+    resetsAt: integer("resets_at", { mode: "timestamp_ms" }),
     flaggedUntil: integer("flagged_until", { mode: "timestamp_ms" }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },

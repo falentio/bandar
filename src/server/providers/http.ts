@@ -1,12 +1,75 @@
 import * as v from "valibot";
 import type { Credential } from "../credential";
 import { currentCapture, noteRequest, noteResponse } from "../router/exchange";
-import { UpstreamError, type UpstreamErrorKind } from "./types";
+import {
+  UpstreamError,
+  type UpstreamClassifier,
+  type UpstreamErrorKind,
+  type UpstreamRejection,
+} from "./types";
 
+/** Whatever a failure envelope calls itself, under the error object or at the top level. */
 const ErrorBodySchema = v.object({
-  error: v.optional(v.object({ message: v.optional(v.string()), type: v.optional(v.string()) })),
+  error: v.optional(
+    v.object({
+      message: v.optional(v.string()),
+      type: v.optional(v.string()),
+      code: v.optional(v.nullable(v.string())),
+    }),
+  ),
   message: v.optional(v.string()),
+  code: v.optional(v.nullable(v.string())),
 });
+
+/** The vendor's own words for "out of allowance": this is not a rate, and a wait will not fix it. */
+const BUDGET_CODES: ReadonlySet<string> = new Set(["budget_exceeded", "insufficient_quota"]);
+
+/** At most one day, matching the cooldown cap the gateway otherwise applies. */
+const MAX_HINT_MS = 24 * 60 * 60 * 1000;
+
+const DURATION_PART =
+  /(\d+(?:\.\d+)?)\s*(d|day|days|h|hr|hrs|hour|hours|m|min|mins|minute|minutes|s|sec|secs|second|seconds)/gi;
+
+type Unit =
+  | "d"
+  | "day"
+  | "days"
+  | "h"
+  | "hr"
+  | "hrs"
+  | "hour"
+  | "hours"
+  | "m"
+  | "min"
+  | "mins"
+  | "minute"
+  | "minutes"
+  | "s"
+  | "sec"
+  | "secs"
+  | "second"
+  | "seconds";
+
+const UNIT_MS: Readonly<Record<Unit, number>> = {
+  d: 86_400_000,
+  day: 86_400_000,
+  days: 86_400_000,
+  h: 3_600_000,
+  hr: 3_600_000,
+  hrs: 3_600_000,
+  hour: 3_600_000,
+  hours: 3_600_000,
+  m: 60_000,
+  min: 60_000,
+  mins: 60_000,
+  minute: 60_000,
+  minutes: 60_000,
+  s: 1000,
+  sec: 1000,
+  secs: 1000,
+  second: 1000,
+  seconds: 1000,
+};
 
 export type JsonPost = {
   readonly url: string;
@@ -70,11 +133,85 @@ async function post(
   return new Response(forCaller, response);
 }
 
-export async function requireOk(response: Response): Promise<void> {
-  if (response.ok) return;
+/**
+ * A classifier runs before the status mapping, on a failure and on an OK response both: a wire can
+ * report an account state in a 200 body. A failure it does not name stays a status kind.
+ */
+export async function requireOk(response: Response, classify?: UpstreamClassifier): Promise<void> {
+  if (response.ok) {
+    if (classify === undefined) return;
 
-  const message = await errorMessage(response);
-  throw new UpstreamError(message, kindForStatus(response.status), response.status);
+    const classified = classify({
+      status: response.status,
+      body: await headOf(response),
+      headers: response.headers,
+    });
+
+    if (classified === null) return;
+
+    throw classified;
+  }
+
+  const rejection = await rejectionOf(response);
+
+  throw classify?.(rejection) ?? statusOf(rejection);
+}
+
+/**
+ * The first chunk of a response the caller still has to read. The copy is read once and left
+ * alone: cancelling it cancels the branch the caller is still reading, and the stream stalls.
+ */
+async function headOf(response: Response): Promise<string> {
+  const copy = response.clone();
+
+  if (copy.body === null) return "";
+
+  const reader = copy.body.getReader();
+
+  try {
+    const { value } = await reader.read();
+
+    reader.releaseLock();
+
+    return value === undefined ? "" : new TextDecoder().decode(value);
+  } catch {
+    reader.releaseLock();
+
+    return "";
+  }
+}
+
+async function rejectionOf(response: Response): Promise<UpstreamRejection> {
+  const body = await response.text();
+
+  return { status: response.status, body, headers: response.headers };
+}
+
+function statusOf(rejection: UpstreamRejection): UpstreamError {
+  return new UpstreamError(
+    messageOf(rejection.body, rejection.status),
+    kindForStatus(rejection.status),
+    rejection.status,
+    retryAfterOf(rejection.headers),
+  );
+}
+
+/**
+ * A classifier for an envelope that names an exhausted allowance in its body: `error.code`, a bare
+ * `code`, or the `error.type` slot a wire reuses for it.
+ */
+export function budgetOfBody(rejection: UpstreamRejection): UpstreamError | null {
+  return isBudgetCode(codeOfBody(rejection.body)) ? budgetExceeded(rejection) : null;
+}
+
+/** The vendor said the allowance is gone: it names a kind no wait clears, and when it comes back. */
+export function budgetExceeded(rejection: UpstreamRejection): UpstreamError {
+  return new UpstreamError(
+    messageOf(rejection.body, rejection.status),
+    "budget_exceeded",
+    rejection.status,
+    resetFrom(rejection.body) ?? retryAfterOf(rejection.headers),
+  );
 }
 
 async function send(url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
@@ -166,30 +303,103 @@ export function apiKeyHeaders(name: string): HeaderFactory {
   };
 }
 
-async function errorMessage(response: Response): Promise<string> {
-  const text = await response.text();
-
-  if (text === "") return `upstream returned ${response.status}`;
+function messageOf(body: string, status: number): string {
+  if (body === "") return `upstream returned ${status}`;
 
   try {
-    const parsed = v.safeParse(ErrorBodySchema, JSON.parse(text));
+    const parsed = v.safeParse(ErrorBodySchema, JSON.parse(body));
 
     if (parsed.success) {
-      return (
-        parsed.output.error?.message ??
-        parsed.output.message ??
-        `upstream returned ${response.status}`
-      );
+      return parsed.output.error?.message ?? parsed.output.message ?? `upstream returned ${status}`;
     }
   } catch {
-    return text.slice(0, 300);
+    return body.slice(0, 300);
   }
 
-  return text.slice(0, 300);
+  return body.slice(0, 300);
+}
+
+/** A code the body calls itself: `code`, or `type` where a wire puts the code there. */
+export function codeOfBody(body: string): string | null {
+  return parsedBody(body)?.code ?? null;
+}
+
+export function messageOfBody(body: string): string | null {
+  const parsed = parsedBody(body);
+
+  if (parsed === null) return null;
+
+  return parsed.message ?? null;
+}
+
+export function isBudgetCode(code: string | null): boolean {
+  return code !== null && BUDGET_CODES.has(code);
+}
+
+/** "Resets in 6h 11m" is the vendor's own countdown: it beats a header, which proxies rewrite. */
+export function resetFrom(body: string): Date | null {
+  const message = messageOfBody(body);
+
+  if (message === null) return null;
+
+  const ms = durationMs(message);
+
+  return clamped(new Date(Date.now() + ms));
+}
+
+/** A Retry-After of seconds or an HTTP date, for the vendors that send one instead. */
+export function retryAfterOf(headers: Headers): Date | null {
+  const value = headers.get("retry-after")?.trim();
+
+  if (value === undefined || value === "") return null;
+
+  const seconds = Number(value);
+
+  if (Number.isFinite(seconds)) return clamped(new Date(Date.now() + seconds * 1000));
+
+  const at = Date.parse(value);
+
+  return Number.isNaN(at) ? null : clamped(new Date(at));
+}
+
+function durationMs(message: string): number {
+  let total = 0;
+
+  for (const [, amount, unit] of message.matchAll(DURATION_PART)) {
+    if (amount === undefined || unit === undefined) continue;
+
+    // SAFETY: DURATION_PART only matches the unit words UNIT_MS is keyed by.
+    total += Number(amount) * UNIT_MS[unit.toLowerCase() as Unit];
+  }
+
+  return total;
+}
+
+function clamped(at: Date): Date | null {
+  const ms = at.getTime() - Date.now();
+
+  return ms <= 0 ? null : new Date(Date.now() + Math.min(ms, MAX_HINT_MS));
+}
+
+function parsedBody(body: string): { code: string | null; message: string | null } | null {
+  try {
+    const parsed = v.safeParse(ErrorBodySchema, JSON.parse(body));
+
+    if (!parsed.success) return null;
+
+    return {
+      code: parsed.output.error?.code ?? parsed.output.code ?? parsed.output.error?.type ?? null,
+      message: parsed.output.error?.message ?? parsed.output.message ?? null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function kindForStatus(status: number): UpstreamErrorKind {
   if (status === 401 || status === 403) return "auth";
+
+  if (status === 402) return "budget_exceeded";
 
   if (status === 429) return "rate_limit";
 

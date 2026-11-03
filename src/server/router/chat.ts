@@ -75,13 +75,14 @@ type Outcome = {
 type AttemptPlan = {
   readonly attempts: readonly ResolvedAttempt[];
   suppressed(attempt: ResolvedAttempt): boolean;
-  failed(attempt: ResolvedAttempt, kind: UpstreamErrorKind, message: string, now: Date): void;
+  failed(attempt: ResolvedAttempt, failure: UpstreamError, now: Date): void;
   succeeded(attempt: ResolvedAttempt): void;
 };
 
 const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
   "auth",
   "rate_limit",
+  "budget_exceeded",
   "not_found",
   "unavailable",
   "protocol",
@@ -195,7 +196,7 @@ async function complete(
         return wire.error(400, "request aborted", "aborted", "upstream_error");
       }
 
-      attempts.failed(attempt, failed.kind, failed.message, new Date());
+      attempts.failed(attempt, failed, new Date());
 
       if (!RETRYABLE.has(failed.kind)) {
         return wire.error(statusFor(failed), failed.message, failed.kind, "upstream_error");
@@ -376,7 +377,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             return;
           }
 
-          attempts.failed(attempt, failed.kind, failed.message, new Date());
+          attempts.failed(attempt, failed, new Date());
 
           if (writer.started || !RETRYABLE.has(failed.kind)) {
             writer.fail(failed.message, failed.kind);
@@ -440,8 +441,8 @@ function attemptPlan(
     attempts,
     suppressed: (attempt) =>
       !probe && subjectsOf(attempt).some((subject) => cooling.has(subjectKey(subject))),
-    failed: (attempt, kind, message, at) => {
-      const subject = subjectFor(kind, {
+    failed: (attempt, failure, at) => {
+      const subject = subjectFor(failure.kind, {
         providerId: attempt.providerId,
         modelId: attempt.modelId,
         credentialId: attempt.credentialId,
@@ -455,8 +456,9 @@ function attemptPlan(
           context: {
             userId,
             reference: plan.ref,
-            errorKind: kind,
-            message,
+            errorKind: failure.kind,
+            message: failure.message,
+            resetsAt: failure.resetsAt,
             providerId: attempt.providerId,
             providerName: attempt.providerName,
             modelId: attempt.modelId,
@@ -614,6 +616,7 @@ function failureOf(error: Error | UpstreamError): UpstreamError {
 function statusFor(error: UpstreamError): number {
   switch (error.kind) {
     case "rate_limit":
+    case "budget_exceeded":
       return 429;
     case "invalid_request":
       return 400;

@@ -27,6 +27,7 @@ export async function readCooldowns(db: Db, userId: string, limit: number): Prom
       reference: row.reference,
       failures: row.failures,
       cooldownMs: row.cooldownMs,
+      resetsAt: row.resetsAt?.toISOString() ?? null,
       flaggedUntil: row.flaggedUntil.toISOString(),
       createdAt: row.createdAt.toISOString(),
     })),

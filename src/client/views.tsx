@@ -13,7 +13,7 @@ export const views = [
   { to: "/providers", label: "Providers", icon: ServerIcon },
   { to: "/tags", label: "Tags", icon: TagsIcon },
   { to: "/requests", label: "Requests", icon: ScrollTextIcon },
-  { to: "/errors", label: "Errors", icon: TriangleAlertIcon },
+  { to: "/cooldowns", label: "Cooldowns", icon: TriangleAlertIcon },
   { to: "/api-keys", label: "API keys", icon: KeyRoundIcon },
   { to: "/cli-tools", label: "CLI tools", icon: TerminalIcon },
 ] as const;
@@ -31,6 +31,8 @@ export function isViewPath(path: string): path is ViewPath {
 
 /** Where to send someone after signing in. A detail page keeps its list page. */
 export function redirectTarget(path: string): ViewPath | undefined {
+  if (path === "/errors") return "/cooldowns";
+
   return activeView(path)?.to ?? (isViewPath(path) ? path : undefined);
 }
 

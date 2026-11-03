@@ -757,6 +757,7 @@ describe("provider models", () => {
       "0014_model_limits",
       "0015_input_modalities",
       "0016_light_greymalkin",
+      "0017_cooldown_attempt",
     ]);
 
     const rows = handle.sqlite
@@ -1156,6 +1157,7 @@ describe("provider credentials", () => {
       "0014_model_limits",
       "0015_input_modalities",
       "0016_light_greymalkin",
+      "0017_cooldown_attempt",
     ]);
 
     const rows = handle.sqlite

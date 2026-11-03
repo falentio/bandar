@@ -17,6 +17,7 @@ import * as v from "valibot";
 import { BINARY } from "./binary";
 import {
   AnalyticsSchema,
+  ExchangeSchema,
   ProjectListSchema,
   RequestListSchema,
   SessionListSchema,
@@ -1979,7 +1980,7 @@ try {
     assert.equal(settled.filter((request) => request.status === "error").length, 1);
   });
 
-  await check("GET /api/cooldowns lists the failure that flagged a credential", async () => {
+  await check("GET /api/cooldowns lists the flagged subject and its upstream call", async () => {
     const list = await getJson(cooldownPaths.list, CooldownListSchema, 200);
 
     const event = list.events.find(
@@ -1992,6 +1993,30 @@ try {
     assert.equal(event.modelSlug, "dead/dead-model");
     assert.equal(event.credentialName, "");
     assert.equal(event.errorMessage, "bad openai key");
+
+    const active = list.active.find((entry) => entry.lastEvent?.id === event.id);
+
+    assert.ok(active, "the flagged credential is not in the active list");
+    assert.equal(active.providerName, "Dead");
+    assert.equal(active.failures, 1);
+    assert.ok(Date.parse(active.flaggedUntil) > Date.now(), "the flag is not in the future");
+    assert.equal(active.lastEvent?.id, event.id);
+
+    const attempt = active.lastEvent?.attempt;
+
+    assert.ok(attempt, "the cooldown event carries no upstream attempt");
+
+    const exchange = await getJson(
+      analyticsPaths.attempt(attempt.requestId, attempt.attemptId),
+      ExchangeSchema,
+      200,
+    );
+
+    assert.equal(exchange.responseStatus, 401);
+    assert.ok(exchange.requestUrl.startsWith(upstreamOrigin + "/openai"), exchange.requestUrl);
+    assert.match(exchange.requestBody, /dead-model/);
+    assert.match(exchange.requestHeaders, /"authorization": "Bearer ••••"/);
+    assert.match(exchange.responseBody ?? "", /bad openai key/);
   });
 
   await check("GET /v1/models and GET /api/tags list the tag in priority order", async () => {

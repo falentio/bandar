@@ -133,6 +133,8 @@ export const cooldownEvents = sqliteTable(
     modelSlug: text("model_slug").notNull(),
     credentialId: text("credential_id"),
     credentialName: text("credential_name"),
+    attemptId: text("attempt_id"),
+    downstreamRequestId: text("downstream_request_id"),
     errorKind: text("error_kind").notNull(),
     errorMessage: text("error_message"),
     reference: text("reference").notNull(),

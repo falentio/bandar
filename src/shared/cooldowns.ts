@@ -4,6 +4,12 @@ export const COOLDOWN_SUBJECTS = ["provider", "model", "credential"] as const;
 
 export const CooldownSubjectSchema = v.picklist(COOLDOWN_SUBJECTS);
 
+/** The upstream call behind a flag: the downstream request it belonged to, and the attempt row. */
+export const CooldownLinkSchema = v.object({
+  requestId: v.string(),
+  attemptId: v.string(),
+});
+
 export const CooldownEventSchema = v.object({
   id: v.string(),
   subject: CooldownSubjectSchema,
@@ -23,9 +29,26 @@ export const CooldownEventSchema = v.object({
   resetsAt: v.nullable(v.string()),
   flaggedUntil: v.string(),
   createdAt: v.string(),
+  attempt: v.nullable(CooldownLinkSchema),
+});
+
+/**
+ * A subject the gateway is skipping right now. The state lives on the subject row, so a success
+ * clears it and the subject leaves this list while its event stays in the history.
+ */
+export const ActiveCooldownSchema = v.object({
+  subject: CooldownSubjectSchema,
+  subjectId: v.string(),
+  subjectName: v.string(),
+  providerId: v.string(),
+  providerName: v.string(),
+  failures: v.number(),
+  flaggedUntil: v.string(),
+  lastEvent: v.nullable(CooldownEventSchema),
 });
 
 export const CooldownListSchema = v.object({
+  active: v.array(ActiveCooldownSchema),
   events: v.array(CooldownEventSchema),
 });
 
@@ -35,6 +58,10 @@ export const cooldownPaths = {
 
 export type CooldownSubject = v.InferOutput<typeof CooldownSubjectSchema>;
 
+export type CooldownLink = v.InferOutput<typeof CooldownLinkSchema>;
+
 export type CooldownEvent = v.InferOutput<typeof CooldownEventSchema>;
+
+export type ActiveCooldown = v.InferOutput<typeof ActiveCooldownSchema>;
 
 export type CooldownList = v.InferOutput<typeof CooldownListSchema>;

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
   BoxesIcon,
+  ChevronRightIcon,
   CircleDollarSignIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
@@ -13,11 +14,19 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ANALYTICS_RANGES, type Analytics } from "../../shared/analytics";
+import { ANALYTICS_RANGES, type Analytics, type RequestEvent } from "../../shared/analytics";
 import { type Tag } from "../../shared/tags";
 import {
   BUILT_IN_PROVIDERS,
@@ -41,6 +50,7 @@ import { type Providers, useProviders } from "../use-providers";
 import { useRequests } from "../use-requests";
 import { useTags } from "../use-tags";
 import { CredentialsCard } from "./credentials-card";
+import { ExchangeView } from "./exchange-view";
 import { HealthBadge } from "./health-badge";
 import { EditModelDialog } from "./model-edit-dialog";
 import { OverviewStats } from "./overview-stats";
@@ -772,16 +782,25 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
   const providers = useProviders();
   const labels = modelLabels(providers.providers);
 
+  const attempts = requests.requests.flatMap((request) =>
+    request.attempts
+      .filter((attempt) => attempt.providerId === providerId)
+      .map((attempt) => ({ requestId: request.id, attempt })),
+  );
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Recent requests</CardTitle>
-        <CardDescription>The last 10 attempts routed to {providerName}.</CardDescription>
+        <CardDescription>
+          The last 10 attempts routed to {providerName}. Inspect one to read what was sent and what
+          came back.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {requests.status === "loading" ? (
           <Skeleton className="h-16 w-full" />
-        ) : requests.requests.length === 0 ? (
+        ) : attempts.length === 0 ? (
           <p className="text-sm text-muted-foreground">No requests to this provider yet.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -792,44 +811,88 @@ function RequestsCard({ providerId, providerName }: { providerId: string; provid
                   <th className="py-2 pr-3 font-medium">Model</th>
                   <th className="py-2 pr-3 font-medium">Status</th>
                   <th className="py-2 pr-3 text-right font-medium">Tokens</th>
-                  <th className="py-2 text-right font-medium">Speed</th>
+                  <th className="py-2 pr-3 text-right font-medium">Speed</th>
+                  <th className="py-2 text-right font-medium">
+                    <span className="sr-only">Exchange</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {requests.requests
-                  .flatMap((request) => request.attempts)
-                  .filter((attempt) => attempt.providerId === providerId)
-                  .map((request) => (
-                    <tr key={request.id} className="border-b last:border-0">
-                      <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
-                        {formatWhen(request.startedAt)}
-                      </td>
-                      <td className="py-2 pr-3">
-                        <ModelName labels={labels} slug={request.model} className="text-xs" />
-                      </td>
-                      <td className="py-2 pr-3">
-                        <span
-                          className={
-                            request.status === "success" ? "text-xs" : "text-xs text-destructive"
-                          }
-                        >
-                          {request.status}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3 text-right text-xs">
-                        {formatExactTokens(request.inputTokens)} /{" "}
-                        {formatExactTokens(request.outputTokens)}
-                      </td>
-                      <td className="py-2 text-right text-xs">
-                        {formatTps(request.tokensPerSecond)}
-                      </td>
-                    </tr>
-                  ))}
+                {attempts.map(({ requestId, attempt }) => (
+                  <AttemptRow
+                    key={attempt.id}
+                    requestId={requestId}
+                    attempt={attempt}
+                    labels={labels}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function AttemptRow({
+  requestId,
+  attempt,
+  labels,
+}: {
+  requestId: string;
+  attempt: RequestEvent;
+  labels: ReturnType<typeof modelLabels>;
+}) {
+  return (
+    <tr className="border-b last:border-0">
+      <td className="py-2 pr-3 whitespace-nowrap text-muted-foreground">
+        {formatWhen(attempt.startedAt)}
+      </td>
+      <td className="py-2 pr-3">
+        <ModelName labels={labels} slug={attempt.model} className="text-xs" />
+      </td>
+      <td className="py-2 pr-3">
+        <span className={attempt.status === "success" ? "text-xs" : "text-xs text-destructive"}>
+          {attempt.status}
+        </span>
+      </td>
+      <td className="py-2 pr-3 text-right text-xs">
+        {formatExactTokens(attempt.inputTokens)} / {formatExactTokens(attempt.outputTokens)}
+      </td>
+      <td className="py-2 text-right text-xs">{formatTps(attempt.tokensPerSecond)}</td>
+      <td className="py-2 text-right">
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              aria-label={`Inspect ${attempt.model} exchange`}
+            >
+              Inspect
+              <ChevronRightIcon className="size-3.5" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[85vh] w-full max-w-3xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Upstream exchange</DialogTitle>
+              <DialogDescription className="flex flex-wrap items-center gap-x-2">
+                <span>{formatWhen(attempt.startedAt)}</span>
+                <span aria-hidden="true">·</span>
+                <ModelName labels={labels} slug={attempt.model} className="text-xs" />
+                <span aria-hidden="true">·</span>
+                <span
+                  className={attempt.status === "success" ? "text-primary" : "text-destructive"}
+                >
+                  {attempt.status}
+                </span>
+              </DialogDescription>
+            </DialogHeader>
+            <ExchangeView requestId={requestId} attemptId={attempt.id} flat />
+          </DialogContent>
+        </Dialog>
+      </td>
+    </tr>
   );
 }

@@ -75,7 +75,13 @@ type Outcome = {
 type AttemptPlan = {
   readonly attempts: readonly ResolvedAttempt[];
   suppressed(attempt: ResolvedAttempt): boolean;
-  failed(attempt: ResolvedAttempt, kind: UpstreamErrorKind, message: string, now: Date): void;
+  failed(
+    attempt: ResolvedAttempt,
+    kind: UpstreamErrorKind,
+    message: string,
+    attemptId: string | null,
+    now: Date,
+  ): void;
   succeeded(attempt: ResolvedAttempt): void;
 };
 
@@ -104,7 +110,7 @@ export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Respons
   const downstreamRequestId = crypto.randomUUID();
   const created = Math.floor(startedAt.getTime() / 1000);
   const start = performance.now();
-  const attempts = attemptPlan(deps.providers, plan, input.userId, startedAt);
+  const attempts = attemptPlan(deps.providers, plan, input.userId, downstreamRequestId, startedAt);
 
   if (!input.stream)
     return complete(deps, input, plan, attempts, wire, downstreamRequestId, id, created);
@@ -195,7 +201,7 @@ async function complete(
         return wire.error(400, "request aborted", "aborted", "upstream_error");
       }
 
-      attempts.failed(attempt, failed.kind, failed.message, new Date());
+      attempts.failed(attempt, failed.kind, failed.message, attemptId, new Date());
 
       if (!RETRYABLE.has(failed.kind)) {
         return wire.error(statusFor(failed), failed.message, failed.kind, "upstream_error");
@@ -376,7 +382,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
             return;
           }
 
-          attempts.failed(attempt, failed.kind, failed.message, new Date());
+          attempts.failed(attempt, failed.kind, failed.message, attemptId, new Date());
 
           if (writer.started || !RETRYABLE.has(failed.kind)) {
             writer.fail(failed.message, failed.kind);
@@ -416,6 +422,7 @@ function attemptPlan(
   providers: ProviderDeps,
   plan: ResolvedPlan,
   userId: string,
+  downstreamRequestId: string,
   startedAt: Date,
 ): AttemptPlan {
   const attempts = plan.attempts;
@@ -440,7 +447,7 @@ function attemptPlan(
     attempts,
     suppressed: (attempt) =>
       !probe && subjectsOf(attempt).some((subject) => cooling.has(subjectKey(subject))),
-    failed: (attempt, kind, message, at) => {
+    failed: (attempt, kind, message, attemptId, at) => {
       const subject = subjectFor(kind, {
         providerId: attempt.providerId,
         modelId: attempt.modelId,
@@ -463,6 +470,7 @@ function attemptPlan(
             modelSlug: attempt.slug,
             credentialId: attempt.credentialId,
             credentialName: attempt.credentialId === null ? null : attempt.credentialLabel,
+            attempt: attemptId === null ? null : { requestId: downstreamRequestId, attemptId },
           },
           now: at,
         });

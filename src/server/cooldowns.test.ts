@@ -92,6 +92,25 @@ describe("cooldown history", () => {
     expect(otherList.events[0]?.providerId).toBe(other.providerId);
   });
 
+  test("stores the upstream attempt behind each flag", async () => {
+    const handle = freshDb();
+    const seeded = await seedCredential(handle, "user-1");
+    const now = new Date("2026-01-01T00:00:00.000Z");
+
+    recordFailure(
+      handle.db,
+      failureOf(seeded, now, { requestId: "request-1", attemptId: "attempt-1" }),
+    );
+    recordFailure(handle.db, failureOf(seeded, new Date(now.getTime() + 1000)));
+
+    const rows = handle.db.select().from(cooldownEvents).all();
+
+    expect(rows[0]?.downstreamRequestId).toBe("request-1");
+    expect(rows[0]?.attemptId).toBe("attempt-1");
+    expect(rows[1]?.downstreamRequestId).toBeNull();
+    expect(rows[1]?.attemptId).toBeNull();
+  });
+
   test("drops a user's history when the user is deleted", async () => {
     const handle = freshDb();
     const seeded = await seedCredential(handle, "user-1");
@@ -119,7 +138,11 @@ describe("cooldown history", () => {
   });
 });
 
-function failureOf(seeded: Seeded, now: Date): FailureRecord {
+function failureOf(
+  seeded: Seeded,
+  now: Date,
+  attempt: FailureContext["attempt"] = null,
+): FailureRecord {
   const context: FailureContext = {
     userId: seeded.userId,
     reference: "fast",
@@ -130,6 +153,7 @@ function failureOf(seeded: Seeded, now: Date): FailureRecord {
     modelSlug: seeded.modelSlug,
     credentialId: seeded.credentialId,
     credentialName: seeded.credentialName,
+    attempt,
   };
 
   return { subject: { kind: "credential", id: seeded.credentialId }, context, now };

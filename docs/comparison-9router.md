@@ -320,11 +320,12 @@ Three subject kinds: provider, model, credential (`src/server/health.ts:11-14`, 
 Which error flags which subject (`src/server/health.ts:51-82`):
 
 - `auth` and `rate_limit` to the credential, or nothing when the attempt has none.
+- `budget_exceeded` to the credential, or the provider when the attempt has none.
 - `not_found` and `protocol` to the model.
 - `unavailable` and `network` to the provider.
 - `invalid_request` and `unknown` to nothing.
 
-Duration is `min(30s * 2^(failures - 1), 24h)` (`src/server/health.ts:6-7`, `src/server/health.ts:41-45`). A success clears failures and the flag on all three subjects of that attempt (`src/server/health.ts:174-210`; subject list at `src/server/router/chat.ts:423-433`).
+Duration is `min(30s * 2^(failures - 1), 24h)`, raised to a refill a vendor named for a `budget_exceeded` (`src/server/health.ts:6-7`, `src/server/health.ts:41-56`). Stored on the event as `resets_at`. A success clears failures and the flag on all three subjects of that attempt (`src/server/health.ts:174-210`; subject list at `src/server/router/chat.ts:423-433`).
 
 Each failure writes a `cooldown_events` row inside the same transaction that bumps the subject (`src/server/health.ts:91-130`), truncates the message at 500 chars (`src/server/health.ts:9`, `src/server/health.ts:133-135`), and prunes history to the newest 500 rows per user (`src/server/health.ts:8`, `src/server/health.ts:120-129`).
 

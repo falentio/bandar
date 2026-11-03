@@ -15,9 +15,14 @@ export const zro: BuiltInProviderDefinition<"zro"> = {
     slug: settings.slug,
   },
   routes: {
-    chat: { adapter: bearerAdapter("zro") },
+    chat: { adapter: bearerAdapter("zro", "zro", { budget: true }) },
     messages: {
-      adapter: anthropicAdapter({ kind: "zro", label: "zro", headers: bearerHeaders }),
+      adapter: anthropicAdapter({
+        kind: "zro",
+        label: "zro",
+        headers: bearerHeaders,
+        budget: true,
+      }),
     },
   },
   defaultCompat: always("chat"),

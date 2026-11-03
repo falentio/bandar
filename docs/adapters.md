@@ -580,23 +580,57 @@ that gets null writes no modality keys at all.
 Adapters throw one type:
 
 ```ts
-new UpstreamError(message, kind, status);
+new UpstreamError(message, kind, status, resetsAt);
 ```
 
-`kind` is one of `auth`, `rate_limit`, `invalid_request`, `not_found`,
-`unavailable`, `protocol`, `network`, or `unknown`. `status` is the upstream HTTP
-status when there was one. The gateway maps `rate_limit` to 429,
-`invalid_request` to 400, `not_found` to 404, and the rest to 502, then records
-the event with the error kind. `kindForStatus` answers `unknown` for a status it
-does not classify, so an account-level status the gateway has no rule for does
-not convict a subject.
+`kind` is one of `auth`, `rate_limit`, `budget_exceeded`, `invalid_request`,
+`not_found`, `unavailable`, `protocol`, `network`, or `unknown`. `status` is the
+upstream HTTP status when there was one. The gateway maps `rate_limit` and
+`budget_exceeded` to 429, `invalid_request` to 400, `not_found` to 404, and the
+rest to 502, then records the event with the error kind. `kindForStatus` answers
+`unknown` for a status it does not classify, so an account-level status the
+gateway has no rule for does not convict a subject. A bare 402 is read as
+`budget_exceeded`, because that is the status vendors put on an exhausted
+allowance.
 
-Each failure that points at a subject also flags it: a credential for `auth` and
-`rate_limit`, the provider for `unavailable` and `network`, the model for
-`protocol` and `not_found`. `unknown` points at nobody, so the chain falls
-through it without recording a flag. The gateway records the flag in SQLite and skips an attempt whose
-subject is cooling down, so the next request does not repeat the same failure
-until the cooldown ends.
+`budget_exceeded` is the allowance being gone rather than the rate being too
+high: a wait of a second will not clear it, and the vendor says when it comes
+back. It is retryable like a rate limit, so the chain moves to the next
+credential, but it flags for that refill time instead of the 30-second growth,
+and answers 429 when no credential is left.
+
+Each failure that points at a subject also flags it: a credential for `auth`,
+`rate_limit`, and `budget_exceeded`, the provider for `unavailable` and
+`network`, the model for `protocol` and `not_found`. A budget with no
+credential saved is the account's own allowance, so it flags the provider
+instead. `unknown` points at nobody, so the chain falls through it without
+recording a flag. The gateway records the flag in SQLite and skips an attempt
+whose subject is cooling down, so the next request does not repeat the same
+failure until the cooldown ends.
+
+### Reading an exhausted allowance
+
+A kind whose wire says an allowance is gone names that itself, because a vendor's
+envelope is where it puts it and no status band carries it alone:
+
+```ts
+routes: {
+  chat: { adapter: bearerAdapter("zro", "zro", { budget: true }) },
+  messages: {
+    adapter: anthropicAdapter({ kind: "zro", label: "zro", headers: bearerHeaders, budget: true }),
+  },
+},
+```
+
+`budget: true` is `requireOk`'s second argument. It reads the body's `error.code`
+or top-level `code`, and answers `budget_exceeded` for `budget_exceeded` and
+`insufficient_quota`. The classification runs on a failure and on an OK
+response both, since a wire can report the state in a 200 body, and on an OK
+response only the head of the stream is read, so the caller still gets its body.
+
+The refill time comes from the vendor's own words where it names one — `"It
+resets in 6h 11m" is read as a countdown, capped at one day — and otherwise from
+a `Retry-After` header. With neither, the cooldown is the ordinary growth.
 
 Helpers in `src/server/providers/http.ts`:
 
@@ -605,8 +639,12 @@ Helpers in `src/server/providers/http.ts`:
   `UpstreamError(..., "network")` and passes an abort through.
 - `postForm({ url, headers, form, signal })` sends a form-urlencoded body with
   the same network mapping.
-- `requireOk(response)` reads an error envelope (`error.message`, `message`, or
-  plain text) and classifies the status.
+- `requireOk(response, classify?)` reads an error envelope (`error.message`,
+  `message`, or plain text) and classifies the status, after letting `classify`
+  name a kind the status does not.
+- `budgetExceeded(rejection)` builds the budget error, its refill time included,
+  and `codeOfBody`, `isBudgetCode`, `resetFrom`, and `retryAfterOf` are the
+  pieces it reads.
 - `sseData(body, signal)` yields the joined `data:` lines of each SSE event, including one
   the upstream closes on without a trailing blank line.
 - `apiKeyHeaders(name)` returns a `HeaderFactory` that omits the header when the
@@ -784,6 +822,12 @@ answers on both, so `zro/index.ts` declares the two routes inline: no `mount`,
 no per-model table, and no `compat.ts` record. The default is `always("chat")`,
 the documented primary and the wire an OpenAI-shaped client speaks; a model moves
 to Messages through the per-model override.
+
+Both of its routes carry `budget: true`, the classification sits at the
+adapter rather than the definition: which wire answers is a per-model choice, so
+a model moved to Messages would otherwise lose the reading the chat route has.
+Its answer is the Zro billing envelope — `code: "budget_exceeded"` with a
+message naming the refill — and it flags the spent credential for that long.
 
 A `compat.ts` record earns its place when each model needs a different wire, as
 on OpenCode Go. Where one default covers every model, the routes belong in

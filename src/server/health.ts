@@ -24,6 +24,8 @@ export type FailureContext = {
   readonly reference: string;
   readonly errorKind: UpstreamErrorKind;
   readonly message?: string;
+  /** When the exhausted allowance comes back, for the subjects a wait actually clears. */
+  readonly resetsAt?: Date | null;
   readonly providerId: string;
   readonly providerName: string;
   readonly modelId: string;
@@ -38,10 +40,16 @@ export type FailureRecord = {
   readonly now: Date;
 };
 
-export function cooldownMs(failures: number): number {
+/**
+ * The wait after a failure. It doubles per consecutive failure, and a vendor that named when its
+ * allowance comes back sets the floor: probing before it refills spends a request to be told so.
+ */
+export function cooldownMs(failures: number, resetsAt: Date | null, now: Date): number {
   const growth = COOLDOWN_BASE_MS * 2 ** Math.max(failures - 1, 0);
 
-  return Math.min(growth, COOLDOWN_CAP_MS);
+  if (resetsAt === null) return Math.min(growth, COOLDOWN_CAP_MS);
+
+  return Math.min(Math.max(resetsAt.getTime() - now.getTime(), growth), COOLDOWN_CAP_MS);
 }
 
 export function isCoolingDown(flaggedUntil: Date | null, now: number): boolean {
@@ -53,6 +61,14 @@ export function subjectFor(kind: UpstreamErrorKind, target: FailureTarget): Subj
     case "auth":
     case "rate_limit": {
       return target.credentialId === null ? null : { kind: "credential", id: target.credentialId };
+    }
+
+    case "budget_exceeded": {
+      // A budget is spent per account, so it rests that credential. With no credential saved, the
+      // account's allowance is the provider's problem, and rests it.
+      return target.credentialId === null
+        ? { kind: "provider", id: target.providerId }
+        : { kind: "credential", id: target.credentialId };
     }
 
     case "not_found": {
@@ -90,7 +106,7 @@ export function recordFailure(db: Db, record: FailureRecord): void {
 
   db.transaction((tx) => {
     const failures = failuresOf(tx, subject) + 1;
-    const cooldown = cooldownMs(failures);
+    const cooldown = cooldownMs(failures, context.resetsAt ?? null, now);
     const flaggedUntil = new Date(now.getTime() + cooldown);
 
     updateSubject(tx, subject, failures, flaggedUntil);
@@ -112,6 +128,7 @@ export function recordFailure(db: Db, record: FailureRecord): void {
         reference: context.reference,
         failures,
         cooldownMs: cooldown,
+        resetsAt: context.resetsAt ?? null,
         flaggedUntil,
         createdAt: now,
       })

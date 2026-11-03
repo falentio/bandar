@@ -13,6 +13,7 @@ import type { ReasoningEffort } from "../../../shared/reasoning";
 import type { ProviderKind } from "../../../shared/providers";
 import {
   bearerHeaders,
+  budgetOfBody,
   joinUrl,
   postJson,
   protocolError,
@@ -124,13 +125,18 @@ export type CompatibleOptions<K extends ProviderKind> = {
   readonly kind: K;
   readonly label: string;
   readonly headers: HeaderFactory;
+  /** The kind names an exhausted allowance itself; this wire's envelope is where it says so. */
+  readonly budget?: boolean;
 };
 
 export function chatAdapter<K extends ProviderKind>({
   kind,
   label,
   headers: headersOf,
+  budget = false,
 }: CompatibleOptions<K>): ProviderAdapter<K> {
+  const classify = budget ? budgetOfBody : undefined;
+
   return {
     kind,
 
@@ -142,7 +148,7 @@ export function chatAdapter<K extends ProviderKind>({
         signal: input.signal,
       });
 
-      await requireOk(response);
+      await requireOk(response, classify);
 
       const parsed = v.safeParse(ResponseSchema, await response.json());
 
@@ -170,7 +176,7 @@ export function chatAdapter<K extends ProviderKind>({
         signal: input.signal,
       });
 
-      await requireOk(response);
+      await requireOk(response, classify);
 
       let reason: string | null = null;
       let usage: CanonicalUsage | null = null;
@@ -265,8 +271,9 @@ export function chatAdapter<K extends ProviderKind>({
 export function bearerAdapter<K extends ProviderKind>(
   kind: K,
   label: string = kind,
+  options: { readonly budget?: boolean } = {},
 ): ProviderAdapter<K> {
-  return chatAdapter({ kind, label, headers: bearerHeaders });
+  return chatAdapter({ kind, label, headers: bearerHeaders, budget: options.budget });
 }
 
 type Draft = {

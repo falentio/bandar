@@ -10,6 +10,7 @@ import { finishOf } from "../types";
 import type { ReasoningEffort } from "../../../shared/reasoning";
 import type { ProviderKind } from "../../../shared/providers";
 import {
+  budgetOfBody,
   joinUrl,
   postJson,
   protocolError,
@@ -105,13 +106,18 @@ export type ResponsesOptions<K extends ProviderKind> = {
   readonly kind: K;
   readonly label: string;
   readonly headers: HeaderFactory;
+  /** The kind names an exhausted allowance itself; this wire's envelope is where it says so. */
+  readonly budget?: boolean;
 };
 
 export function responsesAdapter<K extends ProviderKind>({
   kind,
   label,
   headers: headersOf,
+  budget = false,
 }: ResponsesOptions<K>): ProviderAdapter<K> {
+  const classify = budget ? budgetOfBody : undefined;
+
   return {
     kind,
 
@@ -123,7 +129,7 @@ export function responsesAdapter<K extends ProviderKind>({
         signal: input.signal,
       });
 
-      await requireOk(response);
+      await requireOk(response, classify);
 
       const parsed = v.safeParse(ResponseSchema, await response.json());
 
@@ -154,7 +160,7 @@ export function responsesAdapter<K extends ProviderKind>({
         signal: input.signal,
       });
 
-      await requireOk(response);
+      await requireOk(response, classify);
 
       let reason: string | null = null;
       let usage: CanonicalUsage | null = null;

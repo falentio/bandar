@@ -12,6 +12,7 @@ import type { ProviderKind } from "../../../shared/providers";
 import { ANTHROPIC_EFFORT_VALUES } from "../../../shared/messages";
 import type { ReasoningEffort } from "../../../shared/reasoning";
 import {
+  budgetOfBody,
   joinUrl,
   postJson,
   protocolError,
@@ -110,13 +111,18 @@ export type AnthropicOptions<K extends ProviderKind> = {
   readonly kind: K;
   readonly label: string;
   readonly headers: HeaderFactory;
+  /** The kind names an exhausted allowance itself; this wire's envelope is where it says so. */
+  readonly budget?: boolean;
 };
 
 export function anthropicAdapter<K extends ProviderKind>({
   kind,
   label,
   headers: headersOf,
+  budget = false,
 }: AnthropicOptions<K>): ProviderAdapter<K> {
+  const classify = budget ? budgetOfBody : undefined;
+
   return {
     kind,
 
@@ -128,7 +134,7 @@ export function anthropicAdapter<K extends ProviderKind>({
         signal: input.signal,
       });
 
-      await requireOk(response);
+      await requireOk(response, classify);
 
       const parsed = v.safeParse(ResponseSchema, await response.json());
 
@@ -157,7 +163,7 @@ export function anthropicAdapter<K extends ProviderKind>({
         signal: input.signal,
       });
 
-      await requireOk(response);
+      await requireOk(response, classify);
 
       let usage: Usage = {};
       let reason: string | null = null;

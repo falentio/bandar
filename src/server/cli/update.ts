@@ -15,6 +15,12 @@ import { version as installedVersion } from "../generated/version";
 import { settingsIo } from "../settings-io";
 import type { Commands, Env } from "./command";
 import { detectInstall } from "./install-source";
+import {
+  archiveFormatOf,
+  toolInstalled,
+  unpackArchive,
+  type ArchiveFormat,
+} from "./update-archive";
 import { createProgress, type ByteProgress, type ReportUpdate } from "./update-progress";
 
 const COMMAND = "update";
@@ -46,6 +52,16 @@ const RELEASE_ARCH = new Map([
   ["x64", "x64"],
   ["arm64", "arm64"],
 ]);
+
+type ReleaseFormat = {
+  readonly suffix: "" | ".tar.gz" | ".tar.zst";
+  readonly archive: ArchiveFormat | null;
+  readonly needs: readonly string[];
+};
+
+const PLAIN: ReleaseFormat = { suffix: "", archive: null, needs: [] };
+const TAR_GZ: ReleaseFormat = { suffix: ".tar.gz", archive: "tar.gz", needs: ["gzip", "tar"] };
+const TAR_ZST: ReleaseFormat = { suffix: ".tar.zst", archive: "tar.zst", needs: ["zstd", "tar"] };
 
 const ReleaseAssetSchema = v.object({
   name: v.pipe(v.string(), v.minLength(1)),
@@ -94,6 +110,7 @@ export type UpdateRun = {
   readonly stderr: (line: string) => void;
   readonly send: HttpSend;
   readonly canWrite: (directory: string) => boolean;
+  readonly toolAvailable: (name: string) => boolean;
   readonly report: ReportUpdate;
 };
 
@@ -111,6 +128,7 @@ type ParsedVersion = {
 
 type Download =
   | { readonly kind: "bytes"; readonly bytes: Uint8Array }
+  | { readonly kind: "missing"; readonly reason: string }
   | { readonly kind: "failed"; readonly reason: string };
 
 /** One published release, and the only two things an installer needs from it. */
@@ -127,8 +145,10 @@ type LatestLookup =
 type Prepared =
   | {
       readonly kind: "ready";
-      readonly bytes: Uint8Array;
+      readonly published: Uint8Array;
       readonly expected: string;
+      readonly asset: string;
+      readonly format: ArchiveFormat | null;
       readonly message: string;
     }
   | { readonly kind: "stopped"; readonly message: string }
@@ -213,16 +233,33 @@ export function versionFromTagLocation(
   return VERSION_TEXT.test(version) ? version : null;
 }
 
-export function releaseNames(version: string, platform: string, arch: string): ReleaseNames | null {
+export function releaseNames(
+  version: string,
+  platform: string,
+  arch: string,
+  suffix = "",
+): ReleaseNames | null {
   const os = RELEASE_OS.get(platform);
   const cpu = RELEASE_ARCH.get(arch);
 
   if (os === undefined || cpu === undefined) return null;
 
   const extension = platform === "win32" ? ".exe" : "";
-  const asset = `bandar-${version}-${os}-${cpu}${extension}`;
+  const asset = `bandar-${version}-${os}-${cpu}${extension}${suffix}`;
 
   return { asset, checksum: `${asset}.sha256` };
+}
+
+/** The formats this platform can unpack, smallest first, keeping only those every tool allows. */
+export function releaseFormats(
+  platform: string,
+  available: (name: string) => boolean,
+): readonly ReleaseFormat[] {
+  if (platform === "win32") return [PLAIN];
+
+  if (platform !== "linux") return [];
+
+  return [TAR_ZST, TAR_GZ, PLAIN].filter((format) => format.needs.every((name) => available(name)));
 }
 
 /** How the candidate release stands against the installed version. */
@@ -298,6 +335,7 @@ export async function run(args: readonly string[], env: Env): Promise<number> {
       stderr: progress.sink((line) => console.error(line)),
       send: sendRequest,
       canWrite: canWriteDirectory,
+      toolAvailable: toolInstalled,
       report: progress.report,
     });
   } finally {
@@ -383,21 +421,35 @@ async function update(run: UpdateRun, archive: string | null): Promise<number> {
     return 1;
   }
 
-  run.report({ kind: "verifying", bytes: prepared.bytes.length });
+  run.report({ kind: "verifying", bytes: prepared.published.length });
 
-  const actual = sha256(prepared.bytes);
+  const actual = sha256(prepared.published);
 
   if (actual !== prepared.expected) {
     run.stderr(
-      `bandar: checksum mismatch for ${target}: expected ${prepared.expected}, got ${actual}`,
+      `bandar: checksum mismatch for ${prepared.asset}: expected ${prepared.expected}, got ${actual}`,
     );
 
     return 1;
   }
 
+  let bytes = prepared.published;
+
+  if (prepared.format !== null) {
+    const unpacked = await unpackArchive(prepared.format, prepared.published);
+
+    if (unpacked.kind === "failed") {
+      run.stderr(`bandar: could not unpack ${prepared.asset}: ${unpacked.reason}`);
+
+      return 1;
+    }
+
+    bytes = unpacked.bytes;
+  }
+
   run.report({ kind: "installing", target });
 
-  const replaced = replaceBinary(run, target, prepared.bytes);
+  const replaced = replaceBinary(run, target, bytes);
 
   if (replaced !== null) {
     run.stderr(`bandar: ${replaced}`);
@@ -446,35 +498,59 @@ async function installLatest(
     };
   }
 
-  const names = releaseNames(release.version, run.platform, run.arch);
+  let missed: { readonly asset: string; readonly reason: string } | null = null;
 
-  if (names === null) {
+  for (const format of releaseFormats(run.platform, run.toolAvailable)) {
+    const names = releaseNames(release.version, run.platform, run.arch, format.suffix);
+
+    if (names === null) continue;
+
+    const binary = await release.fetchAsset(names.asset, assetProgress(run, names.asset));
+
+    if (binary.kind === "missing") {
+      missed = { asset: names.asset, reason: binary.reason };
+
+      continue;
+    }
+
+    if (binary.kind === "failed")
+      return { kind: "failed", reason: `could not download ${names.asset}: ${binary.reason}` };
+
+    const checksum = await release.fetchAsset(names.checksum);
+
+    if (checksum.kind === "missing") {
+      missed = { asset: names.checksum, reason: checksum.reason };
+
+      continue;
+    }
+
+    if (checksum.kind === "failed")
+      return {
+        kind: "failed",
+        reason: `could not download ${names.checksum}: ${checksum.reason}`,
+      };
+
+    const expected = parseChecksum(new TextDecoder().decode(checksum.bytes));
+
+    if (expected === null)
+      return { kind: "failed", reason: `${names.checksum} does not hold a sha256 digest` };
+
     return {
-      kind: "failed",
-      reason: `bandar releases on linux and windows, not ${run.platform}-${run.arch}`,
+      kind: "ready",
+      published: binary.bytes,
+      expected,
+      asset: names.asset,
+      format: format.archive,
+      message: `bandar ${release.version} installed at ${target}`,
     };
   }
 
-  const binary = await release.fetchAsset(names.asset, assetProgress(run, names.asset));
-
-  if (binary.kind === "failed")
-    return { kind: "failed", reason: `could not download ${names.asset}: ${binary.reason}` };
-
-  const checksum = await release.fetchAsset(names.checksum);
-
-  if (checksum.kind === "failed")
-    return { kind: "failed", reason: `could not download ${names.checksum}: ${checksum.reason}` };
-
-  const expected = parseChecksum(new TextDecoder().decode(checksum.bytes));
-
-  if (expected === null)
-    return { kind: "failed", reason: `${names.checksum} does not hold a sha256 digest` };
-
   return {
-    kind: "ready",
-    bytes: binary.bytes,
-    expected,
-    message: `bandar ${release.version} installed at ${target}`,
+    kind: "failed",
+    reason:
+      missed === null
+        ? `bandar releases on linux and windows, not ${run.platform}-${run.arch}`
+        : `could not download ${missed.asset}: ${missed.reason}`,
   };
 }
 
@@ -612,6 +688,8 @@ async function downloadPublic(
       onBytes,
     );
 
+    if (response.status === 404) return { kind: "missing", reason: "HTTP 404" };
+
     if (response.status !== 200)
       return { kind: "failed", reason: `HTTP ${String(response.status)}` };
 
@@ -636,7 +714,7 @@ async function downloadApi(
   const asset = assets.find((candidate) => candidate.name === name);
 
   if (asset === undefined)
-    return { kind: "failed", reason: `release ${version} publishes no ${name} asset` };
+    return { kind: "missing", reason: `release ${version} publishes no ${name} asset` };
 
   if (!assetHostAllowed(asset.url, feed))
     return {
@@ -690,8 +768,10 @@ function prepareFromArchive(archive: string, target: string): Prepared {
 
   return {
     kind: "ready",
-    bytes,
+    published: bytes,
     expected,
+    asset: archive,
+    format: archiveFormatOf(archive),
     message: `bandar installed from ${archive} at ${target}`,
   };
 }

@@ -24,13 +24,21 @@ import {
   parseUpdateFlags,
   register,
   releaseAssetUrl,
+  releaseFormats,
   releaseNames,
   run,
   runUpdate,
   versionFromTagLocation,
   type HttpSend,
+  type HttpResponse,
   type UpdateRun,
 } from "./update";
+import {
+  archiveFormatOf,
+  toolInstalled,
+  unpackArchive,
+  type ArchiveFormat,
+} from "./update-archive";
 import type { UpdateEvent } from "./update-progress";
 
 const workspaces: string[] = [];
@@ -111,15 +119,76 @@ type ServeOptions = {
   readonly tagStatus?: number;
   readonly location?: string | null;
   readonly assetStatus?: number;
+  readonly archives?: readonly ArchiveFormat[];
+  readonly corrupt?: boolean;
   readonly assets?: readonly { readonly name: string; readonly url: string }[];
 };
 
 const tagLocation = (version: string): string =>
   `https://web.test/falentio/bandar/releases/tag/v${version}`;
 
-/** The anonymous flow: a redirect from the release page, then two asset downloads. */
+const tarball = (payload: Uint8Array, format: ArchiveFormat): Uint8Array => {
+  const directory = workspace();
+
+  writeFileSync(join(directory, "bandar"), payload);
+
+  const tar = Bun.spawnSync(["tar", "-cf", "-", "-C", directory, "bandar"]);
+
+  if (tar.exitCode !== 0) throw new Error("the fixture tar could not be built");
+
+  const compressor = Bun.spawnSync(
+    format === "tar.gz" ? ["gzip", "-9", "-c"] : ["zstd", "-3", "-q", "-c"],
+    { stdin: tar.stdout },
+  );
+
+  if (compressor.exitCode !== 0) throw new Error(`the fixture ${format} could not be compressed`);
+
+  return new Uint8Array(compressor.stdout);
+};
+
+const publishedAssets = (
+  options: ServeOptions,
+  platform: string,
+): ReadonlyMap<string, Uint8Array> => {
+  const assets = new Map<string, Uint8Array>();
+  const plain = releaseNames(options.version, platform, "x64");
+
+  if (plain !== null) assets.set(plain.asset, options.bytes);
+
+  for (const format of options.archives ?? []) {
+    const names = releaseNames(options.version, platform, "x64", `.${format}`);
+
+    if (names === null) continue;
+
+    assets.set(
+      names.asset,
+      options.corrupt === true
+        ? encode("this is not a tar archive")
+        : tarball(options.bytes, format),
+    );
+  }
+
+  return assets;
+};
+
+const assetResponse = (
+  url: string,
+  staged: ReadonlyMap<string, Uint8Array>,
+  assetUrlOf: (name: string) => string,
+  options: ServeOptions,
+): HttpResponse => {
+  for (const [name, bytes] of staged) {
+    if (url === assetUrlOf(name)) return { status: options.assetStatus ?? 200, body: bytes };
+
+    if (url === assetUrlOf(`${name}.sha256`))
+      return { status: 200, body: encode(`${options.checksum ?? sha256(bytes)}  ${name}\n`) };
+  }
+
+  return { status: 404, body: new Uint8Array() };
+};
+
 const publicServing = (options: ServeOptions, platform = "linux"): HttpSend => {
-  const names = releaseNames(options.version, platform, "x64");
+  const staged = publishedAssets(options, platform);
 
   return async (url) => {
     if (url === TAG_PAGE) {
@@ -134,53 +203,37 @@ const publicServing = (options: ServeOptions, platform = "linux"): HttpSend => {
       };
     }
 
-    if (names === null) return { status: 404, body: new Uint8Array() };
-
-    if (url === releaseAssetUrl(WEB, options.version, names.asset))
-      return { status: options.assetStatus ?? 200, body: options.bytes };
-
-    if (url === releaseAssetUrl(WEB, options.version, names.checksum)) {
-      const digest = options.checksum ?? sha256(options.bytes);
-
-      return { status: 200, body: encode(`${digest}  ${names.asset}\n`) };
-    }
-
-    return { status: 404, body: new Uint8Array() };
+    return assetResponse(
+      url,
+      staged,
+      (name) => releaseAssetUrl(WEB, options.version, name),
+      options,
+    );
   };
 };
 
 const apiRelease = (options: ServeOptions, platform: string): string => {
-  const names = releaseNames(options.version, platform, "x64");
+  const staged = publishedAssets(options, platform);
 
-  if (names === null) throw new Error("the fixture platform has no asset");
+  if (staged.size === 0) throw new Error("the fixture platform has no asset");
 
-  return JSON.stringify({
-    tag_name: `v${options.version}`,
-    assets: options.assets ?? [
-      { name: names.asset, url: `https://api.test/assets/${names.asset}` },
-      { name: names.checksum, url: `https://api.test/assets/${names.checksum}` },
-    ],
-  });
+  const published = [...staged.keys()].flatMap((name) => [
+    { name, url: `https://api.test/assets/${name}` },
+    { name: `${name}.sha256`, url: `https://api.test/assets/${name}.sha256` },
+  ]);
+
+  return JSON.stringify({ tag_name: `v${options.version}`, assets: options.assets ?? published });
 };
 
 /** The private-fork flow: one JSON feed carrying the asset urls that need the token. */
 const apiServing = (options: ServeOptions, platform = "linux"): HttpSend => {
-  const names = releaseNames(options.version, platform, "x64");
+  const staged = publishedAssets(options, platform);
 
   return async (url) => {
     if (url === API_FEED)
       return { status: options.tagStatus ?? 200, body: encode(apiRelease(options, platform)) };
 
-    if (names !== null && url === `https://api.test/assets/${names.asset}`)
-      return { status: options.assetStatus ?? 200, body: options.bytes };
-
-    if (names !== null && url === `https://api.test/assets/${names.checksum}`) {
-      const digest = options.checksum ?? sha256(options.bytes);
-
-      return { status: 200, body: encode(`${digest}  ${names.asset}\n`) };
-    }
-
-    return { status: 404, body: new Uint8Array() };
+    return assetResponse(url, staged, (name) => `https://api.test/assets/${name}`, options);
   };
 };
 
@@ -211,7 +264,15 @@ type RunOptions = {
   readonly platform?: string;
   readonly canWrite?: boolean;
   readonly send?: HttpSend;
+  readonly toolAvailable?: (name: string) => boolean;
 };
+
+const toolsOf =
+  (...names: readonly string[]) =>
+  (name: string): boolean =>
+    names.includes(name);
+
+const zstdTest = toolInstalled("zstd") ? test : test.skip;
 
 const runOf = (fixture: Fixture, options: RunOptions): Recorded => {
   const lines: string[] = [];
@@ -243,6 +304,7 @@ const runOf = (fixture: Fixture, options: RunOptions): Recorded => {
       stderr: (line) => errors.push(line),
       send: recording,
       canWrite: () => options.canWrite ?? true,
+      toolAvailable: options.toolAvailable ?? (() => false),
       report: (event) => events.push(event),
     },
   };
@@ -376,6 +438,40 @@ describe("versions and assets", () => {
       checksum: "bandar-0.2.0-windows-x64.exe.sha256",
     });
     expect(releaseNames("0.2.0", "darwin", "arm64")).toBeNull();
+  });
+
+  test("releaseNames puts a format suffix on the asset and its checksum", () => {
+    expect(releaseNames("0.2.0", "linux", "x64", ".tar.gz")).toEqual({
+      asset: "bandar-0.2.0-linux-x64.tar.gz",
+      checksum: "bandar-0.2.0-linux-x64.tar.gz.sha256",
+    });
+    expect(releaseNames("0.2.0", "linux", "x64", ".tar.zst")).toEqual({
+      asset: "bandar-0.2.0-linux-x64.tar.zst",
+      checksum: "bandar-0.2.0-linux-x64.tar.zst.sha256",
+    });
+  });
+
+  test("releaseFormats orders linux by size and keeps only a format whose tools exist", () => {
+    const suffixes = (platform: string, installed: readonly string[]): readonly string[] =>
+      releaseFormats(platform, (name) => installed.includes(name)).map((format) => format.suffix);
+
+    expect(suffixes("linux", ["zstd", "gzip", "tar"])).toEqual([".tar.zst", ".tar.gz", ""]);
+    expect(suffixes("linux", ["gzip", "tar"])).toEqual([".tar.gz", ""]);
+    expect(suffixes("linux", ["zstd", "tar"])).toEqual([".tar.zst", ""]);
+    expect(suffixes("linux", ["zstd", "gzip"])).toEqual([""]);
+    expect(suffixes("win32", ["zstd", "gzip", "tar"])).toEqual([""]);
+    expect(suffixes("darwin", ["zstd", "gzip", "tar"])).toEqual([]);
+  });
+
+  test("archiveFormatOf reads the suffix, and a plain binary has none", () => {
+    expect(archiveFormatOf("bandar-0.2.0-linux-x64")).toBeNull();
+    expect(archiveFormatOf("bandar-0.2.0-linux-x64.tar.gz")).toBe("tar.gz");
+    expect(archiveFormatOf("bandar-0.2.0-linux-x64.tar.zst")).toBe("tar.zst");
+  });
+
+  test("toolInstalled reports a tool on PATH and one that is absent", () => {
+    expect(toolInstalled("tar")).toBe(true);
+    expect(toolInstalled("bandar-no-such-tool")).toBe(false);
   });
 
   test("a token comes from the first non-blank variable", () => {
@@ -650,6 +746,40 @@ describe("update --check", () => {
 
     expect(await runUpdate(recorded.run)).toBe(1);
     expect(recorded.errors).toEqual(["bandar: the release feed answered HTTP 500"]);
+  });
+});
+
+describe("the archive unpack", () => {
+  test("a real tarball yields its bandar member", async () => {
+    const payload = encode("binary from a tarball");
+
+    expect(await unpackArchive("tar.gz", tarball(payload, "tar.gz"))).toEqual({
+      kind: "bytes",
+      bytes: payload,
+    });
+  });
+
+  zstdTest("a real zstd tarball yields its bandar member", async () => {
+    const payload = encode("binary from a zstd tarball");
+
+    expect(await unpackArchive("tar.zst", tarball(payload, "tar.zst"))).toEqual({
+      kind: "bytes",
+      bytes: payload,
+    });
+  });
+
+  test("an archive whose bandar member is empty is refused", async () => {
+    expect(await unpackArchive("tar.gz", tarball(new Uint8Array(), "tar.gz"))).toEqual({
+      kind: "failed",
+      reason: "the archive holds no bandar",
+    });
+  });
+
+  test("bytes that are no archive report what tar said", async () => {
+    const unpacked = await unpackArchive("tar.gz", encode("not a tar archive"));
+
+    expect(unpacked.kind).toBe("failed");
+    expect(unpacked.kind === "failed" ? unpacked.reason : "").toContain("tar:");
   });
 });
 
@@ -974,6 +1104,107 @@ describe("bandar update", () => {
     expect(recorded.errors[0]).toContain("publishes no bandar-0.2.0-linux-x64 asset");
     expect(decode(readFileSync(fixture.target))).toBe("old binary");
   });
+
+  zstdTest("a zstd tarball is preferred and its bandar member is installed", async () => {
+    const fixture = fixtureOf("install-script");
+    const bytes = encode("payload inside a zstd tarball");
+
+    const recorded = runOf(fixture, {
+      toolAvailable: toolsOf("zstd", "tar"),
+      send: publicServing({ version: "0.2.0", bytes, archives: ["tar.zst"] }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(decode(readFileSync(fixture.target))).toBe("payload inside a zstd tarball");
+    expect(recorded.requests.map((request) => request.url)).toEqual([
+      TAG_PAGE,
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.tar.zst"),
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.tar.zst.sha256"),
+    ]);
+  });
+
+  test("a release without the zstd tarball falls back to the gzip tarball", async () => {
+    const fixture = fixtureOf("install-script");
+    const bytes = encode("payload inside a gzip tarball");
+
+    const recorded = runOf(fixture, {
+      toolAvailable: toolsOf("zstd", "gzip", "tar"),
+      send: publicServing({ version: "0.2.0", bytes, archives: ["tar.gz"] }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(decode(readFileSync(fixture.target))).toBe("payload inside a gzip tarball");
+    expect(recorded.requests.map((request) => request.url)).toEqual([
+      TAG_PAGE,
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.tar.zst"),
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.tar.gz"),
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.tar.gz.sha256"),
+    ]);
+  });
+
+  test("a release with no tarball at all falls back to the plain binary", async () => {
+    const fixture = fixtureOf("install-script");
+    const bytes = encode("plain binary payload");
+
+    const recorded = runOf(fixture, {
+      toolAvailable: toolsOf("zstd", "gzip", "tar"),
+      send: publicServing({ version: "0.2.0", bytes }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(decode(readFileSync(fixture.target))).toBe("plain binary payload");
+    expect(recorded.requests.map((request) => request.url)).toEqual([
+      TAG_PAGE,
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.tar.zst"),
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.tar.gz"),
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64"),
+      releaseAssetUrl(WEB, "0.2.0", "bandar-0.2.0-linux-x64.sha256"),
+    ]);
+  });
+
+  test("a corrupt tarball stops the update and leaves the installed binary alone", async () => {
+    const fixture = fixtureOf("install-script");
+
+    const recorded = runOf(fixture, {
+      toolAvailable: toolsOf("gzip", "tar"),
+      send: publicServing({
+        version: "0.2.0",
+        bytes: encode("new binary payload"),
+        archives: ["tar.gz"],
+        corrupt: true,
+      }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.errors[0]).toContain("could not unpack bandar-0.2.0-linux-x64.tar.gz");
+    expect(decode(readFileSync(fixture.target))).toBe("old binary");
+    expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
+  });
+
+  test("an API feed that lists only the plain binary installs it", async () => {
+    const fixture = fixtureOf("install-script");
+    const bytes = encode("plain feed payload");
+    const names = releaseNames("0.2.0", "linux", "x64");
+
+    if (names === null) throw new Error("the fixture platform has no asset");
+
+    const recorded = runOf(fixture, {
+      update: API_UPDATE,
+      env: TOKEN_ENV,
+      toolAvailable: toolsOf("zstd", "gzip", "tar"),
+      send: apiServing({
+        version: "0.2.0",
+        bytes,
+        assets: [
+          { name: names.asset, url: `https://api.test/assets/${names.asset}` },
+          { name: names.checksum, url: `https://api.test/assets/${names.checksum}` },
+        ],
+      }),
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(decode(readFileSync(fixture.target))).toBe("plain feed payload");
+  });
 });
 
 test("a foreign asset host is refused before any request, so the token stays put", async () => {
@@ -1107,5 +1338,42 @@ describe("bandar update --archive", () => {
     expect(await runUpdate(recorded.run)).toBe(0);
     expect(readFileSync(join(databases, "bandar.db"), "utf8")).toBe("sqlite");
     expect(readFileSync(join(databases, "bandar.duckdb"), "utf8")).toBe("duckdb");
+  });
+
+  test("--archive unpacks a local gzip tarball", async () => {
+    const fixture = fixtureOf("install-script");
+    const payload = encode("archived binary payload");
+    const archive = join(fixture.directory, "bandar-0.2.0-linux-x64.tar.gz");
+    const packed = tarball(payload, "tar.gz");
+
+    writeFileSync(archive, packed);
+    writeFileSync(`${archive}.sha256`, `${sha256(packed)}  bandar-0.2.0-linux-x64.tar.gz\n`);
+
+    const recorded = runOf(fixture, {
+      argv: ["--archive", archive],
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(0);
+    expect(decode(readFileSync(fixture.target))).toBe("archived binary payload");
+    expect(statSync(fixture.target).mode & 0o777).toBe(0o755);
+    expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
+  });
+
+  test("--archive refuses a corrupt tarball and leaves the binary alone", async () => {
+    const fixture = fixtureOf("install-script");
+    const archive = join(fixture.directory, "bandar-0.2.0-linux-x64.tar.gz");
+    const packed = encode("not a tar archive");
+
+    writeFileSync(archive, packed);
+    writeFileSync(`${archive}.sha256`, `${sha256(packed)}  bandar-0.2.0-linux-x64.tar.gz\n`);
+
+    const recorded = runOf(fixture, {
+      argv: ["--archive", archive],
+    });
+
+    expect(await runUpdate(recorded.run)).toBe(1);
+    expect(recorded.errors[0]).toContain(`could not unpack ${archive}`);
+    expect(decode(readFileSync(fixture.target))).toBe("old binary");
+    expect(tempFilesIn(join(fixture.directory, "bin"))).toEqual([]);
   });
 });

@@ -249,7 +249,11 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
   let ttftMs: number | null = null;
   let beat: ReturnType<typeof setInterval> | null = null;
 
-  const stopBeat = () => {
+  // The writer's close and the consumer's cancel both end the stream here, so neither path can
+  // leave the interval running behind it.
+  const stop = () => {
+    detach();
+
     if (beat !== null) clearInterval(beat);
 
     beat = null;
@@ -264,8 +268,7 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
       };
 
       const close = () => {
-        detach();
-        stopBeat();
+        stop();
 
         if (!cancelled) controller.close();
       };
@@ -420,9 +423,8 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
     },
     cancel() {
       cancelled = true;
-      stopBeat();
+      stop();
       abort.abort();
-      detach();
     },
   });
 

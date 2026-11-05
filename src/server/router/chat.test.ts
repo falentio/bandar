@@ -1769,15 +1769,13 @@ type ResponsesFrame = {
 };
 
 function responsesFrames(text: string): readonly ResponsesFrame[] {
-  return sseFrames(text)
-    .filter((block) => block.startsWith("data: "))
-    .map((block): ResponsesFrame => {
-      const data = block.replace(/^data: /u, "");
+  return sseFrames(text).map((block): ResponsesFrame => {
+    const data = block.replace(/^data: /u, "");
 
-      const parsed: unknown = data === "[DONE]" ? { type: "[DONE]" } : JSON.parse(data);
+    const parsed: unknown = data === "[DONE]" ? { type: "[DONE]" } : JSON.parse(data);
 
-      return v.parse(v.looseObject({ type: v.string() }), parsed);
-    });
+    return v.parse(v.looseObject({ type: v.string() }), parsed);
+  });
 }
 
 async function setCompat(harness: Harness, seeded: Seeded, compat: "responses"): Promise<void> {

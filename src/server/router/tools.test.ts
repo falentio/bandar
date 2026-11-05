@@ -1039,7 +1039,6 @@ function parsedJson(text: string): JsonValue {
 
 function chatChunks(text: string): readonly unknown[] {
   return sseFrames(text)
-    .filter((block) => block.startsWith("data: "))
     .map((block) => block.replace(/^data: /u, ""))
     .filter((data) => data !== "[DONE]")
     .map((data) => parsedJson(data));
@@ -1048,18 +1047,17 @@ function chatChunks(text: string): readonly unknown[] {
 type AnthropicFrame = { readonly event: string; readonly data: unknown };
 
 function anthropicFrames(text: string): readonly AnthropicFrame[] {
-  return sseFrames(text)
-    .filter((block) => block.split("\n").some((line) => line.startsWith("data: ")))
-    .map((block) => {
-      const lines = block.split("\n");
+  return sseFrames(text).map((block) => {
+    const lines = block.split("\n");
+    const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length);
 
-      return {
-        event: lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) ?? "",
-        data: parsedJson(
-          lines.find((line) => line.startsWith("data: "))?.slice("data: ".length) ?? "{}",
-        ),
-      };
-    });
+    if (data === undefined) throw new Error("a messages frame carried no data line: " + block);
+
+    return {
+      event: lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) ?? "",
+      data: parsedJson(data),
+    };
+  });
 }
 
 function migrations(): readonly Migration[] {

@@ -24,6 +24,7 @@ import type { ToolCall, ToolResult } from "../../shared/conversation";
 import type { JsonValue } from "../../shared/json";
 import { ChatCompletionRequestSchema } from "../../shared/chat";
 import { MessagesRequestSchema } from "../../shared/messages";
+import { sseFrames } from "../../shared/sse";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 const DUCK_DIR = fileURLToPath(new URL("../../../duckdb", import.meta.url));
@@ -1037,8 +1038,7 @@ function parsedJson(text: string): JsonValue {
 }
 
 function chatChunks(text: string): readonly unknown[] {
-  return text
-    .split("\n\n")
+  return sseFrames(text)
     .filter((block) => block.startsWith("data: "))
     .map((block) => block.replace(/^data: /u, ""))
     .filter((data) => data !== "[DONE]")
@@ -1048,8 +1048,7 @@ function chatChunks(text: string): readonly unknown[] {
 type AnthropicFrame = { readonly event: string; readonly data: unknown };
 
 function anthropicFrames(text: string): readonly AnthropicFrame[] {
-  return text
-    .split("\n\n")
+  return sseFrames(text)
     .filter((block) => block.split("\n").some((line) => line.startsWith("data: ")))
     .map((block) => {
       const lines = block.split("\n");

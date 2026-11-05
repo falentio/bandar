@@ -26,6 +26,7 @@ import type { Auth } from "../auth";
 import { createGateway } from "../gateway";
 import { ChatCompletionRequestSchema } from "../../shared/chat";
 import { toolById, toolStatus } from "../../shared/cli-tools";
+import { sseFrames } from "../../shared/sse";
 import type { JsonValue } from "../../shared/json";
 import type { GenericProviderKind } from "../../shared/providers";
 import { anthropicWire } from "./anthropic-wire";
@@ -1768,8 +1769,7 @@ type ResponsesFrame = {
 };
 
 function responsesFrames(text: string): readonly ResponsesFrame[] {
-  return text
-    .split("\n\n")
+  return sseFrames(text)
     .filter((block) => block.startsWith("data: "))
     .map((block): ResponsesFrame => {
       const data = block.replace(/^data: /u, "");

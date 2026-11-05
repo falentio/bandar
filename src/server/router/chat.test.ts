@@ -26,6 +26,7 @@ import type { Auth } from "../auth";
 import { createGateway } from "../gateway";
 import { ChatCompletionRequestSchema } from "../../shared/chat";
 import { toolById, toolStatus } from "../../shared/cli-tools";
+import { sseFrames } from "../../shared/sse";
 import type { JsonValue } from "../../shared/json";
 import type { GenericProviderKind } from "../../shared/providers";
 import { anthropicWire } from "./anthropic-wire";
@@ -602,6 +603,67 @@ describe("runChat cooldowns", () => {
     ).toBe(0);
     expect(credentialNamed(harness.db, "only")?.failures).toBe(0);
     expect(credentialNamed(harness.db, "only")?.flaggedUntil).toBeNull();
+  });
+
+  test("opens the stream with a keep-alive comment before the upstream answers", async () => {
+    let release: () => void = () => {};
+
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const harness = await freshHarness(async () => {
+      await held;
+
+      return openAiStream();
+    });
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, chatInput("fast", true));
+    const body = response.body;
+
+    if (body === null) throw new Error("the streamed response carried no body");
+
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let opened = "";
+
+    for (let read = 0; !opened.includes(": keep-alive\n\n"); read += 1) {
+      if (read === 16) throw new Error("the stream never sent the keep-alive comment");
+
+      const chunk = await reader.read();
+
+      if (chunk.done) break;
+
+      opened += decoder.decode(chunk.value, { stream: true });
+    }
+
+    expect(opened.startsWith(": keep-alive\n\n")).toBe(true);
+    expect(harness.upstream.calls).toHaveLength(0);
+
+    release();
+
+    let rest = "";
+
+    for (;;) {
+      const chunk = await reader.read();
+
+      if (chunk.done) break;
+
+      rest += decoder.decode(chunk.value, { stream: true });
+    }
+
+    expect(rest).toContain('"content":"hello"');
+    expect(rest.trimEnd().endsWith("data: [DONE]")).toBe(true);
+    expect(harness.upstream.calls).toHaveLength(1);
   });
 
   test("streams from the next credential after an auth failure before any text", async () => {
@@ -1719,16 +1781,13 @@ type ResponsesFrame = {
 };
 
 function responsesFrames(text: string): readonly ResponsesFrame[] {
-  return text
-    .split("\n\n")
-    .filter((block) => block.trim() !== "")
-    .map((block): ResponsesFrame => {
-      const data = block.replace(/^data: /u, "");
+  return sseFrames(text).map((block): ResponsesFrame => {
+    const data = block.replace(/^data: /u, "");
 
-      const parsed: unknown = data === "[DONE]" ? { type: "[DONE]" } : JSON.parse(data);
+    const parsed: unknown = data === "[DONE]" ? { type: "[DONE]" } : JSON.parse(data);
 
-      return v.parse(v.looseObject({ type: v.string() }), parsed);
-    });
+    return v.parse(v.looseObject({ type: v.string() }), parsed);
+  });
 }
 
 async function setCompat(harness: Harness, seeded: Seeded, compat: "responses"): Promise<void> {

@@ -50,6 +50,7 @@ import {
 import { CHARS_PER_TOKEN } from "../src/server/router/anthropic-wire";
 import { PROJECT_URL_HEADER } from "../src/shared/project";
 import { SESSION_ID_HEADER } from "../src/shared/session-id";
+import { sseFrames } from "../src/shared/sse";
 import { TagListSchema, tagPaths } from "../src/shared/tags";
 
 const JOURNAL = join(import.meta.dir, "../drizzle/meta/_journal.json");
@@ -3593,9 +3594,7 @@ async function readMessageStream(response: Response): Promise<{
   let inputTokens: number | null = null;
   let outputTokens: number | null = null;
 
-  for (const frame of raw.split("\n\n")) {
-    if (frame.trim() === "") continue;
-
+  for (const frame of sseFrames(raw)) {
     const lines = frame.split("\n");
     const name = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length);
     const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length);
@@ -3794,7 +3793,7 @@ function responsesStream(raw: string) {
   const frames: string[] = [];
   let text = "";
 
-  for (const frame of raw.split("\n\n")) {
+  for (const frame of sseFrames(raw)) {
     if (!frame.startsWith("data: ")) continue;
 
     const data = frame.slice("data: ".length);
@@ -3828,7 +3827,7 @@ async function readStream(response: Response): Promise<{
   let text = "";
   let usage: { prompt_tokens: number; completion_tokens: number } | null = null;
 
-  for (const event of raw.split("\n\n")) {
+  for (const event of sseFrames(raw)) {
     if (!event.startsWith("data: ")) continue;
 
     const data = event.slice("data: ".length);

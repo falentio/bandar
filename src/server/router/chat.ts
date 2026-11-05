@@ -84,6 +84,8 @@ type AttemptPlan = {
   succeeded(attempt: ResolvedAttempt): void;
 };
 
+const KEEP_ALIVE = ": keep-alive\n\n";
+
 const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
   "auth",
   "rate_limit",
@@ -257,6 +259,8 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
 
         if (!cancelled) controller.close();
       };
+
+      send(KEEP_ALIVE);
 
       const writerOf = () =>
         wire.stream({

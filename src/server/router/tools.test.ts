@@ -24,6 +24,7 @@ import type { ToolCall, ToolResult } from "../../shared/conversation";
 import type { JsonValue } from "../../shared/json";
 import { ChatCompletionRequestSchema } from "../../shared/chat";
 import { MessagesRequestSchema } from "../../shared/messages";
+import { sseFrames } from "../../shared/sse";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 const DUCK_DIR = fileURLToPath(new URL("../../../duckdb", import.meta.url));
@@ -1037,9 +1038,7 @@ function parsedJson(text: string): JsonValue {
 }
 
 function chatChunks(text: string): readonly unknown[] {
-  return text
-    .split("\n\n")
-    .filter((block) => block.trim() !== "")
+  return sseFrames(text)
     .map((block) => block.replace(/^data: /u, ""))
     .filter((data) => data !== "[DONE]")
     .map((data) => parsedJson(data));
@@ -1048,19 +1047,17 @@ function chatChunks(text: string): readonly unknown[] {
 type AnthropicFrame = { readonly event: string; readonly data: unknown };
 
 function anthropicFrames(text: string): readonly AnthropicFrame[] {
-  return text
-    .split("\n\n")
-    .filter((block) => block.trim() !== "")
-    .map((block) => {
-      const lines = block.split("\n");
+  return sseFrames(text).map((block) => {
+    const lines = block.split("\n");
+    const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length);
 
-      return {
-        event: lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) ?? "",
-        data: parsedJson(
-          lines.find((line) => line.startsWith("data: "))?.slice("data: ".length) ?? "{}",
-        ),
-      };
-    });
+    if (data === undefined) throw new Error("a messages frame carried no data line: " + block);
+
+    return {
+      event: lines.find((line) => line.startsWith("event: "))?.slice("event: ".length) ?? "",
+      data: parsedJson(data),
+    };
+  });
 }
 
 function migrations(): readonly Migration[] {

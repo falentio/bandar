@@ -604,6 +604,55 @@ describe("runChat cooldowns", () => {
     expect(credentialNamed(harness.db, "only")?.flaggedUntil).toBeNull();
   });
 
+  test("opens the stream with a keep-alive comment before the upstream answers", async () => {
+    let release: () => void = () => {};
+
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const harness = await freshHarness(async () => {
+      await held;
+
+      return openAiStream();
+    });
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, chatInput("fast", true));
+    const body = response.body;
+
+    if (body === null) throw new Error("the streamed response carried no body");
+
+    const reader = body.getReader();
+    const first = await reader.read();
+
+    expect(new TextDecoder().decode(first.value)).toBe(": keep-alive\n\n");
+
+    release();
+
+    let rest = "";
+
+    for (;;) {
+      const chunk = await reader.read();
+
+      if (chunk.done) break;
+
+      rest += new TextDecoder().decode(chunk.value);
+    }
+
+    expect(rest).toContain('"content":"hello"');
+    expect(rest.trimEnd().endsWith("data: [DONE]")).toBe(true);
+    expect(harness.upstream.calls).toHaveLength(1);
+  });
+
   test("streams from the next credential after an auth failure before any text", async () => {
     const harness = await freshHarness((call) =>
       call.key === "Bearer good-key"
@@ -1721,7 +1770,7 @@ type ResponsesFrame = {
 function responsesFrames(text: string): readonly ResponsesFrame[] {
   return text
     .split("\n\n")
-    .filter((block) => block.trim() !== "")
+    .filter((block) => block.startsWith("data: "))
     .map((block): ResponsesFrame => {
       const data = block.replace(/^data: /u, "");
 

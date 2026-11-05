@@ -114,9 +114,11 @@ completed response, and its stream frames: `src/server/router/wire.ts` holds
 `openAiWire`, `src/server/router/anthropic-wire.ts` holds `anthropicWire`, and
 `src/server/router/responses-wire.ts` holds `responsesWire`. Every one satisfies
 `ChatWire` and a caller passes it as `ChatInput.wire`; the default is
-`openAiWire`. `GATEWAY_SURFACE` in `src/shared/cli-tools.ts` records which of the
-three paths this build serves, and a CLI tool whose `needs` the build meets is
-reported ready.
+`openAiWire`. A streamed answer opens with one `: keep-alive` comment frame
+before bandar reaches the upstream, so a client or proxy waiting on the first
+token sees the stream open. `GATEWAY_SURFACE` in `src/shared/cli-tools.ts`
+records which of the three paths this build serves, and a CLI tool whose
+`needs` the build meets is reported ready.
 
 ### OpenAI chat ingress
 

@@ -1039,7 +1039,7 @@ function parsedJson(text: string): JsonValue {
 function chatChunks(text: string): readonly unknown[] {
   return text
     .split("\n\n")
-    .filter((block) => block.trim() !== "")
+    .filter((block) => block.startsWith("data: "))
     .map((block) => block.replace(/^data: /u, ""))
     .filter((data) => data !== "[DONE]")
     .map((data) => parsedJson(data));
@@ -1050,7 +1050,7 @@ type AnthropicFrame = { readonly event: string; readonly data: unknown };
 function anthropicFrames(text: string): readonly AnthropicFrame[] {
   return text
     .split("\n\n")
-    .filter((block) => block.trim() !== "")
+    .filter((block) => block.split("\n").some((line) => line.startsWith("data: ")))
     .map((block) => {
       const lines = block.split("\n");
 

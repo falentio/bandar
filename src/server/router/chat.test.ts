@@ -35,6 +35,10 @@ const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 const DUCK_DIR = fileURLToPath(new URL("../../../duckdb", import.meta.url));
 const DUCK_LIB = fileURLToPath(new URL("../../../vendor/duckdb/libduckdb.so", import.meta.url));
 
+// Derived from the interval so a mutated KEEP_ALIVE_MS moves the timeout too, and the gap
+// assertion fails before the clock does.
+const KEEP_ALIVE_TEST_TIMEOUT_MS = KEEP_ALIVE_MS * 3 + 10_000;
+
 const CompletionSchema = v.object({
   choices: v.array(
     v.object({
@@ -632,38 +636,54 @@ describe("runChat cooldowns", () => {
     expect(harness.upstream.calls).toHaveLength(1);
   });
 
-  test("repeats the keep-alive comment while the upstream holds the stream open", async () => {
-    const { harness, release } = await heldUpstreamHarness();
-    const streamed = streamedBody(await runChat(harness.deps, chatInput("fast", true)));
-    const comment = ": keep-alive\n\n";
-    const deadline = Date.now() + 12_000;
-    let opened = "";
+  test(
+    "repeats the keep-alive comment while the upstream holds the stream open",
+    async () => {
+      const { harness, release } = await heldUpstreamHarness();
+      const streamed = streamedBody(await runChat(harness.deps, chatInput("fast", true)));
+      const comment = ": keep-alive\n\n";
+      const deadline = Date.now() + KEEP_ALIVE_MS * 2 + 5_000;
+      const arrivals: number[] = [];
+      let opened = "";
 
-    while (opened.split(comment).length - 1 < 2) {
-      if (Date.now() > deadline)
-        throw new Error("the stream never repeated the keep-alive comment");
+      while (arrivals.length < 2) {
+        if (Date.now() > deadline)
+          throw new Error("the stream never repeated the keep-alive comment");
 
-      const chunk = await streamed.reader.read();
+        const chunk = await streamed.reader.read();
 
-      if (chunk.done) break;
+        if (chunk.done) break;
 
-      opened += streamed.decoder.decode(chunk.value, { stream: true });
-    }
+        const at = Date.now();
+        opened += streamed.decoder.decode(chunk.value, { stream: true });
 
-    expect(opened.split(comment).length - 1).toBeGreaterThanOrEqual(2);
-    expect(opened).not.toContain("data: ");
-    expect(harness.upstream.calls).toHaveLength(1);
+        while (arrivals.length < opened.split(comment).length - 1) arrivals.push(at);
+      }
 
-    release();
+      const [first, second] = arrivals;
 
-    const rest = await drain(streamed);
+      if (first === undefined || second === undefined)
+        throw new Error("the stream did not send two keep-alive comments");
 
-    expect(rest).toContain('"content":"hello"');
-    expect(rest).toContain("data: [DONE]");
+      const gap = second - first;
 
-    // A leaked interval enqueues on the closed controller, and the throw fails the run.
-    await Bun.sleep(KEEP_ALIVE_MS + 500);
-  }, 20_000);
+      expect(opened).not.toContain("data: ");
+      expect(harness.upstream.calls).toHaveLength(1);
+      expect(gap).toBeGreaterThanOrEqual(4_000);
+      expect(gap).toBeLessThanOrEqual(7_000);
+
+      release();
+
+      const rest = await drain(streamed);
+
+      expect(rest).toContain('"content":"hello"');
+      expect(rest).toContain("data: [DONE]");
+
+      // A leaked interval enqueues on the closed controller, and the throw fails the run.
+      await Bun.sleep(KEEP_ALIVE_MS + 500);
+    },
+    KEEP_ALIVE_TEST_TIMEOUT_MS,
+  );
 
   test("streams from the next credential after an auth failure before any text", async () => {
     const harness = await freshHarness((call) =>

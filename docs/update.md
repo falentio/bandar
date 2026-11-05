@@ -7,11 +7,11 @@ reads a token.
 
 ## Commands
 
-| Command                          | Effect                                                                                                                   |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `bandar update`                  | Download the latest release, verify its sha256, rename it over the recorded path, print the new version.                 |
-| `bandar update --check`          | Print the installed version, the latest version, and one of `up-to-date`, `update-available`, `unknown`. Writes nothing. |
-| `bandar update --archive <path>` | Install from a local file, with the same verify and rename path. The file `<path>.sha256` must sit next to it.           |
+| Command                          | Effect                                                                                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bandar update`                  | Download the latest release, verify its sha256, rename it over the recorded path, print the new version.                                                                 |
+| `bandar update --check`          | Print the installed version, the latest version, and one of `up-to-date`, `update-available`, `unknown`. Writes nothing.                                                 |
+| `bandar update --archive <path>` | Install from a local file, with the same verify and rename path. The file `<path>.sha256` must sit next to it. The file may be the binary, a `.tar.gz`, or a `.tar.zst`. |
 
 ## How the latest version is resolved
 
@@ -33,6 +33,32 @@ with no `Authorization` header. GitHub redirects the asset to
 page means the repository has no published release, which `--check` reports as `unknown` with
 exit 0.
 
+## Which asset it downloads
+
+A Linux release publishes the binary three ways, and `bandar update` takes the first one the
+machine can open:
+
+| Asset                                   | Needs            |
+| --------------------------------------- | ---------------- |
+| `bandar-<version>-linux-<arch>.tar.zst` | `zstd` and `tar` |
+| `bandar-<version>-linux-<arch>.tar.gz`  | `gzip` and `tar` |
+| `bandar-<version>-linux-<arch>`         | nothing          |
+
+The command looks for each tool on `PATH`. A machine without `zstd` drops the first row and
+takes the gzip one, and a machine with neither takes the plain binary.
+
+The tarball is a Linux file only. Windows downloads the `.exe`, because Windows locks a
+running executable and replaces it by rename alone.
+
+The command unpacks in memory. It pipes `zstd -d -c` or `gzip -d -c` into
+`tar -x -O -f - bandar` and keeps the member's bytes, so the unpack leaves no directory and no
+temporary file behind. The checksum covers the archive, and the command verifies it before the
+unpack starts.
+
+A tag that publishes no tarball answers 404 for it, and the command moves down to the next row, so
+a release cut before the archives existed still updates. A corrupt archive stops the update with
+exit 1 instead, because a bad checksum is a failed download, not a missing asset.
+
 ## What it shows while it works
 
 On a terminal, `bandar update` rewrites one row on stderr while it works:
@@ -50,6 +76,9 @@ second number with its percentage appears only when the server declares a `Conte
 response that declares none counts bytes alone, as in
 `/ downloading bandar-0.3.1-linux-x64 61.2 MB`. A row narrower than the terminal is padded to
 the widest row drawn so far, so a shorter line leaves no tail of the longer one behind.
+
+The asset in the row is the one the command picked, so a Linux update shows the `.tar.zst` file
+when the machine has the tools to open it.
 
 The `bandar <version> installed at <path>` line stays on stdout; the row above it is erased
 first. `--archive` skips the release check and the downloads, so it shows only the verify and
@@ -161,12 +190,16 @@ bandar: cannot write /usr/local/bin; run "sudo bandar update" to replace /usr/lo
 The release workflow publishes, per platform:
 
 ```text
-bandar-<version>-<os>-<arch>[.exe]
-bandar-<version>-<os>-<arch>[.exe].sha256
+bandar-<version>-linux-<arch>
+bandar-<version>-linux-<arch>.tar.gz
+bandar-<version>-linux-<arch>.tar.zst
+bandar-<version>-windows-<arch>.exe
 ```
 
-`<os>` is `linux` or `windows`, and `<arch>` is `x64` or `arm64`. The checksum file holds one
-line, `<hex>  <filename>`. Other platforms are refused by name.
+Each file has a sibling `<file>.sha256`. The plain Linux file and the Windows `.exe` are the bare
+binary. Each tarball holds one file named `bandar` at its root, and the zstd one is compressed
+at level 3. `<arch>` is `x64` or `arm64`, and the checksum file holds one line,
+`<hex>  <filename>`. Other platforms are refused by name.
 
 ## Configuration and environment
 
@@ -182,11 +215,11 @@ line, `<hex>  <filename>`. Other platforms are refused by name.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                                                                                                                 |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Up to date, updated, or a `--check` report of `up-to-date`, `update-available`, or `unknown` for a repository with no published release.                                                                                                |
-| 1    | A private-fork API URL with no token, no published release to install, unknown install source, unwritable target, foreign asset host, failed download, checksum mismatch, a feed that cannot be read, or a rename the platform refuses. |
-| 2    | Unknown option.                                                                                                                                                                                                                         |
+| Code | Meaning                                                                                                                                                                                                                                                                  |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0    | Up to date, updated, or a `--check` report of `up-to-date`, `update-available`, or `unknown` for a repository with no published release.                                                                                                                                 |
+| 1    | A private-fork API URL with no token, no published release to install, unknown install source, unwritable target, foreign asset host, failed download, checksum mismatch, an archive that will not unpack, a feed that cannot be read, or a rename the platform refuses. |
+| 2    | Unknown option.                                                                                                                                                                                                                                                          |
 
 ## Tests
 
@@ -194,5 +227,6 @@ line, `<hex>  <filename>`. Other platforms are refused by name.
 directory, with its own `BANDAR_HOME` per case. It covers the anonymous happy path, a feed named
 only by `config.json`, the private-fork override, an API URL without a token, a checksum mismatch,
 a foreign asset host, an unknown install source, a same-version no-op, `--check` with and without
-a published release, `--archive`, and an unwritable target. It never reaches the network. `src/server/cli/update.test.ts` covers the same behavior without a filesystem
-where it can.
+a published release, an update from a `.tar.zst` archive and from a `.tar.gz` archive, a release
+that publishes neither, `--archive`, and an unwritable target. It never reaches the network.
+`src/server/cli/update.test.ts` covers the same behavior without a filesystem where it can.

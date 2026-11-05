@@ -170,6 +170,17 @@ curl -fsSL -O "https://github.com/falentio/bandar/releases/download/v$version/ba
 sha256sum -c "bandar-$version-linux-x64.sha256"
 ```
 
+Linux releases also publish the same binary as `bandar-<version>-linux-<arch>.tar.zst` and
+`bandar-<version>-linux-<arch>.tar.gz`, each with its own `.sha256` sibling. Each tarball holds
+one file named `bandar`, so extracting it puts the binary in the current directory:
+
+```sh
+curl -fsSL -O "https://github.com/falentio/bandar/releases/download/v$version/bandar-$version-linux-x64.tar.zst"
+curl -fsSL -O "https://github.com/falentio/bandar/releases/download/v$version/bandar-$version-linux-x64.tar.zst.sha256"
+sha256sum -c "bandar-$version-linux-x64.tar.zst.sha256"
+tar --zstd -xf "bandar-$version-linux-x64.tar.zst"
+```
+
 On macOS, where `sha256sum` is absent, use `shasum -a 256 -c`. The installer accepts either tool
 and refuses to install when it finds neither.
 

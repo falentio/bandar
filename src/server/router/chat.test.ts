@@ -633,9 +633,20 @@ describe("runChat cooldowns", () => {
     if (body === null) throw new Error("the streamed response carried no body");
 
     const reader = body.getReader();
-    const first = await reader.read();
+    const decoder = new TextDecoder();
+    let opened = "";
 
-    expect(new TextDecoder().decode(first.value)).toBe(": keep-alive\n\n");
+    for (let read = 0; !opened.includes(": keep-alive\n\n"); read += 1) {
+      if (read === 16) throw new Error("the stream never sent the keep-alive comment");
+
+      const chunk = await reader.read();
+
+      if (chunk.done) break;
+
+      opened += decoder.decode(chunk.value, { stream: true });
+    }
+
+    expect(opened.startsWith(": keep-alive\n\n")).toBe(true);
 
     release();
 
@@ -646,7 +657,7 @@ describe("runChat cooldowns", () => {
 
       if (chunk.done) break;
 
-      rest += new TextDecoder().decode(chunk.value);
+      rest += decoder.decode(chunk.value, { stream: true });
     }
 
     expect(rest).toContain('"content":"hello"');

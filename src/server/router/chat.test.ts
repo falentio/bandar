@@ -21,7 +21,7 @@ import { DEFAULT_PROVIDER_ENDPOINTS } from "../providers/endpoints";
 import { ensureBuiltInProviders } from "../providers/seeding";
 import { createSealer } from "../seal";
 import { createTag, setTagModels } from "../tags";
-import { runChat, type ChatDeps, type ChatInput } from "./chat";
+import { KEEP_ALIVE_MS, runChat, type ChatDeps, type ChatInput } from "./chat";
 import type { Auth } from "../auth";
 import { createGateway } from "../gateway";
 import { ChatCompletionRequestSchema } from "../../shared/chat";
@@ -665,6 +665,74 @@ describe("runChat cooldowns", () => {
     expect(rest.trimEnd().endsWith("data: [DONE]")).toBe(true);
     expect(harness.upstream.calls).toHaveLength(1);
   });
+
+  test("repeats the keep-alive comment while the upstream holds the stream open", async () => {
+    let release: () => void = () => {};
+
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const harness = await freshHarness(async () => {
+      await held;
+
+      return openAiStream();
+    });
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    const response = await runChat(harness.deps, chatInput("fast", true));
+    const body = response.body;
+
+    if (body === null) throw new Error("the streamed response carried no body");
+
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    const comment = ": keep-alive\n\n";
+    const deadline = Date.now() + 12_000;
+
+    let opened = "";
+
+    while (occurrences(opened, comment) < 2) {
+      if (Date.now() > deadline)
+        throw new Error("the stream never repeated the keep-alive comment");
+
+      const chunk = await reader.read();
+
+      if (chunk.done) break;
+
+      opened += decoder.decode(chunk.value, { stream: true });
+    }
+
+    expect(occurrences(opened, comment)).toBeGreaterThanOrEqual(2);
+    expect(opened).not.toContain("data: ");
+    expect(harness.upstream.calls).toHaveLength(1);
+
+    release();
+
+    let rest = "";
+
+    for (;;) {
+      const chunk = await reader.read();
+
+      if (chunk.done) break;
+
+      rest += decoder.decode(chunk.value, { stream: true });
+    }
+
+    expect(rest).toContain('"content":"hello"');
+    expect(rest).toContain("data: [DONE]");
+
+    // A leaked interval enqueues on the closed controller, and the throw fails the run.
+    await Bun.sleep(KEEP_ALIVE_MS + 500);
+  }, 20_000);
 
   test("streams from the next credential after an auth failure before any text", async () => {
     const harness = await freshHarness((call) =>
@@ -1578,6 +1646,10 @@ function sse(events: readonly unknown[]): Response {
 }
 
 type Seeded = { readonly providerId: string; readonly modelId: string };
+
+function occurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}
 
 function requestEvents(duck: DuckDb): readonly QueryRow[] {
   return duck.query(

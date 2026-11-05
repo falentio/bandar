@@ -647,6 +647,7 @@ describe("runChat cooldowns", () => {
     }
 
     expect(opened.startsWith(": keep-alive\n\n")).toBe(true);
+    expect(harness.upstream.calls).toHaveLength(0);
 
     release();
 

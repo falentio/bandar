@@ -86,6 +86,8 @@ type AttemptPlan = {
 
 const KEEP_ALIVE = ": keep-alive\n\n";
 
+export const KEEP_ALIVE_MS = 5_000;
+
 const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
   "auth",
   "rate_limit",
@@ -245,6 +247,17 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
 
   let cancelled = false;
   let ttftMs: number | null = null;
+  let beat: ReturnType<typeof setInterval> | null = null;
+
+  // The writer's close and the consumer's cancel both end the stream here, so neither path can
+  // leave the interval running behind it.
+  const stop = () => {
+    detach();
+
+    if (beat !== null) clearInterval(beat);
+
+    beat = null;
+  };
 
   const encoder = new TextEncoder();
 
@@ -255,12 +268,14 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
       };
 
       const close = () => {
-        detach();
+        stop();
 
         if (!cancelled) controller.close();
       };
 
       send(KEEP_ALIVE);
+
+      beat = setInterval(() => send(KEEP_ALIVE), KEEP_ALIVE_MS);
 
       const writerOf = () =>
         wire.stream({
@@ -408,8 +423,8 @@ function streamResponse(deps: ChatDeps, context: StreamInput): Response {
     },
     cancel() {
       cancelled = true;
+      stop();
       abort.abort();
-      detach();
     },
   });
 

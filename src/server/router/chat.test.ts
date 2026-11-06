@@ -21,7 +21,7 @@ import { DEFAULT_PROVIDER_ENDPOINTS } from "../providers/endpoints";
 import { ensureBuiltInProviders } from "../providers/seeding";
 import { createSealer } from "../seal";
 import { createTag, setTagModels } from "../tags";
-import { runChat, type ChatDeps, type ChatInput } from "./chat";
+import { KEEP_ALIVE_MS, runChat, type ChatDeps, type ChatInput } from "./chat";
 import type { Auth } from "../auth";
 import { createGateway } from "../gateway";
 import { ChatCompletionRequestSchema } from "../../shared/chat";
@@ -34,6 +34,10 @@ import { anthropicWire } from "./anthropic-wire";
 const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
 const DUCK_DIR = fileURLToPath(new URL("../../../duckdb", import.meta.url));
 const DUCK_LIB = fileURLToPath(new URL("../../../vendor/duckdb/libduckdb.so", import.meta.url));
+
+// Derived from the interval so a mutated KEEP_ALIVE_MS moves the timeout too, and the gap
+// assertion fails before the clock does.
+const KEEP_ALIVE_TEST_TIMEOUT_MS = KEEP_ALIVE_MS * 3 + 10_000;
 
 const CompletionSchema = v.object({
   choices: v.array(
@@ -606,44 +610,18 @@ describe("runChat cooldowns", () => {
   });
 
   test("opens the stream with a keep-alive comment before the upstream answers", async () => {
-    let release: () => void = () => {};
-
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-
-    const harness = await freshHarness(async () => {
-      await held;
-
-      return openAiStream();
-    });
-
-    const seeded = await providerWithModel(harness, {
-      name: "Primary",
-      path: "",
-      slug: "fast",
-      upstreamModel: "m",
-    });
-
-    await addCredential(harness.providers, seeded.providerId, "primary", "key");
-
-    const response = await runChat(harness.deps, chatInput("fast", true));
-    const body = response.body;
-
-    if (body === null) throw new Error("the streamed response carried no body");
-
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
+    const { harness, release } = await heldUpstreamHarness();
+    const streamed = streamedBody(await runChat(harness.deps, chatInput("fast", true)));
     let opened = "";
 
     for (let read = 0; !opened.includes(": keep-alive\n\n"); read += 1) {
       if (read === 16) throw new Error("the stream never sent the keep-alive comment");
 
-      const chunk = await reader.read();
+      const chunk = await streamed.reader.read();
 
       if (chunk.done) break;
 
-      opened += decoder.decode(chunk.value, { stream: true });
+      opened += streamed.decoder.decode(chunk.value, { stream: true });
     }
 
     expect(opened.startsWith(": keep-alive\n\n")).toBe(true);
@@ -651,20 +629,61 @@ describe("runChat cooldowns", () => {
 
     release();
 
-    let rest = "";
-
-    for (;;) {
-      const chunk = await reader.read();
-
-      if (chunk.done) break;
-
-      rest += decoder.decode(chunk.value, { stream: true });
-    }
+    const rest = await drain(streamed);
 
     expect(rest).toContain('"content":"hello"');
     expect(rest.trimEnd().endsWith("data: [DONE]")).toBe(true);
     expect(harness.upstream.calls).toHaveLength(1);
   });
+
+  test(
+    "repeats the keep-alive comment while the upstream holds the stream open",
+    async () => {
+      const { harness, release } = await heldUpstreamHarness();
+      const streamed = streamedBody(await runChat(harness.deps, chatInput("fast", true)));
+      const comment = ": keep-alive\n\n";
+      const deadline = Date.now() + KEEP_ALIVE_MS * 2 + 5_000;
+      const arrivals: number[] = [];
+      let opened = "";
+
+      while (arrivals.length < 2) {
+        if (Date.now() > deadline)
+          throw new Error("the stream never repeated the keep-alive comment");
+
+        const chunk = await streamed.reader.read();
+
+        if (chunk.done) break;
+
+        const at = Date.now();
+        opened += streamed.decoder.decode(chunk.value, { stream: true });
+
+        while (arrivals.length < opened.split(comment).length - 1) arrivals.push(at);
+      }
+
+      const [first, second] = arrivals;
+
+      if (first === undefined || second === undefined)
+        throw new Error("the stream did not send two keep-alive comments");
+
+      const gap = second - first;
+
+      expect(opened).not.toContain("data: ");
+      expect(harness.upstream.calls).toHaveLength(1);
+      expect(gap).toBeGreaterThanOrEqual(4_000);
+      expect(gap).toBeLessThanOrEqual(7_000);
+
+      release();
+
+      const rest = await drain(streamed);
+
+      expect(rest).toContain('"content":"hello"');
+      expect(rest).toContain("data: [DONE]");
+
+      // A leaked interval enqueues on the closed controller, and the throw fails the run.
+      await Bun.sleep(KEEP_ALIVE_MS + 500);
+    },
+    KEEP_ALIVE_TEST_TIMEOUT_MS,
+  );
 
   test("streams from the next credential after an auth failure before any text", async () => {
     const harness = await freshHarness((call) =>
@@ -1467,6 +1486,58 @@ async function freshHarness(
   );
 
   return { deps: { duck, providers }, providers, db: database.db, upstream };
+}
+
+type Held = {
+  readonly harness: Harness;
+  readonly release: () => void;
+};
+
+async function heldUpstreamHarness(): Promise<Held> {
+  let release: () => void = () => {};
+
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const harness = await freshHarness(async () => {
+    await held;
+
+    return openAiStream();
+  });
+
+  const seeded = await providerWithModel(harness, {
+    name: "Primary",
+    path: "",
+    slug: "fast",
+    upstreamModel: "m",
+  });
+
+  await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+  return { harness, release };
+}
+
+function streamedBody(response: Response) {
+  const body = response.body;
+
+  if (body === null) throw new Error("the streamed response carried no body");
+
+  return { reader: body.getReader(), decoder: new TextDecoder() };
+}
+
+async function drain(streamed: ReturnType<typeof streamedBody>): Promise<string> {
+  let rest = "";
+
+  for (;;) {
+    const chunk = await streamed.reader.read();
+
+    if (chunk.done) break;
+
+    rest += streamed.decoder.decode(chunk.value, { stream: true });
+  }
+
+  return rest;
 }
 
 function startUpstream(handle: (call: Call) => Response | Promise<Response>): Upstream {

@@ -115,10 +115,15 @@ completed response, and its stream frames: `src/server/router/wire.ts` holds
 `src/server/router/responses-wire.ts` holds `responsesWire`. Every one satisfies
 `ChatWire` and a caller passes it as `ChatInput.wire`; the default is
 `openAiWire`. A streamed answer opens with one `: keep-alive` comment frame
-before bandar reaches the upstream, so a client or proxy waiting on the first
-token sees the stream open. `GATEWAY_SURFACE` in `src/shared/cli-tools.ts`
-records which of the three paths this build serves, and a CLI tool whose
-`needs` the build meets is reported ready.
+before bandar reaches the upstream, which covers the wait for the first token,
+and repeats the comment every 5 seconds while the stream stays open, which
+covers the silence between frames. The 5 seconds is sized for an idle window of
+10 seconds or more: `idleTimeout` stays unset on bandar's own server, so
+`Bun.serve` in `src/server/main.ts` runs Bun's 10 second default, and the beat
+lands at half of it. A proxy that cuts after 5 seconds of silence would cut
+before the beat arrives. `GATEWAY_SURFACE` in `src/shared/cli-tools.ts` records
+which of the three paths this build serves, and a CLI tool whose `needs` the
+build meets is reported ready.
 
 ### OpenAI chat ingress
 

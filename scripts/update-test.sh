@@ -302,22 +302,49 @@ sha256_of() {
   FILE="$1" bun -e 'import { readFileSync } from "node:fs"; process.stdout.write(new Bun.CryptoHasher("sha256").update(readFileSync(Bun.env.FILE ?? "")).digest("hex"))'
 }
 
+tar_of() {
+  local payload="$1" archive="$2" format="$3" staging
+
+  staging="$(mktemp -d "$work/stage.XXXXXX")"
+  cp "$payload" "$staging/bandar"
+  tar -cf "$staging/bandar.tar" -C "$staging" bandar
+
+  case "$format" in
+    tar.gz) gzip -9 -c "$staging/bandar.tar" >"$archive" ;;
+    tar.zst) zstd -3 -q -c "$staging/bandar.tar" >"$archive" ;;
+    *) echo "update-test: unknown archive format $format" >&2; exit 1 ;;
+  esac
+
+  rm -rf "$staging"
+}
+
 stage_release() {
-  local version="$1" payload="$2" digest="${3:-}"
-  local asset="bandar-$version-linux-x64"
+  local version="$1" payload="$2" digest="${3:-}" formats="${4:-plain tar.gz tar.zst}"
+  local asset="bandar-$version-linux-x64" bucket="$work/site/rel/v$version"
+  local format file entries=""
 
   rm -rf "$work/site"
-  mkdir -p "$work/site/rel/v$version" "$work/site/assets"
-  printf '%s' "$payload" >"$work/site/rel/v$version/$asset"
+  mkdir -p "$bucket" "$work/site/assets"
+  printf '%s' "$payload" >"$bucket/$asset"
 
-  if [ -z "$digest" ]; then digest="$(sha256_of "$work/site/rel/v$version/$asset")"; fi
+  if [ -z "$digest" ]; then digest="$(sha256_of "$bucket/$asset")"; fi
 
-  printf '%s  %s\n' "$digest" "$asset" >"$work/site/rel/v$version/$asset.sha256"
+  for format in $formats; do
+    if [ "$format" = plain ]; then
+      file="$asset"
+      printf '%s  %s\n' "$digest" "$file" >"$bucket/$file.sha256"
+    else
+      file="$asset.$format"
+      tar_of "$bucket/$asset" "$bucket/$file" "$format"
+      printf '%s  %s\n' "$(sha256_of "$bucket/$file")" "$file" >"$bucket/$file.sha256"
+    fi
+
+    cp "$bucket/$file" "$bucket/$file.sha256" "$work/site/assets/"
+    entries="$entries{\"url\":\"$API/api/assets/$file\",\"name\":\"$file\"},{\"url\":\"$API/api/assets/$file.sha256\",\"name\":\"$file.sha256\"},"
+  done
+
   printf '%s\n' "$version" >"$work/site/latest"
-  cp "$work/site/rel/v$version/$asset" "$work/site/assets/$asset"
-  cp "$work/site/rel/v$version/$asset.sha256" "$work/site/assets/$asset.sha256"
-  printf '{"tag_name":"v%s","assets":[{"url":"%s/api/assets/%s","name":"%s"},{"url":"%s/api/assets/%s.sha256","name":"%s.sha256"}]}\n' \
-    "$version" "$API" "$asset" "$asset" "$API" "$asset" "$asset" >"$work/site/feed.json"
+  printf '{"tag_name":"v%s","assets":[%s]}\n' "$version" "${entries%,}" >"$work/site/feed.json"
 }
 
 stage_foreign_release() {
@@ -383,6 +410,12 @@ expect_stdout happy "bandar $newer installed at $CASE_DIR/bin/bandar"
 expect_same "$CASE_DIR/bin/bandar" "$work/site/rel/v$newer/bandar-$newer-linux-x64" "happy: the binary is the release asset"
 expect_mode "$CASE_DIR/bin/bandar" 755 happy
 expect_no_temp "$CASE_DIR/bin" happy
+
+if grep -qE -- "/bandar-$newer-linux-x64\.tar\.(gz|zst) " "$work/logs/requests.log"; then
+  ok "happy: the update installed from a tarball"
+else
+  fail happy "the update never read a tarball: $(cat "$work/logs/requests.log")"
+fi
 expect_same "$CASE_DIR/bandar.db" "$work/logs/happy.db" "happy: bandar.db is untouched"
 expect_same "$CASE_DIR/bandar.duckdb" "$work/logs/happy.duckdb" "happy: bandar.duckdb is untouched"
 expect_same "$CASE_DIR/config/install.json" "$work/logs/happy.json" "happy: the manifest is untouched"
@@ -403,6 +436,75 @@ if grep -qF -- "$STUB_TOKEN" "$work/logs/happy.out" "$work/logs/happy.err"; then
   fail happy "a token was printed"
 else
   ok "happy: no token in the output"
+fi
+
+echo
+echo "case: the zstd tarball is preferred"
+
+if ! command -v zstd >/dev/null 2>&1; then
+  echo "skip: zstd is not installed, so this client cannot unpack the zstd tarball"
+else
+  case_dir zstd install-script
+  stage_release "$newer" 'zstd payload'
+  : >"$work/logs/requests.log"
+  public zstd
+  expect_exit zstd 0
+  expect_stdout zstd "bandar $newer installed at $CASE_DIR/bin/bandar"
+  expect_same "$CASE_DIR/bin/bandar" "$work/site/rel/v$newer/bandar-$newer-linux-x64" "zstd: the binary is the release binary"
+  expect_no_temp "$CASE_DIR/bin" zstd
+
+  if grep -qF -- "/bandar-$newer-linux-x64.tar.zst none" "$work/logs/requests.log"; then
+    ok "zstd: the client downloaded the zstd tarball"
+  else
+    fail zstd "the client never asked for the zstd tarball: $(cat "$work/logs/requests.log")"
+  fi
+
+  if grep -qF -- "bandar-$newer-linux-x64 " "$work/logs/requests.log"; then
+    fail zstd "the client also downloaded the plain binary"
+  else
+    ok "zstd: the plain binary was never downloaded"
+  fi
+fi
+
+echo
+echo "case: a release that publishes only the gzip tarball"
+case_dir gziponly install-script
+printf 'gzip-only payload' >"$work/logs/gziponly-payload"
+stage_release "$newer" 'gzip-only payload' "" tar.gz
+: >"$work/logs/requests.log"
+public gziponly
+expect_exit gziponly 0
+expect_stdout gziponly "bandar $newer installed at $CASE_DIR/bin/bandar"
+expect_same "$CASE_DIR/bin/bandar" "$work/logs/gziponly-payload" "gziponly: the binary is the tarball payload"
+expect_no_temp "$CASE_DIR/bin" gziponly
+
+if grep -qF -- "bandar-$newer-linux-x64.tar.gz none" "$work/logs/requests.log"; then
+  ok "gziponly: the client downloaded the gzip tarball"
+else
+  fail gziponly "the client never asked for the gzip tarball: $(cat "$work/logs/requests.log")"
+fi
+
+if grep -qF -- "bandar-$newer-linux-x64 " "$work/logs/requests.log"; then
+  fail gziponly "the client also downloaded the plain binary"
+else
+  ok "gziponly: the plain binary was never downloaded"
+fi
+
+echo
+echo "case: a release that publishes only the plain binary"
+case_dir plainonly install-script
+printf 'plain-only payload' >"$work/logs/plainonly-payload"
+stage_release "$newer" 'plain-only payload' "" plain
+: >"$work/logs/requests.log"
+public plainonly
+expect_exit plainonly 0
+expect_stdout plainonly "bandar $newer installed at $CASE_DIR/bin/bandar"
+expect_same "$CASE_DIR/bin/bandar" "$work/logs/plainonly-payload" "plainonly: the binary is the plain asset"
+
+if grep -qF -- "bandar-$newer-linux-x64 none" "$work/logs/requests.log"; then
+  ok "plainonly: the client installed the plain binary"
+else
+  fail plainonly "the client never asked for the plain binary: $(cat "$work/logs/requests.log")"
 fi
 
 echo
@@ -506,7 +608,7 @@ fi
 echo
 echo "case: checksum mismatch"
 case_dir mismatch install-script
-stage_release "$newer_minor" 'tampered payload' "$(printf '0%.0s' $(seq 1 64))"
+stage_release "$newer_minor" 'tampered payload' "$(printf '0%.0s' $(seq 1 64))" plain
 public mismatch
 expect_exit mismatch 1
 expect_stderr mismatch "checksum mismatch"

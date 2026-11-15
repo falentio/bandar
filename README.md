@@ -55,9 +55,13 @@ migrations, the DuckDB migrations, and the DuckDB shared library. The binary ser
 the client and the API on one port, and holds both databases in `BANDAR_HOME`.
 
 Every wire carries tool calling: definitions, tool choice, the calls a model
-makes, and the results a client sends back. A canonical turn is text plus tool
-blocks. Not in this version: images and embeddings. Prices come from a provider
-catalog import, not from a form.
+makes, and the results a client sends back. A canonical turn is text, images, and
+tool blocks. An image arrives inline as base64 or as an http address the gateway
+reads itself, and it travels on as that upstream wire's own image block. A model
+whose catalog entry says it reads text only is filtered out of a tag's plan
+before anything is tried, so an image never reaches a model that would drop it.
+Not in this version: embeddings. Prices come from a provider catalog import, not
+from a form.
 
 ## Install
 

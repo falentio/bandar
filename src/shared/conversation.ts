@@ -1,5 +1,6 @@
 import * as v from "valibot";
 import { JsonValueSchema, type JsonValue } from "./json";
+import type { ImageAsset, ImageOrigin } from "./media";
 
 /** The vocabulary a conversation is made of, independent of any dialect. */
 
@@ -51,12 +52,29 @@ export type ToolResult = {
  */
 export type MessagePart =
   | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image"; readonly image: ImageAsset }
   | { readonly type: "tool_call"; readonly call: ToolCall }
   | { readonly type: "tool_result"; readonly result: ToolResult };
+
+/** An image an ingress read by reference and the gateway has not fetched yet. */
+export type PendingImagePart = {
+  readonly type: "image_pending";
+  readonly origin: ImageOrigin;
+  /** The block's dotted path, so a failed read answers where a parse failure would. */
+  readonly at: string;
+};
+
+/** What an ingress produces: a canonical part, or an image still waiting on the gateway. */
+export type InboundPart = MessagePart | PendingImagePart;
 
 export type ConversationMessage = {
   readonly role: MessageRole;
   readonly content: readonly MessagePart[];
+};
+
+export type InboundMessage = {
+  readonly role: MessageRole;
+  readonly content: readonly InboundPart[];
 };
 
 /** What a tool with no declared parameters means on every wire. */
@@ -81,6 +99,27 @@ export function coalesceText(
   }
 
   return folded;
+}
+
+/**
+ * Appends a text run, folding it into the trailing text part. The ingress walks a wire's blocks in
+ * order and never looks back, so it accumulates runs here instead of coalescing afterwards.
+ */
+export function pushText(parts: InboundPart[], text: string, separator: string): void {
+  const last = parts.at(-1);
+
+  if (last?.type === "text") {
+    parts[parts.length - 1] = { type: "text", text: `${last.text}${separator}${text}` };
+
+    return;
+  }
+
+  parts.push({ type: "text", text });
+}
+
+/** Every image a canonical turn carries, in order. */
+export function imagesOf(parts: readonly MessagePart[]): readonly ImageAsset[] {
+  return parts.flatMap((part) => (part.type === "image" ? [part.image] : []));
 }
 
 /** The flattened text of a turn, joining separate text runs with a newline. */

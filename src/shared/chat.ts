@@ -119,7 +119,9 @@ function turnOf(message: ChatMessage, at: string): Normalized<InboundMessage> {
     }
 
     case "assistant": {
-      return turn("assistant", [...parts.value, ...(message.tool_calls ?? []).map(callPart)]);
+      const calls = (message.tool_calls ?? []).map(callPart);
+
+      return turn("assistant", [...spokenOf(parts.value, calls.length > 0), ...calls]);
     }
 
     case "tool": {
@@ -186,6 +188,17 @@ function partsOfArray(
   }
 
   return { ok: true, value: parts.length === 0 ? emptyTurn() : parts };
+}
+
+/** An assistant turn that only called tools drops the placeholder its empty content became. */
+function spokenOf(parts: readonly InboundPart[], called: boolean): readonly InboundPart[] {
+  if (!called || parts.length !== 1) return parts;
+
+  const [only] = parts;
+
+  if (only?.type === "text" && only.text === "") return [];
+
+  return parts;
 }
 
 /** A turn that carried nothing still travels as one empty text part, as it did before images. */

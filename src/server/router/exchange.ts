@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { imageLabel } from "../../shared/media";
 
 /**
  * What one attempt sent upstream and what came back, as text, for the request log. Both halves are
@@ -53,8 +54,20 @@ export function noteRequest(
   capture.request = {
     url,
     headers: JSON.stringify(redactHeaders(headers), null, 2),
-    body: clip(body, capture),
+    // Redacted before the clip, so one large image cannot fill the row and evict the text beside it.
+    body: clip(redactImages(body), capture),
   };
+}
+
+const DATA_IMAGE = /data:image\/([a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)/gu;
+
+/** Replaces every inline image with its size and digest, so a row keeps the shape and not the bytes. */
+export function redactImages(body: string): string {
+  if (!body.includes("data:image/")) return body;
+
+  return body.replace(DATA_IMAGE, (_match, mediaType: string, data: string) => {
+    return `data:image/${mediaType};base64,<${imageLabel(data)}>`;
+  });
 }
 
 /** Copies a response body into the capture as the caller reads its own branch of the tee. */

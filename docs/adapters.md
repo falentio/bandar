@@ -366,8 +366,9 @@ guards in order:
   `node:http`/`node:https` and not on `fetch`: under bun, `fetch` silently ignores
   a dispatcher.
 - No redirect is followed. A 3xx is a rejection.
-- The body is read with a running byte cap that cancels past 5 MiB, without
-  trusting `content-length`.
+- The body is read with a running byte cap that cancels past 5 MiB. A
+  `content-length` over the limit is refused at once, but the running cap is what
+  holds when the header is absent or lies.
 - The media type is the request's magic bytes, never `content-type`. A png, jpeg,
   gif, or webp prefix is required, and the sniffed type wins over whatever the
   client declared.

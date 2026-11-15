@@ -169,7 +169,9 @@ function isImageMediaType(value: string): value is ImageMediaType {
 }
 
 function declined(at: string, message: string): Rejected {
-  return { ok: false, rejection: { status: 422, param: at, message: `${at}: ${message}` } };
+  const prefix = at === "" ? "" : `${at}: `;
+
+  return { ok: false, rejection: { status: 422, param: at, message: `${prefix}${message}` } };
 }
 
 const SHA256_K = new Uint32Array([

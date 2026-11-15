@@ -194,7 +194,7 @@ type and its position. A block inside a `tool_result` must also be text, named a
 its own path:
 
 ```text
-messages.2.content.0.content.0: image blocks are not supported by this text gateway
+messages.2.content.0.content.0: image blocks are not part of this gateway
 ```
 
 A client such as Claude Code connects, calls a tool, and sends the result back.

@@ -365,15 +365,16 @@ function imageOriginOf(block: Block): ImageOrigin | null {
   return { kind: "inline", mediaType, data };
 }
 
-/** A result's own content is text only: this gateway carries no other modality to a model. */
+/** A result's content stays text: no egress wire carries an image inside a tool result. */
 function resultText(content: TextContent | undefined, at: string): Normalized<string> {
   if (content === undefined) return { ok: true, value: "" };
 
   return textOfBlocks(blocksOf(content), `${at}.content`);
 }
 
+/** What a block this gateway has no spelling for answers, naming the block and where it sits. */
 function unsupported(at: string, type: string): Rejected {
-  return rejected(at, `${at}: ${type} blocks are not supported by this text gateway`);
+  return rejected(at, `${at}: ${type} blocks are not part of this gateway`);
 }
 
 function rejected(param: string, message: string): Rejected {

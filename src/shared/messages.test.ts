@@ -42,7 +42,7 @@ describe("normalizeMessages", () => {
       ok: false,
       rejection: {
         param: "messages.0.content.1",
-        message: "messages.0.content.1: document blocks are not supported by this text gateway",
+        message: "messages.0.content.1: document blocks are not part of this gateway",
       },
     });
 
@@ -59,7 +59,7 @@ describe("normalizeMessages", () => {
       rejection: {
         status: 422,
         param: "system.0",
-        message: "system.0: tool_use blocks are not supported by this text gateway",
+        message: "system.0: tool_use blocks are not part of this gateway",
       },
     });
   });
@@ -252,8 +252,7 @@ describe("normalizeMessages", () => {
       rejection: {
         status: 422,
         param: "messages.2.content.0.content.0",
-        message:
-          "messages.2.content.0.content.0: image blocks are not supported by this text gateway",
+        message: "messages.2.content.0.content.0: image blocks are not part of this gateway",
       },
     });
   });

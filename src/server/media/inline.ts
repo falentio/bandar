@@ -1,4 +1,8 @@
-import type { ConversationMessage, InboundMessage, PendingImagePart } from "../../shared/conversation";
+import type {
+  ConversationMessage,
+  InboundMessage,
+  PendingImagePart,
+} from "../../shared/conversation";
 import { MAX_IMAGE_TOTAL_BYTES, assetOf, type ImageAsset } from "../../shared/media";
 import type { Normalized } from "../../shared/messages";
 
@@ -32,17 +36,20 @@ export async function inlineImages(
 
       const asset = await resolve(part, io, signal, fetched);
 
-      if (!asset.ok) return named(asset.rejection.message, part.at);
+      if (asset.ok) {
+        total += asset.value.bytes;
 
-      total += asset.value.bytes;
+        if (total > MAX_IMAGE_TOTAL_BYTES)
+          return named(
+            `the request's images are over the ${String(MAX_IMAGE_TOTAL_BYTES)} byte total limit`,
+            part.at,
+          );
 
-      if (total > MAX_IMAGE_TOTAL_BYTES)
-        return named(
-          `the request's images are over the ${String(MAX_IMAGE_TOTAL_BYTES)} byte total limit`,
-          part.at,
-        );
+        content.push({ type: "image", image: asset.value });
+        continue;
+      }
 
-      content.push({ type: "image", image: asset.value });
+      return named(asset.rejection.message, part.at);
     }
 
     inline.push({ role: message.role, content });
@@ -65,15 +72,11 @@ function resolve(
 
   if (known !== undefined) return known;
 
-  const pending = io.fetchImage(url, signal).catch(() => unreadable());
+  const pending = io.fetchImage(url, signal);
 
   fetched.set(url, pending);
 
   return pending;
-}
-
-function unreadable(): Normalized<never> {
-  return { ok: false, rejection: { status: 422, param: "", message: "the image could not be read" } };
 }
 
 function named(message: string, at: string) {

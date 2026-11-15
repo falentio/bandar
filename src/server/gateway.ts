@@ -241,8 +241,8 @@ export function createGateway(deps: GatewayDeps) {
 }
 
 /**
- * All three ingresses assemble their canonical request here, so none of them knows a wire. This is
- * the one crossing where an image is read: it runs once, before runChat, and never per attempt.
+ * The one crossing where an image is read: it runs here, once, before runChat, so no attempt inside
+ * the failover loop can fetch the same image again.
  */
 async function canonicalRequestOf(
   deps: GatewayDeps,

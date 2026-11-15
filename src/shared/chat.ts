@@ -202,7 +202,6 @@ function spokenOf(parts: readonly InboundPart[], called: boolean): readonly Inbo
   return parts;
 }
 
-/** A turn that carried nothing still travels as one empty text part, as it did before images. */
 function emptyTurn(): readonly InboundPart[] {
   return [{ type: "text", text: "" }];
 }

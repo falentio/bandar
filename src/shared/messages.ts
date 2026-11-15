@@ -20,7 +20,6 @@ import type { Reasoning } from "./reasoning";
 
 const TextBlockSchema = v.object({ type: v.string(), text: v.optional(v.string()) });
 
-/** An image block's source: the base64 form, or the url form, read no further than its fields. */
 const ImageSourceSchema = v.looseObject({
   type: v.optional(v.string()),
   media_type: v.optional(v.string()),

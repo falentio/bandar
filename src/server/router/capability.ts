@@ -3,7 +3,6 @@ import type { InputModality } from "../../shared/providers";
 import type { CanonicalRequest } from "../providers/types";
 import type { ResolvedAttempt, ResolvedPlan } from "./resolve";
 
-/** The input a request cannot be answered without: text always, an image when one is carried. */
 export function requiredModalities(request: CanonicalRequest): readonly InputModality[] {
   const images = request.messages.some((message) => imagesOf(message.content).length > 0);
 

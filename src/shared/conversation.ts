@@ -46,10 +46,7 @@ export type ToolResult = {
   readonly isError: boolean;
 };
 
-/**
- * One block of one turn. A text run inside one message is one part: the ingress normalizers coalesce
- * neighbouring text blocks, because every wire already treats them as one run.
- */
+/** One block of one turn. Neighbouring text blocks are one part, because every wire sends one run. */
 export type MessagePart =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "image"; readonly image: ImageAsset }

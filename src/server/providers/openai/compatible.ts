@@ -332,11 +332,7 @@ function assistantBody(message: CanonicalMessage): ChatMessageBody {
   return body;
 }
 
-/**
- * A result splits the turn: this wire addresses one with a message of its own, at the part's
- * position. Text and images share one content array, so a turn that carried an image is the parts
- * spelling and a turn that carried only text keeps the plain string.
- */
+/** A result splits the turn: this wire addresses one with a message of its own, at the part's position. */
 function flattenedBodies(message: CanonicalMessage): ChatMessageBody[] {
   const bodies: ChatMessageBody[] = [];
   const role = message.role === "system" ? "system" : "user";
@@ -384,7 +380,7 @@ function flattenedBodies(message: CanonicalMessage): ChatMessageBody[] {
   return bodies;
 }
 
-/** A turn of text alone is the string this wire received before images existed. */
+/** A turn of text alone stays the plain string, which is what this wire received before images. */
 function contentOf(parts: readonly ChatContentPart[]): string | readonly ChatContentPart[] {
   const text = parts.flatMap((part) => (part.type === "text" ? [part.text] : []));
 

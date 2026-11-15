@@ -11,9 +11,8 @@ export type MediaIo = {
 };
 
 /**
- * The one crossing from what an ingress read to what a wire can carry. Every pending image is
- * resolved in place, keeping the order the client wrote, and the first one that cannot be read ends
- * the request: a block this gateway cannot carry is named, never dropped.
+ * The one crossing from what an ingress read to what a wire can carry: it runs once, before
+ * runChat. The first image that cannot be read ends the request, so it is named, never dropped.
  */
 export async function inlineImages(
   messages: readonly InboundMessage[],

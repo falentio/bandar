@@ -1,6 +1,5 @@
 import type { Normalized, Rejected } from "./messages";
 
-/** The image formats all four egress wires can spell. */
 export const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
 
 export type ImageMediaType = (typeof IMAGE_MEDIA_TYPES)[number];
@@ -122,7 +121,7 @@ export function base64Bytes(data: string): number {
   return Math.floor((clean.length * 3) / 4);
 }
 
-/** How a log line names an image it does not keep: small enough to keep every row readable. */
+/** Names an image a log line does not keep, short enough that a large one cannot fill the row. */
 export function imageLabel(data: string): string {
   const bytes = decodeBase64(data);
 
@@ -194,8 +193,8 @@ const SHA256_INITIAL = new Uint32Array([
 ]);
 
 /**
- * Digest of the bytes, spelled out because an asset is built in the browser-compiled shared layer,
- * where no synchronous hash exists and building one is async.
+ * Spelled out because tsconfig.app.json typechecks this directory with no node types, so node:crypto
+ * fails the check and WebCrypto is async where an asset is built synchronously.
  */
 export function sha256Hex(bytes: Uint8Array): string {
   const schedule = new Uint32Array(64);

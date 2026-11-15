@@ -7,6 +7,9 @@ import { describe, expect, test } from "vite-plus/test";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 
+/** A cold node start and one vp run, with headroom for a loaded machine. */
+const CHILD_TIMEOUT_MS = 30_000;
+
 const STATUS = JSON.stringify({
   BackendState: "Running",
   Self: { DNSName: "host.tailnet.ts.net.", TailscaleIPs: ["100.90.57.79"] },
@@ -44,7 +47,9 @@ function fakeTailscale(): string {
 }
 
 describe("the vite config", () => {
-  test("it loads under node, the runtime vp reads it in", () => {
+  // The child pays for a cold node start plus a vp run, so it needs the suite's own timeout raised
+  // rather than a wall-clock race against the 5 second default under a full parallel run.
+  test("it loads under node, the runtime vp reads it in", { timeout: CHILD_TIMEOUT_MS }, () => {
     const home = mkdtempSync(join(tmpdir(), "bandar-node-"));
     writeFileSync(join(home, "config.json"), JSON.stringify({ server: { tailscale: true } }));
 

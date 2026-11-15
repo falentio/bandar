@@ -51,10 +51,7 @@ function readsAll(
   return needed.every((modality) => available.includes(modality));
 }
 
+/** Only a model the catalog labelled can be refused, so its modalities are known here. */
 function spokenOf(attempt: ResolvedAttempt): string {
-  const available = attempt.inputModalities;
-
-  return available === null
-    ? `${attempt.slug} reads whatever the catalog does not say`
-    : `${attempt.slug} reads ${available.join(" and ")}`;
+  return `${attempt.slug} reads ${(attempt.inputModalities ?? []).join(" and ")}`;
 }

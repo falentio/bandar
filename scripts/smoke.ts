@@ -47,7 +47,7 @@ import {
   type ProviderModel,
   type ProviderModelEditInput,
 } from "../src/shared/providers";
-import { CHARS_PER_TOKEN } from "../src/server/router/anthropic-wire";
+import { CHARS_PER_TOKEN } from "../src/shared/messages";
 import { PROJECT_URL_HEADER } from "../src/shared/project";
 import { SESSION_ID_HEADER } from "../src/shared/session-id";
 import { sseFrames } from "../src/shared/sse";

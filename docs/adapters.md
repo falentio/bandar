@@ -145,11 +145,16 @@ A `tools` entry is `{type: "function", function: {name, description?,
 parameters?}}`, and `tool_choice` is `auto`, `none`, `required`, or
 `{type: "function", function: {name}}`.
 
-A part whose type is not `text` is a rejection, never a silent drop. It answers
-422 with the message and `param` naming the part's position:
+A `user` message's content may also carry `{type: "image_url", image_url}`, where
+`image_url` is a url string or `{url, detail?}`. The url is a `data:` base64 uri or
+an http(s) address, and it becomes a pending image at its own path. An `image_url`
+in a `system`, `developer`, `assistant`, or `tool` message answers 422.
+
+Any other part type is a rejection, never a silent drop. It answers 422 with the
+message and `param` naming the part's position:
 
 ```text
-messages.0.content.1: image_url blocks are not supported by this text gateway
+messages.0.content.1: image_url parts belong in a user turn
 ```
 
 ### Anthropic Messages ingress
@@ -177,10 +182,16 @@ Two block types carry tool calling and are accepted: `tool_use` in an
 the turn's text blocks. A `tool_use` anywhere else, or a `tool_result` in an
 assistant turn, answers 422.
 
-Every other block type is a rejection, never a silent drop. An `image`,
-`document`, or any other non-text block in `messages` or `system` answers 422
-and names the block type and its position. A block inside a `tool_result` must
-also be text, named at its own path:
+A `user` turn may also carry an `image` block, whose `source` is either
+`{type: "base64", media_type, data}` or `{type: "url", url}`. The flat spelling
+`{type: "image", media_type, data}` is read too. The block becomes a pending image
+at its own path. An `image` in an `assistant` turn answers 422, and so does one in
+`system`, because no egress wire accepts an image there.
+
+Every other block type is a rejection, never a silent drop. A `document`, or any
+other non-text block in `messages` or `system`, answers 422 and names the block
+type and its position. A block inside a `tool_result` must also be text, named at
+its own path:
 
 ```text
 messages.2.content.0.content.0: image blocks are not supported by this text gateway
@@ -251,6 +262,10 @@ status line is already sent.
 | `{role, content}` with no `type`                    | the same message item, which is what bandar's own egress writes |
 | `{type: "function_call", call_id, name, arguments}` | an `assistant` turn with one `tool_call` part                   |
 | `{type: "function_call_output", call_id, output}`   | a `user` turn with one `tool_result` part                       |
+| `{type: "input_image", image_url}` in user content  | a pending image at its own path                                 |
+
+An `{type: "input_image", image_url}` content part becomes a pending image, and
+`image_url` is a url string or `{url}`. Outside a `user` turn it answers 422.
 
 A `system` or `developer` message item becomes a `system` turn. Any other item
 type is a rejection, never a silent drop, and the first item that cannot be
@@ -307,14 +322,97 @@ fabricated zero. A turn with no text and no calls still carries one empty
 failure. `status` is `incomplete` with `incomplete_details: {reason:
 "max_output_tokens"}` when the upstream stopped on length.
 
+### Images
+
+An image reaches the canonical shape as `{type: "image", image: ImageAsset}`, and
+`ImageAsset` holds bytes only: a media type, base64 data, a byte count, and a
+sha256. An ingress never produces that part directly. It produces
+`{type: "image_pending", origin, at}` first, where `at` is the block's dotted
+path, and the gateway resolves every pending image once per request before
+`runChat` starts. The two types are separate so that an unresolved image reaching
+an egress wire is a compile error and not a review comment.
+
+The three ingress spellings:
+
+| Wire        | Block                                                                                 | Accepted in |
+| ----------- | ------------------------------------------------------------------------------------- | ----------- |
+| OpenAI chat | `{type: "image_url", image_url}`, a url string or `{url, detail?}`                    | `user` only |
+| Responses   | `{type: "input_image", image_url}`, a url string or `{url}`                           | `user` only |
+| Messages    | `{type: "image", source: {type: "base64", media_type, data}}` or `{type: "url", url}` | `user` only |
+
+A url is a `data:` base64 uri or an http(s) address. The four egress spellings:
+
+| Canon                    | Wire             | Spelling                                                          |
+| ------------------------ | ---------------- | ----------------------------------------------------------------- |
+| `{type: "image", image}` | OpenAI chat      | `{type: "image_url", image_url: {url}}` in `messages[].content[]` |
+|                          | OpenAI Responses | `{type: "input_image", image_url}` in the item's `content[]`      |
+|                          | Anthropic        | `{type: "image", source: {type: "base64", media_type, data}}`     |
+|                          | Google GenAI     | `{inlineData: {mimeType, data}}` in `parts[]`                     |
+
+Neither a url nor a fetch crosses into an egress wire: every one of them receives
+the bytes, already read. A turn whose parts are all text still collapses to the
+plain string on the chat wire, so a client that never sends an image sees the body
+it saw before. GenAI's `fileData.fileUri` is not used: it takes only a Files API
+reference and cannot fetch a plain http url.
+
+**Reading a remote image.** `fetchImage` in `src/server/media/fetch.ts` runs these
+guards in order:
+
+- http and https only.
+- The host resolves through `node:dns/promises` `lookup`, and one private,
+  loopback, link-local, CGNAT, or v4-mapped private answer refuses the whole name.
+- The validated address is pinned through the agent's `lookup`, so a second DNS
+  answer cannot move the connection. This is why the fetcher is built on
+  `node:http`/`node:https` and not on `fetch`: under bun, `fetch` silently ignores
+  a dispatcher.
+- No redirect is followed. A 3xx is a rejection.
+- The body is read with a running byte cap that cancels past 5 MiB, without
+  trusting `content-length`.
+- The media type is the request's magic bytes, never `content-type`. A png, jpeg,
+  gif, or webp prefix is required, and the sniffed type wins over whatever the
+  client declared.
+- A 10 second timeout, chained to the caller's own signal.
+
+A fetch rejection answers 422 at the block's dotted path, with the reason in
+plain words:
+
+```text
+messages.0.content.1: the image url resolves to 127.0.0.1, a private address this gateway will not reach
+```
+
+**The capability gate.** A request that carries an image needs `text` and
+`image`, and `runChat` splits a tag's plan by what each model's catalog entry
+says it reads before it attempts anything. A refused attempt never runs, so it
+writes no request row and cools down nothing. When no attempt is left, the answer
+is 400 `invalid_request`, naming the reference and what its models read:
+
+```text
+tags/vision cannot carry this request: it needs text and image, and vision reads text
+```
+
+An `inputModalities` of `null` means the catalog says nothing, which is unknown
+and not text-only, so such a model is still tried. An image is never stripped and
+never replaced with a placeholder.
+
+**The request log.** `noteRequest` replaces every inline image with its size and
+digest before the 256 KiB clip, so one large image neither fills the row nor
+evicts the text beside it:
+
+```text
+data:image/png;base64,<12034 bytes, sha256 9f2c1a4e>
+```
+
 ### Token count
 
-`POST /v1/messages/count_tokens` returns `{"input_tokens": n}`. It does not
-call the upstream. `n` is `ceil(total characters / CHARS_PER_TOKEN)`, with
-`CHARS_PER_TOKEN = 4` exported from `src/server/router/anthropic-wire.ts`. The
-count covers `system` and every message joined with a newline. It is a
-character estimate for client budgeting, not a tokenizer, and it can differ from
-the provider count.
+`POST /v1/messages/count_tokens` returns `{"input_tokens": n}`. It does not call
+the upstream, and it never fetches an image. `n` is the text half,
+`ceil(total characters / CHARS_PER_TOKEN)` with `CHARS_PER_TOKEN = 4`, plus the
+image half:
+`clamp(ceil(bytes / 200), 85, 1590)` for each inline image, and the 1590 ceiling
+for each remote one, whose size is not known without reading it. The text half
+covers `system` and every message joined with a newline. It is an estimate for
+client budgeting, not a tokenizer, and it deliberately over-reports an image:
+counting too many is the safe direction.
 
 ## Registry
 
@@ -672,6 +770,7 @@ Helpers in `src/server/providers/http.ts`:
 | Stop           | `stop`                                            | `stop_sequences`                                             | `generationConfig.stopSequences`         | `stop`                                            | `stop`                                            | `stop`                                                       |
 | Stream usage   | final chunk, after `stream_options.include_usage` | `message_start` + `message_delta`                            | `usageMetadata` on chunks                | final chunk, after `stream_options.include_usage` | final chunk, after `stream_options.include_usage` | final chunk, after `stream_options.include_usage`            |
 | Finish reason  | native                                            | `end_turn`/`stop_sequence` → `stop`, `max_tokens` → `length` | `STOP` → `stop`, `MAX_TOKENS` → `length` | native                                            | native                                            | native                                                       |
+| Image          | `{type: "image_url", image_url}`                  | `{type: "image", source: {type: "base64"}}`                  | `{inlineData: {mimeType, data}}`         | `{type: "image_url", image_url}`                  | `{type: "image_url", image_url}`                  | `{type: "image_url", image_url}`                             |
 
 | Thinking | `reasoning_effort` | `output_config.effort`, or `thinking` for a budget | `generationConfig.thinkingConfig.thinkingBudget` | `reasoning_effort` | `reasoning_effort` | `reasoning_effort` |
 

@@ -2,14 +2,16 @@ import * as v from "valibot";
 import {
   DEFAULT_TOOL_PARAMETERS,
   ToolParametersSchema,
-  coalesceText,
-  type ConversationMessage,
+  pushText,
+  type InboundMessage,
+  type InboundPart,
   type MessagePart,
   type MessageRole,
   type ToolChoice,
   type ToolDefinition,
 } from "./conversation";
-import { ContentSchema, contentText, type Normalized } from "./messages";
+import { contentText, type Normalized } from "./messages";
+import { parseImageUrl } from "./media";
 import { ReasoningEffortSchema, type Reasoning, type ReasoningEffort } from "./reasoning";
 import { MAX_MODEL_REF_LENGTH } from "./slugs";
 
@@ -41,10 +43,31 @@ const ChatToolCallSchema = v.object({
   }),
 });
 
+/** An image_url part: the url string, or the object an SDK wraps it in. */
+const ImageUrlSchema = v.union([
+  v.string(),
+  v.looseObject({ url: v.optional(v.string()), detail: v.optional(v.string()) }),
+]);
+
+const ChatTextPartSchema = v.object({ type: v.literal("text"), text: v.optional(v.string()) });
+
+const ChatImagePartSchema = v.object({
+  type: v.literal("image_url"),
+  image_url: ImageUrlSchema,
+});
+
+const ChatContentPartSchema = v.union([ChatTextPartSchema, ChatImagePartSchema]);
+
+const ChatContentSchema = v.union([v.string(), v.array(ChatContentPartSchema)]);
+
+type ChatContent = v.InferOutput<typeof ChatContentSchema>;
+
+type ChatContentPart = v.InferOutput<typeof ChatContentPartSchema>;
+
 export const ChatMessageSchema = v.object({
   role: v.picklist(["system", "developer", "user", "assistant", "tool"]),
   /** Null, or absent, is what a client sends for an assistant turn that only called tools. */
-  content: v.optional(v.nullable(ContentSchema), null),
+  content: v.optional(v.nullable(ChatContentSchema), null),
   tool_call_id: v.optional(v.string()),
   tool_calls: v.optional(v.array(ChatToolCallSchema)),
 });
@@ -53,8 +76,8 @@ export type ChatMessage = v.InferOutput<typeof ChatMessageSchema>;
 
 export function normalizeChatMessages(
   messages: readonly ChatMessage[],
-): Normalized<readonly ConversationMessage[]> {
-  const turns: ConversationMessage[] = [];
+): Normalized<readonly InboundMessage[]> {
+  const turns: InboundMessage[] = [];
 
   for (const [index, message] of messages.entries()) {
     const turn = turnOf(message, `messages.${String(index)}`);
@@ -68,7 +91,7 @@ export function normalizeChatMessages(
 }
 
 /** Per-role grammar: which tool fields a role may carry, and the exact rejection when it may not. */
-function turnOf(message: ChatMessage, at: string): Normalized<ConversationMessage> {
+function turnOf(message: ChatMessage, at: string): Normalized<InboundMessage> {
   if (message.tool_call_id !== undefined && message.role !== "tool")
     return rejected(
       `${at}.tool_call_id`,
@@ -81,24 +104,22 @@ function turnOf(message: ChatMessage, at: string): Normalized<ConversationMessag
       `${at}.tool_calls: only an assistant message carries tool_calls`,
     );
 
-  const text = contentText(message.content, `${at}.content`);
+  const parts = partsOf(message.content, `${at}.content`, message.role);
 
-  if (!text.ok) return text;
+  if (!parts.ok) return parts;
 
   switch (message.role) {
     case "system":
     case "developer": {
-      return turn("system", [{ type: "text", text: text.value }]);
+      return turn("system", parts.value);
     }
 
     case "user": {
-      return turn("user", [{ type: "text", text: text.value }]);
+      return turn("user", parts.value);
     }
 
     case "assistant": {
-      const calls = (message.tool_calls ?? []).map(callPart);
-
-      return turn("assistant", coalesceText(assistantParts(text.value, calls), "\n"));
+      return turn("assistant", [...parts.value, ...(message.tool_calls ?? []).map(callPart)]);
     }
 
     case "tool": {
@@ -107,6 +128,10 @@ function turnOf(message: ChatMessage, at: string): Normalized<ConversationMessag
           `${at}.tool_call_id`,
           `${at}.tool_call_id: a tool message needs the id of the call it answers`,
         );
+
+      const text = contentText(message.content, `${at}.content`);
+
+      if (!text.ok) return text;
 
       return turn("user", [
         {
@@ -118,11 +143,54 @@ function turnOf(message: ChatMessage, at: string): Normalized<ConversationMessag
   }
 }
 
-/** A turn that spoke and then called keeps both: OpenAI sends them as siblings, not alternatives. */
-function assistantParts(text: string, calls: readonly MessagePart[]): MessagePart[] {
-  if (calls.length === 0) return [{ type: "text", text }];
+/** The text and image parts of one content value, in the order the client wrote them. */
+function partsOf(
+  content: ChatContent | null | undefined,
+  at: string,
+  role: ChatMessage["role"],
+): Normalized<readonly InboundPart[]> {
+  if (v.is(v.string(), content)) return { ok: true, value: [{ type: "text", text: content }] };
 
-  return text === "" ? [...calls] : [{ type: "text", text }, ...calls];
+  if (content === null || content === undefined) return { ok: true, value: emptyTurn() };
+
+  return partsOfArray(content, at, role);
+}
+
+function partsOfArray(
+  content: readonly ChatContentPart[],
+  at: string,
+  role: ChatMessage["role"],
+): Normalized<readonly InboundPart[]> {
+  const parts: InboundPart[] = [];
+
+  for (const [index, part] of content.entries()) {
+    const partAt = `${at}.${String(index)}`;
+
+    if (part.type === "text") {
+      pushText(parts, part.text ?? "", "\n");
+      continue;
+    }
+
+    if (role !== "user") return rejected(partAt, `${partAt}: image_url parts belong in a user turn`);
+
+    const url = v.is(v.string(), part.image_url) ? part.image_url : part.image_url.url;
+
+    if (url === undefined) return rejected(partAt, `${partAt}: image_url part carries no url`);
+
+    const origin = parseImageUrl(url);
+
+    if (origin === null)
+      return rejected(partAt, `${partAt}: image_url is not a data: or http(s) url`);
+
+    parts.push({ type: "image_pending", origin, at: partAt });
+  }
+
+  return { ok: true, value: parts.length === 0 ? emptyTurn() : parts };
+}
+
+/** A turn that carried nothing still travels as one empty text part, as it did before images. */
+function emptyTurn(): readonly InboundPart[] {
+  return [{ type: "text", text: "" }];
 }
 
 function callPart(call: v.InferOutput<typeof ChatToolCallSchema>): MessagePart {
@@ -132,7 +200,7 @@ function callPart(call: v.InferOutput<typeof ChatToolCallSchema>): MessagePart {
   };
 }
 
-function turn(role: MessageRole, content: readonly MessagePart[]): Normalized<ConversationMessage> {
+function turn(role: MessageRole, content: readonly InboundPart[]): Normalized<InboundMessage> {
   return { ok: true, value: { role, content } };
 }
 

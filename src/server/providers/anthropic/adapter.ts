@@ -8,6 +8,7 @@ import {
   type ToolDefinition,
   type ToolParameters,
 } from "../../../shared/conversation";
+import type { ImageAsset } from "../../../shared/media";
 import type { ProviderKind } from "../../../shared/providers";
 import { ANTHROPIC_EFFORT_VALUES } from "../../../shared/messages";
 import type { ReasoningEffort } from "../../../shared/reasoning";
@@ -77,8 +78,11 @@ const StreamSchema = v.object({
 
 type RequestBlock =
   | { type: "text"; text: string }
+  | { type: "image"; source: ImageSource }
   | { type: "tool_use"; id: string; name: string; input: ToolParameters }
   | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean };
+
+type ImageSource = { type: "base64"; media_type: string; data: string };
 
 type MessageBody = { role: "user" | "assistant"; content: string | RequestBlock[] };
 
@@ -342,6 +346,11 @@ function contentOf(parts: readonly MessagePart[]): string | RequestBlock[] {
         break;
       }
 
+      case "image": {
+        blocks.push({ type: "image", source: imageSourceOf(part.image) });
+        break;
+      }
+
       case "tool_call": {
         blocks.push({
           type: "tool_use",
@@ -368,6 +377,10 @@ function contentOf(parts: readonly MessagePart[]): string | RequestBlock[] {
   }
 
   return blocks;
+}
+
+function imageSourceOf(image: ImageAsset): ImageSource {
+  return { type: "base64", media_type: image.mediaType, data: image.data };
 }
 
 function toolBodyOf(tool: ToolDefinition): AnthropicToolBody {

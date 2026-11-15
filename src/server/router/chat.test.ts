@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,7 +29,8 @@ import { ChatCompletionRequestSchema } from "../../shared/chat";
 import { toolById, toolStatus } from "../../shared/cli-tools";
 import { sseFrames } from "../../shared/sse";
 import type { JsonValue } from "../../shared/json";
-import type { GenericProviderKind } from "../../shared/providers";
+import type { GenericProviderKind, InputModality } from "../../shared/providers";
+import type { ImageAsset } from "../../shared/media";
 import { anthropicWire } from "./anthropic-wire";
 
 const SQLITE_DIR = fileURLToPath(new URL("../../../drizzle", import.meta.url));
@@ -903,35 +905,35 @@ describe("runChat usage normalization", () => {
   });
 });
 
+async function gatewayFor(harness: Harness) {
+  const seeded = await providerWithModel(harness, {
+    name: "Primary",
+    path: "",
+    slug: "fast",
+    upstreamModel: "m",
+  });
+
+  await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+  return createGateway({ ...harness.deps, auth });
+}
+
+async function post(
+  gateway: ReturnType<typeof createGateway>,
+  body: ChatCompletionBody,
+): Promise<Response> {
+  const payload = v.parse(ChatCompletionRequestSchema, body);
+
+  return gateway.handle(
+    new Request("http://gateway.test/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
+      body: JSON.stringify(payload),
+    }),
+  );
+}
+
 describe("chat ingress", () => {
-  async function gatewayFor(harness: Harness) {
-    const seeded = await providerWithModel(harness, {
-      name: "Primary",
-      path: "",
-      slug: "fast",
-      upstreamModel: "m",
-    });
-
-    await addCredential(harness.providers, seeded.providerId, "primary", "key");
-
-    return createGateway({ ...harness.deps, auth });
-  }
-
-  async function post(
-    gateway: ReturnType<typeof createGateway>,
-    body: ChatCompletionBody,
-  ): Promise<Response> {
-    const payload = v.parse(ChatCompletionRequestSchema, body);
-
-    return gateway.handle(
-      new Request("http://gateway.test/v1/chat/completions", {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
-        body: JSON.stringify(payload),
-      }),
-    );
-  }
-
   test("accepts a pi content-part array and joins its text parts", async () => {
     const harness = await freshHarness(() => answer("hello"));
 
@@ -1011,7 +1013,7 @@ describe("chat ingress", () => {
     expect(harness.upstream.calls).toHaveLength(0);
   });
 
-  test("rejects a non-text part at its path", async () => {
+  test("carries an image to an upstream that speaks this wire", async () => {
     const harness = await freshHarness(() => answer("hello"));
 
     const response = await post(await gatewayFor(harness), {
@@ -1019,7 +1021,37 @@ describe("chat ingress", () => {
       messages: [
         {
           role: "user",
-          content: [{ type: "text", text: "what is this" }, { type: "image_url" }],
+          content: [
+            { type: "text", text: "what is this" },
+            { type: "image_url", image_url: { url: "data:image/png;base64," + PNG } },
+          ],
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this" },
+            { type: "image_url", image_url: { url: "data:image/png;base64," + PNG } },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("refuses an image outside a user turn at its own path", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "image_url", image_url: "data:image/png;base64," + PNG }],
         },
       ],
     });
@@ -1030,8 +1062,345 @@ describe("chat ingress", () => {
     );
 
     expect(response.status).toBe(422);
+    expect(body.error.param).toBe("messages.0.content.0");
+    expect(body.error.message).toContain("image_url parts belong in a user turn");
+    expect(harness.upstream.calls).toHaveLength(0);
+  });
+});
+
+describe("messages ingress", () => {
+  async function gatewayOn(harness: Harness, kind: "openai" | "anthropic" | "google") {
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+      kind,
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+
+    return createGateway({ ...harness.deps, auth });
+  }
+
+  function postMessagesIngress(
+    gateway: ReturnType<typeof createGateway>,
+    data: string,
+  ): Promise<Response> {
+    return gateway.handle(
+      new Request("http://gateway.test/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": "bandar_test" },
+        body: JSON.stringify({
+          model: "fast",
+          max_tokens: 32,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "what is this" },
+                { type: "image", source: { type: "base64", media_type: "image/png", data } },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+  }
+
+  test("carries an image block to an Anthropic upstream as a base64 source", async () => {
+    const harness = await freshHarness(() => anthropicSuccess());
+    const response = await postMessagesIngress(await gatewayOn(harness, "anthropic"), PNG);
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: PNG } },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("carries a Messages image block to an OpenAI chat upstream as a data uri", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+    const response = await postMessagesIngress(await gatewayOn(harness, "openai"), PNG);
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this" },
+            { type: "image_url", image_url: { url: IMAGE_URI } },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("carries a Messages image block to a GenAI upstream as inlineData", async () => {
+    const harness = await freshHarness(() =>
+      Response.json({
+        candidates: [{ content: { parts: [{ text: "hi" }] }, finishReason: "STOP" }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+      }),
+    );
+
+    const response = await postMessagesIngress(await gatewayOn(harness, "google"), PNG);
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: "what is this" }, { inlineData: { mimeType: "image/png", data: PNG } }],
+        },
+      ],
+    });
+  });
+
+  test("refuses an image block in an assistant turn at its own path", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await gatewayOn(harness, "openai").then((gateway) =>
+      gateway.handle(
+        new Request("http://gateway.test/v1/messages", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-api-key": "bandar_test" },
+          body: JSON.stringify({
+            model: "fast",
+            max_tokens: 32,
+            messages: [
+              {
+                role: "assistant",
+                content: [
+                  { type: "image", source: { type: "base64", media_type: "image/png", data: PNG } },
+                ],
+              },
+            ],
+          }),
+        }),
+      ),
+    );
+
+    const body = v.parse(
+      v.object({ error: v.object({ type: v.string(), message: v.string() }) }),
+      await response.json(),
+    );
+
+    expect(response.status).toBe(422);
+    expect(body.error.type).toBe("invalid_request_error");
+    expect(body.error.message).toContain(
+      "messages.0.content.0: image blocks belong in a user turn",
+    );
+    expect(harness.upstream.calls).toHaveLength(0);
+  });
+});
+
+describe("image requests", () => {
+  test("reads a remote image once and hands its bytes to the upstream", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+    const fetches: string[] = [];
+
+    await gatewayFor(harness);
+
+    const response = await post(
+      createGateway({
+        ...harness.deps,
+        auth,
+        media: {
+          fetchImage: (url) => {
+            fetches.push(url);
+
+            return Promise.resolve({ ok: true, value: imageAsset() });
+          },
+        },
+      }),
+      {
+        model: "fast",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: "https://example.com/a.png" },
+              { type: "image_url", image_url: "https://example.com/a.png" },
+            ],
+          },
+        ],
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetches).toEqual(["https://example.com/a.png"]);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: IMAGE_URI } },
+            { type: "image_url", image_url: { url: IMAGE_URI } },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("refuses a text-only model with 400 and never calls the upstream", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+    const gateway = await gatewayFor(harness);
+
+    harness.db
+      .update(providerModels)
+      .set({ inputModalities: JSON.stringify(["text"]) })
+      .where(eq(providerModels.slug, "fast"))
+      .run();
+
+    const response = await postWithImage(gateway);
+
+    const body = v.parse(
+      v.object({ error: v.object({ message: v.string(), code: v.string() }) }),
+      await response.json(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe("invalid_request");
+    expect(body.error.message).toContain("fast");
+    expect(body.error.message).toContain("text and image");
+    expect(body.error.message).toContain("fast reads text");
+    expect(harness.upstream.calls).toHaveLength(0);
+    expect(requestEvents(harness.deps.duck)).toHaveLength(0);
+  });
+
+  test("answers from a tag's second model when the first reads only text", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const blind = await providerWithModel(harness, {
+      name: "Blind",
+      path: "/blind",
+      slug: "blind",
+      upstreamModel: "blind-model",
+      inputModalities: ["text"],
+    });
+
+    const seeing = await providerWithModel(harness, {
+      name: "Seeing",
+      path: "/seeing",
+      slug: "seeing",
+      upstreamModel: "seeing-model",
+      inputModalities: ["text", "image"],
+    });
+
+    await tagWith(harness, "vision", [blind.modelId, seeing.modelId]);
+
+    const response = await gatewayFor(harness).then((gateway) =>
+      postWithImage(gateway, "tags/vision"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls.map((call) => call.path)).toEqual(["/seeing/chat/completions"]);
+  });
+
+  test("lets a model whose catalog says nothing try the image", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await postWithImage(await gatewayFor(harness));
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls).toHaveLength(1);
+  });
+
+  test("counts an image without fetching it", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+    const fetches: string[] = [];
+
+    const response = await createGateway({
+      ...harness.deps,
+      auth,
+      media: {
+        fetchImage: (url) => {
+          fetches.push(url);
+
+          return Promise.resolve({ ok: true, value: imageAsset() });
+        },
+      },
+    }).handle(
+      new Request("http://gateway.test/v1/messages/count_tokens", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": "bandar_test" },
+        body: JSON.stringify({
+          model: "fast",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "what is this" },
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/png", data: PNG },
+                },
+                {
+                  type: "image",
+                  source: { type: "url", url: "https://example.com/a.png" },
+                },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+
+    const body = v.parse(v.object({ input_tokens: v.number() }), await response.json());
+
+    expect(response.status).toBe(200);
+    expect(fetches).toEqual([]);
+    expect(body.input_tokens).toBe(Math.ceil("what is this".length / 4) + 85 + 1590);
+  });
+});
+
+describe("the image guard", () => {
+  test("names the part a failed fetch belongs to", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(
+      createGateway({
+        ...harness.deps,
+        auth,
+        media: {
+          fetchImage: () =>
+            Promise.resolve({
+              ok: false as const,
+              rejection: { status: 422, param: "", message: "the image url resolves to 127.0.0.1" },
+            }),
+        },
+      }),
+      {
+        model: "fast",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "what is this" },
+              { type: "image_url", image_url: "https://example.com/a.png" },
+            ],
+          },
+        ],
+      },
+    );
+
+    const body = v.parse(
+      v.object({ error: v.object({ message: v.string(), param: v.nullable(v.string()) }) }),
+      await response.json(),
+    );
+
+    expect(response.status).toBe(422);
     expect(body.error.param).toBe("messages.0.content.1");
-    expect(body.error.message).toContain("image_url");
+    expect(body.error.message).toBe("messages.0.content.1: the image url resolves to 127.0.0.1");
     expect(harness.upstream.calls).toHaveLength(0);
   });
 });
@@ -1407,6 +1776,76 @@ describe("responses ingress", () => {
     expect(harness.upstream.calls).toHaveLength(0);
   });
 
+  test("carries an input_image to an upstream that speaks the Responses wire", async () => {
+    const harness = await freshHarness(() =>
+      Response.json({
+        status: "completed",
+        output: [{ type: "message", content: [{ type: "output_text", text: "hi" }] }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    );
+
+    const seeded = await providerWithModel(harness, {
+      name: "Primary",
+      path: "",
+      slug: "fast",
+      upstreamModel: "m",
+    });
+
+    await addCredential(harness.providers, seeded.providerId, "primary", "key");
+    await setCompat(harness, seeded, "responses");
+
+    const response = await post(createGateway({ ...harness.deps, auth }), {
+      model: "fast",
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: "what is this" },
+            { type: "input_image", image_url: "data:image/png;base64," + PNG },
+          ],
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.upstream.calls[0]?.body).toMatchObject({
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: "what is this" },
+            { type: "input_image", image_url: "data:image/png;base64," + PNG },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("refuses an input_image outside a user turn at its own path", async () => {
+    const harness = await freshHarness(() => answer("hello"));
+
+    const response = await post(await gatewayFor(harness), {
+      model: "fast",
+      input: [
+        {
+          role: "assistant",
+          content: [{ type: "input_image", image_url: "data:image/png;base64," + PNG }],
+        },
+      ],
+    });
+
+    const body = v.parse(
+      v.object({ error: v.object({ message: v.string(), param: v.nullable(v.string()) }) }),
+      await response.json(),
+    );
+
+    expect(response.status).toBe(422);
+    expect(body.error.param).toBe("input.0.content.0");
+    expect(body.error.message).toContain("input_image parts belong in a user turn");
+    expect(harness.upstream.calls).toHaveLength(0);
+  });
+
   test("reports every declared CLI tool as ready now that the responses route is served", () => {
     expect(toolStatus(toolById("codex")).status).toBe("ready");
   });
@@ -1417,6 +1856,36 @@ const auth = {
   getSession: () => Promise.resolve(null),
   verifyApiKey: () => Promise.resolve({ userId: "user-1", keyId: "key-1" }),
 } satisfies Auth;
+
+/** A real 1x1 png, so every image test runs over bytes that sniff and decode. */
+const PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==";
+
+const IMAGE_URI = "data:image/png;base64," + PNG;
+
+function imageAsset(): ImageAsset {
+  const bytes = Buffer.from(PNG, "base64");
+
+  return {
+    mediaType: "image/png",
+    data: PNG,
+    bytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+function postWithImage(gateway: ReturnType<typeof createGateway>, ref = "fast"): Promise<Response> {
+  return gateway.handle(
+    new Request("http://gateway.test/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
+      body: JSON.stringify({
+        model: ref,
+        messages: [{ role: "user", content: [{ type: "image_url", image_url: IMAGE_URI }] }],
+      }),
+    }),
+  );
+}
 
 function chatInput(
   ref: string,
@@ -1772,6 +2241,7 @@ async function providerWithModel(
     readonly upstreamModel: string;
     readonly origin?: string;
     readonly kind?: GenericProviderKind;
+    readonly inputModalities?: readonly InputModality[];
   },
 ): Promise<Seeded> {
   const provider = await createProvider(harness.providers, "user-1", {
@@ -1784,6 +2254,7 @@ async function providerWithModel(
   const updated = await addProviderModel(harness.providers, "user-1", provider.id, {
     upstreamModel: options.upstreamModel,
     slug: options.slug,
+    inputModalities: options.inputModalities === undefined ? null : [...options.inputModalities],
   });
 
   const modelId = updated?.models.find((model) => model.slug === options.slug)?.id ?? "";

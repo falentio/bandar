@@ -17,6 +17,7 @@ import {
   type RequestEventInput,
   type RequestOutcome,
 } from "./record";
+import { planFor, refusalOf, requiredModalities } from "./capability";
 import { resolvePlan, type ResolvedAttempt, type ResolvedPlan } from "./resolve";
 import {
   UpstreamError,
@@ -101,13 +102,21 @@ const RETRYABLE: ReadonlySet<UpstreamErrorKind> = new Set([
 
 export async function runChat(deps: ChatDeps, input: ChatInput): Promise<Response> {
   const wire = input.wire ?? openAiWire;
-  const plan = await resolvePlan(deps.providers, input.userId, input.ref);
+  const resolved = await resolvePlan(deps.providers, input.userId, input.ref);
 
-  if (plan.attempts.length === 0) {
-    return plan.tag === null
+  if (resolved.attempts.length === 0) {
+    return resolved.tag === null
       ? wire.error(404, `model ${input.ref} is not configured`, "model_not_found")
-      : wire.error(404, `tag ${plan.tag} has no enabled models`, "model_not_found");
+      : wire.error(404, `tag ${resolved.tag} has no enabled models`, "model_not_found");
   }
+
+  const needed = requiredModalities(input.request);
+  const gated = planFor(resolved, needed);
+  const plan: ResolvedPlan = { ...resolved, attempts: gated.attempts };
+
+  // A refused attempt is never tried, so it never burns a request, an attempt row, or a cooldown.
+  if (plan.attempts.length === 0)
+    return wire.error(400, refusalOf(input.ref, gated.refused, needed), "invalid_request");
 
   const startedAt = new Date();
   const id = crypto.randomUUID();

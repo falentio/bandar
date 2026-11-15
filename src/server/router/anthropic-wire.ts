@@ -2,13 +2,6 @@ import type { ToolParameters } from "../../shared/conversation";
 import { jsonObjectOf, type CanonicalUsage } from "../providers/types";
 import type { ChatStreamInput, ChatStreamWriter, ChatWire, CompletionInput } from "./wire";
 
-/** Characters per token for the count_tokens estimate. It is an estimate, not a tokenizer. */
-export const CHARS_PER_TOKEN = 4;
-
-export function estimateInputTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
-}
-
 export function anthropicError(status: number, message: string, code = ""): Response {
   return Response.json(
     { type: "error", error: { type: errorTypeOf(status, code), message } },

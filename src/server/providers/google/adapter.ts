@@ -10,6 +10,7 @@ import {
   type ToolParameters,
   type ToolResult,
 } from "../../../shared/conversation";
+import type { ImageAsset } from "../../../shared/media";
 import type { ProviderKind } from "../../../shared/providers";
 import type { Reasoning } from "../../../shared/reasoning";
 import {
@@ -66,6 +67,7 @@ const ResponseSchema = v.object({
 
 type RequestPart =
   | { text: string }
+  | { inlineData: { mimeType: string; data: string } }
   | { functionCall: { name: string; args: ToolParameters } }
   | { functionResponse: { name: string; response: ToolParameters } };
 
@@ -309,6 +311,10 @@ function requestPartOf(part: MessagePart, names: ReadonlyMap<string, string>): R
       return { text: part.text };
     }
 
+    case "image": {
+      return { inlineData: inlineDataOf(part.image) };
+    }
+
     case "tool_call": {
       return {
         functionCall: {
@@ -327,6 +333,10 @@ function requestPartOf(part: MessagePart, names: ReadonlyMap<string, string>): R
       };
     }
   }
+}
+
+function inlineDataOf(image: ImageAsset) {
+  return { mimeType: image.mediaType, data: image.data };
 }
 
 /** This wire addresses a result by name, so a call the history never made cannot be answered. */

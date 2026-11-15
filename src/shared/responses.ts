@@ -2,13 +2,14 @@ import * as v from "valibot";
 import {
   DEFAULT_TOOL_PARAMETERS,
   ToolParametersSchema,
-  coalesceText,
-  type ConversationMessage,
-  type MessagePart,
+  pushText,
+  type InboundMessage,
+  type InboundPart,
   type ToolDefinition,
 } from "./conversation";
 import { choiceOf } from "./chat";
 import type { Normalized } from "./messages";
+import { parseImageUrl } from "./media";
 import { ReasoningEffortSchema, type Reasoning } from "./reasoning";
 import { MAX_MODEL_REF_LENGTH } from "./slugs";
 
@@ -17,9 +18,17 @@ const TextPartSchema = v.object({
   text: v.string(),
 });
 
-const TextContentSchema = v.variant("kind", [
+/** An input image: the url string, or the object an SDK wraps it in. */
+const InputImagePartSchema = v.object({
+  type: v.literal("input_image"),
+  image_url: v.optional(v.union([v.string(), v.looseObject({ url: v.optional(v.string()) })])),
+});
+
+const MessagePartSchema = v.union([TextPartSchema, InputImagePartSchema]);
+
+const MessageContentSchema = v.variant("kind", [
   v.object({ kind: v.literal("text"), value: v.string() }),
-  v.object({ kind: v.literal("parts"), value: v.array(TextPartSchema) }),
+  v.object({ kind: v.literal("parts"), value: v.array(MessagePartSchema) }),
 ]);
 
 /** A client sends the typed item, or the bare item this gateway's own egress writes. */
@@ -113,7 +122,7 @@ export type ResponsesRequest = v.InferOutput<typeof ResponsesRequestSchema>;
 
 export function normalizeResponses(
   request: ResponsesRequest,
-): Normalized<readonly ConversationMessage[]> {
+): Normalized<readonly InboundMessage[]> {
   if (request.input.kind === "text")
     return {
       ok: true,
@@ -124,7 +133,7 @@ export function normalizeResponses(
 
   if (!items.ok) return items;
 
-  const messages: ConversationMessage[] = [];
+  const messages: InboundMessage[] = [];
 
   for (const [index, item] of items.value.entries()) {
     const message = turnOf(item, `input.${String(index)}`);
@@ -164,7 +173,7 @@ function itemsOf(input: readonly unknown[]): Normalized<readonly Item[]> {
   return { ok: true, value: items };
 }
 
-function turnOf(item: Item, at: string): Normalized<ConversationMessage> {
+function turnOf(item: Item, at: string): Normalized<InboundMessage> {
   switch (item.type ?? "message") {
     case "function_call": {
       const call = v.safeParse(FunctionCallItemSchema, item);
@@ -218,14 +227,14 @@ function turnOf(item: Item, at: string): Normalized<ConversationMessage> {
   }
 }
 
-function textContentOf(item: Item): v.InferOutput<typeof TextContentSchema> | null {
+function contentOf(item: Item): v.InferOutput<typeof MessageContentSchema> | null {
   const read = v.safeParse(v.looseObject({ content: v.unknown() }), item);
 
   if (!read.success) return null;
 
   if (v.is(v.string(), read.output.content)) return { kind: "text", value: read.output.content };
 
-  const parts = v.safeParse(v.array(TextPartSchema), read.output.content);
+  const parts = v.safeParse(v.array(MessagePartSchema), read.output.content);
 
   return parts.success ? { kind: "parts", value: parts.output } : null;
 }
@@ -242,34 +251,60 @@ function readIssueOf(type: string, issues: readonly v.BaseIssue<unknown>[]): str
   return type + ": " + reason;
 }
 
-function messageTurn(item: Item, at: string): Normalized<ConversationMessage> {
+function messageTurn(item: Item, at: string): Normalized<InboundMessage> {
   const read = v.safeParse(MessageItemSchema, item);
 
   if (!read.success) return rejected(at, `${at}: ${readIssueOf("message", read.issues)}`);
 
-  const content = textContentOf(item);
+  const content = contentOf(item);
 
   if (content === null) return rejected(`${at}.content`, `${at}.content: content is not text`);
 
-  const parts = partsOf(content, `${at}.content`);
+  const parts = partsOf(content, `${at}.content`, read.output.role);
 
   if (!parts.ok) return parts;
 
   if (read.output.role === "system" || read.output.role === "developer")
     return { ok: true, value: { role: "system", content: parts.value } };
 
-  return { ok: true, value: { role: read.output.role, content: coalesceText(parts.value, "\n") } };
+  return { ok: true, value: { role: read.output.role, content: parts.value } };
 }
 
 function partsOf(
-  content: v.InferOutput<typeof TextContentSchema>,
+  content: v.InferOutput<typeof MessageContentSchema>,
   at: string,
-): Normalized<readonly MessagePart[]> {
+  role: "user" | "assistant" | "system" | "developer",
+): Normalized<readonly InboundPart[]> {
   if (content.kind === "text") return { ok: true, value: [{ type: "text", text: content.value }] };
 
   if (content.value.length === 0) return rejected(at, `${at}: message item has no text`);
 
-  return { ok: true, value: content.value.map((part) => ({ type: "text", text: part.text })) };
+  const parts: InboundPart[] = [];
+
+  for (const [index, part] of content.value.entries()) {
+    const partAt = `${at}.${String(index)}`;
+
+    if (part.type !== "input_image") {
+      pushText(parts, part.text, "\n");
+      continue;
+    }
+
+    if (role !== "user")
+      return rejected(partAt, `${partAt}: input_image parts belong in a user turn`);
+
+    const url = v.is(v.string(), part.image_url) ? part.image_url : part.image_url?.url;
+
+    if (url === undefined) return rejected(partAt, `${partAt}: input_image part carries no url`);
+
+    const origin = parseImageUrl(url);
+
+    if (origin === null)
+      return rejected(partAt, `${partAt}: image_url is not a data: or http(s) url`);
+
+    parts.push({ type: "image_pending", origin, at: partAt });
+  }
+
+  return { ok: true, value: parts };
 }
 
 function rejected(param: string, message: string) {

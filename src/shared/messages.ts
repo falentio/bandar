@@ -2,16 +2,30 @@ import * as v from "valibot";
 import {
   DEFAULT_TOOL_PARAMETERS,
   ToolParametersSchema,
-  coalesceText,
-  type ConversationMessage,
-  type MessagePart,
+  pushText,
+  type InboundMessage,
+  type InboundPart,
   type ToolChoice,
   type ToolDefinition,
 } from "./conversation";
+import {
+  MAX_IMAGE_BYTES,
+  base64Bytes,
+  imageTokens,
+  parseImageUrl,
+  type ImageOrigin,
+} from "./media";
 import { MAX_MODEL_REF_LENGTH } from "./slugs";
 import type { Reasoning } from "./reasoning";
 
 const TextBlockSchema = v.object({ type: v.string(), text: v.optional(v.string()) });
+
+const ImageSourceSchema = v.looseObject({
+  type: v.optional(v.string()),
+  media_type: v.optional(v.string()),
+  data: v.optional(v.string()),
+  url: v.optional(v.string()),
+});
 
 const BlockSchema = v.object({
   type: v.string(),
@@ -22,6 +36,10 @@ const BlockSchema = v.object({
   tool_use_id: v.optional(v.string()),
   content: v.optional(v.union([v.string(), v.array(TextBlockSchema)])),
   is_error: v.optional(v.boolean()),
+  source: v.optional(ImageSourceSchema),
+  media_type: v.optional(v.string()),
+  data: v.optional(v.string()),
+  url: v.optional(v.string()),
 });
 
 export const ContentSchema = v.union([v.string(), v.array(BlockSchema)]);
@@ -127,7 +145,7 @@ function reasoningOf(
 
 export type NormalizedMessages = {
   readonly system: string;
-  readonly messages: readonly ConversationMessage[];
+  readonly messages: readonly InboundMessage[];
 };
 
 export type MessagesRejection = {
@@ -147,14 +165,14 @@ export function normalizeMessages(request: MessagesRequest): Normalized<Normaliz
 
   if (!system.ok) return system;
 
-  const messages: ConversationMessage[] = [];
+  const messages: InboundMessage[] = [];
 
   for (const [index, message] of request.messages.entries()) {
     const parts = partsOf(message.content, `messages.${String(index)}.content`, message.role);
 
     if (!parts.ok) return parts;
 
-    messages.push({ role: message.role, content: coalesceText(parts.value, "\n") });
+    messages.push({ role: message.role, content: parts.value });
   }
 
   return { ok: true, value: { system: system.value, messages } };
@@ -183,12 +201,20 @@ function textOfBlocks(blocks: readonly TextBlock[], at: string): Normalized<stri
   return { ok: true, value: texts.join("\n") };
 }
 
+/** Characters per token for the count_tokens estimate. It is an estimate, not a tokenizer. */
+export const CHARS_PER_TOKEN = 4;
+
+/** The whole request's estimate: the text half plus the image half. It never fetches anything. */
+export function estimateTokens(messages: NormalizedMessages): number {
+  return Math.ceil(promptText(messages).length / CHARS_PER_TOKEN) + imageTokensOf(messages);
+}
+
 export function promptText({ system, messages }: NormalizedMessages): string {
   return [system, ...messages.map(promptTextOf)].filter((part) => part !== "").join("\n");
 }
 
 /** Tool text counts toward the estimate, but tool definitions do not. It stays an estimate. */
-function promptTextOf(message: ConversationMessage): string {
+function promptTextOf(message: InboundMessage): string {
   return message.content
     .flatMap((part) => {
       switch (part.type) {
@@ -203,10 +229,36 @@ function promptTextOf(message: ConversationMessage): string {
         case "tool_result": {
           return [part.result.content];
         }
+
+        case "image":
+        case "image_pending": {
+          return [];
+        }
       }
     })
     .filter((part) => part !== "")
     .join("\n");
+}
+
+/**
+ * The image half of the count_tokens estimate, added to the text half. It reads a pending image's
+ * own bytes without fetching it, and charges a remote one the ceiling rather than a known size.
+ */
+export function imageTokensOf({ messages }: NormalizedMessages): number {
+  let tokens = 0;
+
+  for (const message of messages) {
+    for (const part of message.content) {
+      if (part.type !== "image_pending") continue;
+
+      tokens +=
+        part.origin.kind === "inline"
+          ? imageTokens(base64Bytes(part.origin.data))
+          : imageTokens(MAX_IMAGE_BYTES);
+    }
+  }
+
+  return tokens;
 }
 
 /** Blocks to parts for one turn. tool_use belongs to assistant turns, tool_result to user turns. */
@@ -214,26 +266,39 @@ function partsOf(
   content: Content,
   at: string,
   role: "user" | "assistant",
-): Normalized<readonly MessagePart[]> {
-  const parts: MessagePart[] = [];
+): Normalized<readonly InboundPart[]> {
+  const parts: InboundPart[] = [];
 
   for (const [index, block] of blocksOf(content).entries()) {
     const part = partOf(block, `${at}.${String(index)}`, role);
 
     if (!part.ok) return part;
 
-    parts.push(part.value);
+    const pushed = part.value;
+
+    if (pushed.type === "text") pushText(parts, pushed.text, "\n");
+    else parts.push(pushed);
   }
 
   return { ok: true, value: parts };
 }
 
-function partOf(block: Block, at: string, role: "user" | "assistant"): Normalized<MessagePart> {
+function partOf(block: Block, at: string, role: "user" | "assistant"): Normalized<InboundPart> {
   switch (block.type) {
     case "text": {
       if (block.text === undefined) return rejected(at, `${at}: text block has no text`);
 
       return { ok: true, value: { type: "text", text: block.text } };
+    }
+
+    case "image": {
+      if (role !== "user") return rejected(at, `${at}: image blocks belong in a user turn`);
+
+      const origin = imageOriginOf(block);
+
+      if (origin === null) return rejected(at, `${at}: image block carries no image source`);
+
+      return { ok: true, value: { type: "image_pending", origin, at } };
     }
 
     case "tool_use": {
@@ -285,15 +350,30 @@ function partOf(block: Block, at: string, role: "user" | "assistant"): Normalize
   }
 }
 
-/** A result's own content is text only: this gateway carries no other modality to a model. */
+/** An image block's source: the base64 pair, or the url, in either the nested or the flat spelling. */
+function imageOriginOf(block: Block): ImageOrigin | null {
+  const url = block.source?.url ?? block.url;
+
+  if (url !== undefined) return parseImageUrl(url);
+
+  const mediaType = block.source?.media_type ?? block.media_type;
+  const data = block.source?.data ?? block.data;
+
+  if (mediaType === undefined || data === undefined) return null;
+
+  return { kind: "inline", mediaType, data };
+}
+
+/** A result's content stays text: no egress wire carries an image inside a tool result. */
 function resultText(content: TextContent | undefined, at: string): Normalized<string> {
   if (content === undefined) return { ok: true, value: "" };
 
   return textOfBlocks(blocksOf(content), `${at}.content`);
 }
 
+/** What a block this gateway has no spelling for answers, naming the block and where it sits. */
 function unsupported(at: string, type: string): Rejected {
-  return rejected(at, `${at}: ${type} blocks are not supported by this text gateway`);
+  return rejected(at, `${at}: ${type} blocks are not part of this gateway`);
 }
 
 function rejected(param: string, message: string): Rejected {

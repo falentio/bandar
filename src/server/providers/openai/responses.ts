@@ -6,6 +6,7 @@ import {
   type ToolDefinition,
   type ToolParameters,
 } from "../../../shared/conversation";
+import { dataUriOf } from "../../../shared/media";
 import { finishOf } from "../types";
 import type { ReasoningEffort } from "../../../shared/reasoning";
 import type { ProviderKind } from "../../../shared/providers";
@@ -70,9 +71,13 @@ const EventSchema = v.object({
   message: v.optional(v.string()),
 });
 
+type InputContentPart =
+  | { type: "input_text"; text: string }
+  | { type: "input_image"; image_url: string };
+
 type InputMessage = {
   role: "system" | "user" | "assistant";
-  content: { type: "input_text"; text: string }[];
+  content: InputContentPart[];
 };
 
 type InputItem =
@@ -324,19 +329,24 @@ function itemsOf(messages: readonly CanonicalMessage[]): InputItem[] {
   const items: InputItem[] = [];
 
   for (const message of messages) {
-    let text: string[] = [];
+    let content: InputContentPart[] = [];
 
     const flush = () => {
-      if (text.length === 0) return;
+      if (content.length === 0) return;
 
-      items.push({ role: message.role, content: [{ type: "input_text", text: text.join("\n") }] });
-      text = [];
+      items.push({ role: message.role, content });
+      content = [];
     };
 
     for (const part of message.content) {
       switch (part.type) {
         case "text": {
-          text.push(part.text);
+          content.push({ type: "input_text", text: part.text });
+          break;
+        }
+
+        case "image": {
+          content.push({ type: "input_image", image_url: dataUriOf(part.image) });
           break;
         }
 

@@ -1,15 +1,18 @@
 import { Elysia } from "elysia";
 import * as v from "valibot";
 import { GatewayRequestSchema, normalizeChatMessages, type ModelList } from "../shared/chat";
-import { MessagesRequestSchema, normalizeMessages, promptText } from "../shared/messages";
+import { MessagesRequestSchema, estimateTokens, normalizeMessages } from "../shared/messages";
 import { ResponsesRequestSchema, normalizeResponses } from "../shared/responses";
-import type { ConversationMessage, ToolChoice, ToolDefinition } from "../shared/conversation";
+import type { InboundMessage, ToolChoice, ToolDefinition } from "../shared/conversation";
+import type { Normalized } from "../shared/messages";
 import { PROJECT_URL_HEADER, projectUrlOf } from "../shared/project";
 import { SESSION_ID_HEADER, sessionIdOf } from "../shared/session-id";
 import type { Auth, VerifiedKey } from "./auth";
 import type { CanonicalMessage, CanonicalRequest } from "./providers/types";
 import type { Reasoning } from "../shared/reasoning";
-import { anthropicError, anthropicWire, estimateInputTokens } from "./router/anthropic-wire";
+import { anthropicError, anthropicWire } from "./router/anthropic-wire";
+import { fetchImage } from "./media/fetch";
+import { inlineImages, type MediaIo } from "./media/inline";
 import { runChat, type ChatDeps } from "./router/chat";
 import { listModelRefs } from "./router/resolve";
 import { responsesWire } from "./router/responses-wire";
@@ -20,6 +23,8 @@ const MESSAGES_PATH = "/v1/messages";
 
 export type GatewayDeps = ChatDeps & {
   readonly auth: Auth;
+  /** How a remote image is read. The default fetcher is used unless a caller injects its own. */
+  readonly media?: MediaIo;
 };
 
 export function createGateway(deps: GatewayDeps) {
@@ -85,8 +90,7 @@ export function createGateway(deps: GatewayDeps) {
 
       const input = parsed.output;
 
-      const canonical = canonicalRequestOf({
-        messages: normalized.value,
+      const canonical = await canonicalRequestOf(deps, normalized.value, request.signal, {
         system: "",
         tools: input.tools,
         toolChoice: input.toolChoice,
@@ -97,13 +101,22 @@ export function createGateway(deps: GatewayDeps) {
         reasoning: input.reasoning,
       });
 
+      if (!canonical.ok)
+        return openAiError(
+          canonical.rejection.status,
+          canonical.rejection.message,
+          "validation",
+          "invalid_request_error",
+          canonical.rejection.param,
+        );
+
       return runChat(deps, {
         userId: caller.userId,
         apiKeyId: caller.keyId,
         projectUrl: projectUrlOf(request.headers.get(PROJECT_URL_HEADER)),
         sessionId: sessionIdOf(request.headers.get(SESSION_ID_HEADER)),
         ref: input.model,
-        request: canonical,
+        request: canonical.value,
         stream: input.stream,
         signal: request.signal,
       });
@@ -134,23 +147,33 @@ export function createGateway(deps: GatewayDeps) {
 
       const input = parsed.output;
 
+      const canonical = await canonicalRequestOf(deps, normalized.value, request.signal, {
+        system: input.instructions ?? "",
+        tools: input.tools,
+        toolChoice: input.toolChoice,
+        temperature: input.temperature,
+        topP: input.topP,
+        maxTokens: input.maxOutputTokens,
+        stop: input.stop,
+        reasoning: input.reasoning,
+      });
+
+      if (!canonical.ok)
+        return openAiError(
+          canonical.rejection.status,
+          canonical.rejection.message,
+          "validation",
+          "invalid_request_error",
+          canonical.rejection.param,
+        );
+
       return runChat(deps, {
         userId: caller.userId,
         apiKeyId: caller.keyId,
         projectUrl: projectUrlOf(request.headers.get(PROJECT_URL_HEADER)),
         sessionId: sessionIdOf(request.headers.get(SESSION_ID_HEADER)),
         ref: input.model,
-        request: canonicalRequestOf({
-          messages: normalized.value,
-          system: input.instructions ?? "",
-          tools: input.tools,
-          toolChoice: input.toolChoice,
-          temperature: input.temperature,
-          topP: input.topP,
-          maxTokens: input.maxOutputTokens,
-          stop: input.stop,
-          reasoning: input.reasoning,
-        }),
+        request: canonical.value,
         stream: input.stream,
         signal: request.signal,
         wire: responsesWire,
@@ -170,23 +193,27 @@ export function createGateway(deps: GatewayDeps) {
       if (!normalized.ok)
         return anthropicError(normalized.rejection.status, normalized.rejection.message);
 
+      const canonical = await canonicalRequestOf(deps, normalized.value.messages, request.signal, {
+        system: normalized.value.system,
+        tools: parsed.output.tools,
+        toolChoice: parsed.output.toolChoice,
+        temperature: parsed.output.temperature,
+        topP: parsed.output.top_p,
+        maxTokens: parsed.output.max_tokens,
+        stop: parsed.output.stop_sequences,
+        reasoning: parsed.output.reasoning,
+      });
+
+      if (!canonical.ok)
+        return anthropicError(canonical.rejection.status, canonical.rejection.message);
+
       return runChat(deps, {
         userId: caller.userId,
         apiKeyId: caller.keyId,
         projectUrl: projectUrlOf(request.headers.get(PROJECT_URL_HEADER)),
         sessionId: sessionIdOf(request.headers.get(SESSION_ID_HEADER)),
         ref: parsed.output.model,
-        request: canonicalRequestOf({
-          messages: normalized.value.messages,
-          system: normalized.value.system,
-          tools: parsed.output.tools,
-          toolChoice: parsed.output.toolChoice,
-          temperature: parsed.output.temperature,
-          topP: parsed.output.top_p,
-          maxTokens: parsed.output.max_tokens,
-          stop: parsed.output.stop_sequences,
-          reasoning: parsed.output.reasoning,
-        }),
+        request: canonical.value,
         stream: parsed.output.stream ?? false,
         signal: request.signal,
         wire: anthropicWire,
@@ -207,41 +234,56 @@ export function createGateway(deps: GatewayDeps) {
         return anthropicError(normalized.rejection.status, normalized.rejection.message);
 
       return Response.json(
-        { input_tokens: estimateInputTokens(promptText(normalized.value)) },
+        { input_tokens: estimateTokens(normalized.value) },
         { headers: { "cache-control": "no-store" } },
       );
     });
 }
 
-/** Both ingresses assemble their canonical request here, so neither handler knows a wire. */
-function canonicalRequestOf(input: {
-  readonly messages: readonly ConversationMessage[];
-  readonly system: string;
-  readonly tools: readonly ToolDefinition[];
-  readonly toolChoice: ToolChoice | null;
-  readonly temperature?: number | undefined;
-  readonly topP?: number | undefined;
-  readonly maxTokens?: number | undefined;
-  readonly stop?: readonly string[] | undefined;
-  readonly reasoning?: Reasoning | undefined;
-}): CanonicalRequest {
-  const messages: CanonicalMessage[] = [];
+/**
+ * The one crossing where an image is read: it runs here, once, before runChat, so no attempt inside
+ * the failover loop can fetch the same image again.
+ */
+async function canonicalRequestOf(
+  deps: GatewayDeps,
+  messages: readonly InboundMessage[],
+  signal: AbortSignal,
+  input: {
+    readonly system: string;
+    readonly tools: readonly ToolDefinition[];
+    readonly toolChoice: ToolChoice | null;
+    readonly temperature?: number | undefined;
+    readonly topP?: number | undefined;
+    readonly maxTokens?: number | undefined;
+    readonly stop?: readonly string[] | undefined;
+    readonly reasoning?: Reasoning | undefined;
+  },
+): Promise<Normalized<CanonicalRequest>> {
+  const media = deps.media ?? { fetchImage };
+  const inlined = await inlineImages(messages, media, signal);
+
+  if (!inlined.ok) return inlined;
+
+  const canonical: CanonicalMessage[] = [];
 
   if (input.system !== "")
-    messages.push({ role: "system", content: [{ type: "text", text: input.system }] });
+    canonical.push({ role: "system", content: [{ type: "text", text: input.system }] });
 
-  for (const message of input.messages)
-    messages.push({ role: message.role, content: message.content });
+  for (const message of inlined.value)
+    canonical.push({ role: message.role, content: message.content });
 
   return {
-    messages,
-    tools: input.tools,
-    toolChoice: input.toolChoice,
-    temperature: input.temperature,
-    topP: input.topP,
-    maxTokens: input.maxTokens,
-    stop: input.stop,
-    reasoning: input.reasoning,
+    ok: true,
+    value: {
+      messages: canonical,
+      tools: input.tools,
+      toolChoice: input.toolChoice,
+      temperature: input.temperature,
+      topP: input.topP,
+      maxTokens: input.maxTokens,
+      stop: input.stop,
+      reasoning: input.reasoning,
+    },
   };
 }
 

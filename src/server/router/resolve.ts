@@ -1,5 +1,11 @@
 import { and, asc, eq } from "drizzle-orm";
-import { parseCompat, type Compat, type ProviderKind } from "../../shared/providers";
+import {
+  parseCompat,
+  parseInputModalities,
+  type Compat,
+  type InputModality,
+  type ProviderKind,
+} from "../../shared/providers";
 import { TAG_REF_PREFIX, providerRefOf, tagRefOf } from "../../shared/slugs";
 import { providerCredentials, providerModels, providers, tagModels, tags } from "../db/schema";
 import type { ProviderDeps } from "../providers";
@@ -9,6 +15,8 @@ export type ResolvedAttempt = {
   readonly slug: string;
   readonly upstreamModel: string;
   readonly compat: Compat | null;
+  /** Null means the catalog says nothing, which is not the same as saying text only. */
+  readonly inputModalities: readonly InputModality[] | null;
   readonly inputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;
   readonly providerId: string;
@@ -36,6 +44,7 @@ type AttemptRow = {
   readonly slug: string;
   readonly upstreamModel: string;
   readonly compat: string | null;
+  readonly inputModalities: string | null;
   readonly inputPricePerMtok: number | null;
   readonly outputPricePerMtok: number | null;
   readonly providerId: string;
@@ -55,6 +64,7 @@ const attemptColumns = {
   slug: providerModels.slug,
   upstreamModel: providerModels.upstreamModel,
   compat: providerModels.compat,
+  inputModalities: providerModels.inputModalities,
   inputPricePerMtok: providerModels.inputPricePerMtok,
   outputPricePerMtok: providerModels.outputPricePerMtok,
   providerId: providers.id,
@@ -79,6 +89,7 @@ function attemptsOf(
     ...row,
     baseUrl: isBuiltInProviderKind(row.kind) ? endpoints[row.kind].baseUrl : row.baseUrl,
     compat: parseCompat(row.compat),
+    inputModalities: parseInputModalities(row.inputModalities),
     credentialLabel: row.credentialLabel ?? "",
     sealedKey: row.sealedKey ?? "",
   }));

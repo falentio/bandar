@@ -80,5 +80,8 @@ function resolve(
 }
 
 function named(message: string, at: string) {
-  return { ok: false as const, rejection: { status: 422, param: at, message: `${at}: ${message}` } };
+  return {
+    ok: false as const,
+    rejection: { status: 422, param: at, message: `${at}: ${message}` },
+  };
 }

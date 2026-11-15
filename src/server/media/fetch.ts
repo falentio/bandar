@@ -1,5 +1,10 @@
 import { lookup } from "node:dns/promises";
-import { Agent as HttpAgent, request as httpRequest, type IncomingMessage } from "node:http";
+import {
+  Agent as HttpAgent,
+  request as httpRequest,
+  type IncomingMessage,
+  type RequestOptions,
+} from "node:http";
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { MAX_IMAGE_BYTES, assetOfBytes, type ImageAsset } from "../../shared/media";
@@ -12,7 +17,10 @@ export const IMAGE_FETCH_TIMEOUT_MS = 10_000;
  * bun's fetch ignores a dispatcher, and a dispatcher is the only way to pin the address the guard
  * checked. No credential, cookie, or referer travels, and a redirect is never followed.
  */
-export async function fetchImage(url: string, signal: AbortSignal): Promise<Normalized<ImageAsset>> {
+export async function fetchImage(
+  url: string,
+  signal: AbortSignal,
+): Promise<Normalized<ImageAsset>> {
   const target = targetOf(url);
 
   if (!target.ok) return target;
@@ -116,16 +124,20 @@ function readBody(
     let settled = false;
 
     const path = `${target.url.pathname}${target.url.search}`;
-    const options = {
+
+    const agent = target.secure
+      ? new HttpsAgent({ lookup: pinnedLookup(pinned) })
+      : new HttpAgent({ lookup: pinnedLookup(pinned) });
+
+    const options: RequestOptions = {
       host: target.hostname,
       path,
       method: "GET",
       headers: { accept: "image/*" },
-      agent: target.secure
-        ? new HttpsAgent({ lookup: pinnedLookup(pinned) })
-        : new HttpAgent({ lookup: pinnedLookup(pinned) }),
-      ...(target.url.port === "" ? {} : { port: Number(target.url.port) }),
+      agent,
     };
+
+    if (target.url.port !== "") options.port = Number(target.url.port);
 
     const request = target.secure
       ? httpsRequest(options, (response) => readResponse(response, finish))
@@ -219,13 +231,17 @@ function tooLarge(): Normalized<never> {
  * this as two overloads and asks which one it wants through the options, so it is dispatched there.
  */
 function pinnedLookup(pinned: ResolvedAddress): LookupFunction {
-  type AnyCallback = (error: null, address: unknown, family?: number) => void;
+  type AnyCallback = (error: null, address: LookupAnswer, family?: number) => void;
 
+  // SAFETY: node types this as one signature per overload, and the branch on options.all is the
+  // whole difference between them, so the function answers whichever the caller asked for.
   return ((_hostname: string, options: { readonly all?: boolean }, callback: AnyCallback) => {
     if (options.all === true) callback(null, [{ address: pinned.address, family: pinned.family }]);
     else callback(null, pinned.address, pinned.family);
   }) as LookupFunction;
 }
+
+type LookupAnswer = string | readonly ResolvedAddress[];
 
 /** Loopback, link-local, private, CGNAT, and the v4-mapped IPv6 spelling of each. */
 function isPrivate(address: string): boolean {

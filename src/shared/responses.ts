@@ -31,8 +31,6 @@ const MessageContentSchema = v.variant("kind", [
   v.object({ kind: v.literal("parts"), value: v.array(MessagePartSchema) }),
 ]);
 
-type MessagePart = v.InferOutput<typeof MessagePartSchema>;
-
 /** A client sends the typed item, or the bare item this gateway's own egress writes. */
 const MessageItemSchema = v.object({
   type: v.optional(v.literal("message")),
@@ -291,7 +289,8 @@ function partsOf(
       continue;
     }
 
-    if (role !== "user") return rejected(partAt, `${partAt}: input_image parts belong in a user turn`);
+    if (role !== "user")
+      return rejected(partAt, `${partAt}: input_image parts belong in a user turn`);
 
     const url = v.is(v.string(), part.image_url) ? part.image_url : part.image_url?.url;
 

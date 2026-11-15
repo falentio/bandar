@@ -8,7 +8,7 @@ import {
   type ToolDefinition,
   type ToolParameters,
 } from "../../../shared/conversation";
-import { dataUriOf, type ImageAsset } from "../../../shared/media";
+import { dataUriOf } from "../../../shared/media";
 import { finishOf } from "../types";
 import type { ReasoningEffort } from "../../../shared/reasoning";
 import type { ProviderKind } from "../../../shared/providers";
@@ -103,7 +103,9 @@ type ChatToolCallBody = {
   function: { name: string; arguments: string };
 };
 
-type ChatContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 
 type ChatMessageBody =
   | { role: "system" | "user"; content: string | readonly ChatContentPart[] }

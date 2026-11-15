@@ -68,8 +68,7 @@ describe("readImage", () => {
 
   test("refuses html behind a .png url", async () => {
     const origin = serve(
-      () =>
-        new Response("<html>not an image</html>", { headers: { "content-type": "image/png" } }),
+      () => new Response("<html>not an image</html>", { headers: { "content-type": "image/png" } }),
     );
 
     expect(await readImage(`${origin}/a.png`, LOOPBACK, signal())).toMatchObject({
@@ -126,7 +125,8 @@ describe("fetchImage", () => {
     expect(await fetchImage("http://10.0.0.1/a.png", signal())).toMatchObject({
       ok: false,
       rejection: {
-        message: "the image url resolves to 10.0.0.1, a private address this gateway will not reach",
+        message:
+          "the image url resolves to 10.0.0.1, a private address this gateway will not reach",
       },
     });
     expect(await fetchImage("http://[::1]/a.png", signal())).toMatchObject({ ok: false });

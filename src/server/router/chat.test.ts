@@ -1179,7 +1179,9 @@ describe("messages ingress", () => {
             messages: [
               {
                 role: "assistant",
-                content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: PNG } }],
+                content: [
+                  { type: "image", source: { type: "base64", media_type: "image/png", data: PNG } },
+                ],
               },
             ],
           }),
@@ -1194,7 +1196,9 @@ describe("messages ingress", () => {
 
     expect(response.status).toBe(422);
     expect(body.error.type).toBe("invalid_request_error");
-    expect(body.error.message).toContain("messages.0.content.0: image blocks belong in a user turn");
+    expect(body.error.message).toContain(
+      "messages.0.content.0: image blocks belong in a user turn",
+    );
     expect(harness.upstream.calls).toHaveLength(0);
   });
 });
@@ -1396,9 +1400,7 @@ describe("the image guard", () => {
 
     expect(response.status).toBe(422);
     expect(body.error.param).toBe("messages.0.content.1");
-    expect(body.error.message).toBe(
-      "messages.0.content.1: the image url resolves to 127.0.0.1",
-    );
+    expect(body.error.message).toBe("messages.0.content.1: the image url resolves to 127.0.0.1");
     expect(harness.upstream.calls).toHaveLength(0);
   });
 });
@@ -1872,19 +1874,14 @@ function imageAsset(): ImageAsset {
   };
 }
 
-function postWithImage(
-  gateway: ReturnType<typeof createGateway>,
-  ref = "fast",
-): Promise<Response> {
+function postWithImage(gateway: ReturnType<typeof createGateway>, ref = "fast"): Promise<Response> {
   return gateway.handle(
     new Request("http://gateway.test/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer bandar_test" },
       body: JSON.stringify({
         model: ref,
-        messages: [
-          { role: "user", content: [{ type: "image_url", image_url: IMAGE_URI }] },
-        ],
+        messages: [{ role: "user", content: [{ type: "image_url", image_url: IMAGE_URI }] }],
       }),
     }),
   );

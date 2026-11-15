@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { describe, expect, test } from "vite-plus/test";
 import {
   MAX_IMAGE_BYTES,
@@ -15,7 +14,18 @@ import {
 } from "./media";
 
 function base64(bytes: readonly number[]): string {
-  return Buffer.from(bytes).toString("base64");
+  let binary = "";
+
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+
+  return btoa(binary);
+}
+
+/** A reference digest, so the carried one is checked against something else that computes it. */
+async function sha256(bytes: readonly number[]): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
+
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function bytesOf(asset: { readonly data: string }): Uint8Array {
@@ -108,7 +118,7 @@ describe("assetOf", () => {
     expect(asset.ok && asset.value.mediaType).toBe("image/gif");
   });
 
-  test("measures the decoded bytes and keeps them in one canonical spelling", () => {
+  test("measures the decoded bytes and keeps them in one canonical spelling", async () => {
     const asset = assetOf(
       { kind: "inline", mediaType: "image/png", data: base64(PNG) },
       "messages.0.content.0",
@@ -120,12 +130,15 @@ describe("assetOf", () => {
 
     expect(asset.value.bytes).toBe(PNG.length);
     expect(bytesOf(asset.value)).toEqual(new Uint8Array(PNG));
-    expect(asset.value.sha256).toBe(createHash("sha256").update(Buffer.from(PNG)).digest("hex"));
+    expect(asset.value.sha256).toBe(await sha256(PNG));
   });
 
   test("refuses a payload that is not an image, at the part's path", () => {
     expect(
-      assetOf({ kind: "inline", mediaType: "image/png", data: base64(HTML) }, "messages.0.content.0"),
+      assetOf(
+        { kind: "inline", mediaType: "image/png", data: base64(HTML) },
+        "messages.0.content.0",
+      ),
     ).toEqual({
       ok: false,
       rejection: {
@@ -166,14 +179,15 @@ describe("assetOf", () => {
 
 describe("assetOfBytes", () => {
   test("refuses bytes over the cap before it sniffs them", () => {
-    expect(assetOfBytes(new Uint8Array(MAX_IMAGE_BYTES + 1), "messages.0.content.0")).toMatchObject({
-      ok: false,
-      rejection: {
-        param: "messages.0.content.0",
-        message:
-          "messages.0.content.0: the image is 5242881 bytes, over the 5242880 byte limit",
+    expect(assetOfBytes(new Uint8Array(MAX_IMAGE_BYTES + 1), "messages.0.content.0")).toMatchObject(
+      {
+        ok: false,
+        rejection: {
+          param: "messages.0.content.0",
+          message: "messages.0.content.0: the image is 5242881 bytes, over the 5242880 byte limit",
+        },
       },
-    });
+    );
   });
 });
 
@@ -214,11 +228,9 @@ describe("imageTokens", () => {
 });
 
 describe("imageLabel", () => {
-  test("names the size and the digest prefix without keeping the bytes", () => {
+  test("names the size and the digest prefix without keeping the bytes", async () => {
     expect(imageLabel(base64(PNG))).toBe(
-      PNG.length +
-        " bytes, sha256 " +
-        createHash("sha256").update(Buffer.from(PNG)).digest("hex").slice(0, 8),
+      PNG.length + " bytes, sha256 " + (await sha256(PNG)).slice(0, 8),
     );
   });
 });

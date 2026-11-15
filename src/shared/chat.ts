@@ -173,7 +173,8 @@ function partsOfArray(
       continue;
     }
 
-    if (role !== "user") return rejected(partAt, `${partAt}: image_url parts belong in a user turn`);
+    if (role !== "user")
+      return rejected(partAt, `${partAt}: image_url parts belong in a user turn`);
 
     const url = v.is(v.string(), part.image_url) ? part.image_url : part.image_url.url;
 

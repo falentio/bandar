@@ -335,7 +335,7 @@ function requestPartOf(part: MessagePart, names: ReadonlyMap<string, string>): R
   }
 }
 
-function inlineDataOf(image: ImageAsset): { mimeType: string; data: string } {
+function inlineDataOf(image: ImageAsset) {
   return { mimeType: image.mediaType, data: image.data };
 }
 

@@ -1,12 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 import * as v from "valibot";
-import {
-  MessagesRequestSchema,
-  estimateTokens,
-  imageTokensOf,
-  normalizeMessages,
-  promptText,
-} from "./messages";
+import { MessagesRequestSchema, estimateTokens, normalizeMessages, promptText } from "./messages";
 
 const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==";
@@ -19,7 +13,10 @@ describe("normalizeMessages", () => {
         messages: [
           {
             role: "assistant",
-            content: [{ type: "text", text: "hi" }, { type: "image", source: { type: "base64" } }],
+            content: [
+              { type: "text", text: "hi" },
+              { type: "image", source: { type: "base64" } },
+            ],
           },
         ],
       }),

@@ -8,6 +8,7 @@ import {
   type ToolDefinition,
   type ToolParameters,
 } from "../../../shared/conversation";
+import { dataUriOf, type ImageAsset } from "../../../shared/media";
 import { finishOf } from "../types";
 import type { ReasoningEffort } from "../../../shared/reasoning";
 import type { ProviderKind } from "../../../shared/providers";
@@ -102,8 +103,10 @@ type ChatToolCallBody = {
   function: { name: string; arguments: string };
 };
 
+type ChatContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 type ChatMessageBody =
-  | { role: "system" | "user"; content: string }
+  | { role: "system" | "user"; content: string | readonly ChatContentPart[] }
   | { role: "assistant"; content: string; tool_calls?: ChatToolCallBody[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
@@ -327,23 +330,32 @@ function assistantBody(message: CanonicalMessage): ChatMessageBody {
   return body;
 }
 
-/** A result splits the turn: this wire addresses one with a message of its own, at the part's position. */
+/**
+ * A result splits the turn: this wire addresses one with a message of its own, at the part's
+ * position. Text and images share one content array, so a turn that carried an image is the parts
+ * spelling and a turn that carried only text keeps the plain string.
+ */
 function flattenedBodies(message: CanonicalMessage): ChatMessageBody[] {
   const bodies: ChatMessageBody[] = [];
   const role = message.role === "system" ? "system" : "user";
-  let text: string[] = [];
+  let parts: ChatContentPart[] = [];
 
   const flush = () => {
-    if (text.length === 0) return;
+    if (parts.length === 0) return;
 
-    bodies.push({ role, content: text.join("\n") });
-    text = [];
+    bodies.push({ role, content: contentOf(parts) });
+    parts = [];
   };
 
   for (const part of message.content) {
     switch (part.type) {
       case "text": {
-        text.push(part.text);
+        parts.push({ type: "text", text: part.text });
+        break;
+      }
+
+      case "image": {
+        parts.push({ type: "image_url", image_url: { url: dataUriOf(part.image) } });
         break;
       }
 
@@ -368,6 +380,13 @@ function flattenedBodies(message: CanonicalMessage): ChatMessageBody[] {
   flush();
 
   return bodies;
+}
+
+/** A turn of text alone is the string this wire received before images existed. */
+function contentOf(parts: readonly ChatContentPart[]): string | readonly ChatContentPart[] {
+  const text = parts.flatMap((part) => (part.type === "text" ? [part.text] : []));
+
+  return text.length === parts.length ? text.join("\n") : parts;
 }
 
 function toolCallBody(call: ToolCall): ChatToolCallBody {
